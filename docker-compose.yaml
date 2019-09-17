@@ -1,0 +1,11 @@
+version: "3.7"
+services:
+  # https://yaml.org/type/merge.html
+  test: &FULL
+    image: ashwoods/mix-tape-vol-1
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python3 -m pytest -s
+    volumes:
+      - .:/src      

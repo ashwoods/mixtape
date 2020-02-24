@@ -11,7 +11,6 @@ from gi.repository import Gst, GObject, GLib  # noqa
 from mixtape.bus import Bus
 
 
-
 @pytest.mark.asyncio
 async def test_bus_wrapper(gst):
     p = Gst.Pipeline()
@@ -26,7 +25,6 @@ async def test_bus_wrapper(gst):
     bus = Bus(pipeline=p)
     assert bus.loop
     assert bus.pollfd
-    
     res = bus.pipeline.set_state(Gst.State.PLAYING)
     if res == Gst.StateChangeReturn.ASYNC:
         fut = bus.create_async_future()

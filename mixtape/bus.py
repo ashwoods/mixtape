@@ -3,11 +3,32 @@ import asyncio
 import gi
 import logging
 import functools
+import beppu
+import enum
+
+from pampy import match, ANY
 gi.require_version('Gst', '1.0')
 gi.require_version('GLib', '2.0')
 from gi.repository import Gst, GObject, GLib  # noqa
-from pampy import match, ANY
 logger = logging.getLogger(__name__)
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class Events:
+    """
+    Individual event flags to wait on
+    """
+    setup: asyncio.Event = attr.Factory(asyncio.Event) 
+    eos: asyncio.Event = attr.Factory(asyncio.Event) 
+    error: asyncio.Event = attr.Factory(asyncio.Event)
+    teardown: asyncio.Event = attr.Factory(asyncio.Event)
+
+class PipelineStates(enum.Enum):
+    VOIO_PENDING = 0
+    NULL = 1
+    READY = 2
+    PAUSED = 3
+    PLAYING = 4
 
 
 @attr.s(slots=True)
@@ -20,11 +41,10 @@ class Bus:
 
     Polls the gstreamer bus for `Gst.message`s using `asyncio.add_reader` with the 
     file descriptor provided by `Gst.bus.get_pollfd`. 
-    
-    Used together with the `mixtape.utils.gst_async` on methods that can trigger
-    a `Gst.ASYNC` response, it provides a somewhat asyncio compatible interface 
-    by wrapping the calls with creation of awaitables that `result` 
-    when a `MessageType.ASYNC_DONE` is popped from bus.   
+
+    Async state changes are handled by providing a `beppu.Basket` event that
+    can be awaited, and the state change is `picked` from the Basekt when the 
+    message is received on the Bus.
 
     `Bus.teardown` must be called before setting the pipeline to `Gst.States.NULL`
     and it expects a `Gst.Pipeline` with `set_auto_flush_bus` set to `True`.
@@ -35,9 +55,11 @@ class Bus:
     loop = attr.ib(init=False)
     pollfd = attr.ib(init=False, default=None) 
     futures = attr.ib(init=False, factory=list)
-    errors = attr.ib(init=False, factory=list)
-    msg = attr.ib(init=False, factory=list)
 
+    state = attr.ib(init=False, default=None) 
+
+    errors = attr.ib(init=False, factory=list)
+    events = attr.ib(init=False, default=None)
 
     @bus.default
     def get_bus(self):
@@ -51,6 +73,9 @@ class Bus:
     def __attrs_post_init__(self):
         self.pollfd = self.bus.get_pollfd()
         self.loop.add_reader(self.pollfd.fd, self.poll_cb) 
+        self.events = Events()
+        self.events.setup.set()
+        self.state = beppu.Basket(PipelineStates)
     
     def create_async_future(self):
         """
@@ -82,6 +107,7 @@ class Bus:
         By default will only log to `debug`
         """
         old, new, _ = message.parse_state_changed()
+        
         if message.src != self.pipeline:
             return
         logger.debug(
@@ -89,6 +115,8 @@ class Bus:
             Gst.Element.state_get_name(old),
             Gst.Element.state_get_name(new)
             )
+       
+        self.state.pick(PipelineStates(int(new)))
 
     def on_error(self, bus, message):
         """
@@ -97,7 +125,8 @@ class Bus:
         log to `error` and append to `self.errors`
         """
         err, debug = message.parse_error()
-       
+        self.errors.append((err, debug))
+        self.events.error.set() 
         logger.error(
             "Error received from element %s:%s", 
             message.src.get_name(), 
@@ -105,16 +134,15 @@ class Bus:
             )
         if debug is not None:
             logger.error("Debugging information: %s", debug)
-        self.errors.append((err, debug))
 
     def on_eos(self, bus, message):
         """
         Handler for eos messages
-        By default it will only log to `info`
+        By default it sets the eos event
         """
-    
+        self.events.eos.set()
         logger.info("End-Of-Stream reached")
-        # self._events.eos.set()
+        
 
     def on_async_done(self, bus, messsage):
         """
@@ -126,7 +154,7 @@ class Bus:
         try:
             ft = self.futures.pop(0)
         except IndexError:
-            logger.error("Unexpected ASYNC_DONE message")
+            logger.info("Unexpected ASYNC_DONE message")
         else:
             self._call_from_thread(ft.set_result, None)
 
@@ -147,4 +175,5 @@ class Bus:
         self.bus = None
         self.loop = None
         self.pipeline = None
+        self.events.teardown.set()
         logger.debug("Teardown complete")

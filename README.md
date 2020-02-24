@@ -44,6 +44,28 @@ You can use `pip` to install `mixtape`:
 You can use `mixtape` similar to how you use `gst-launch-1.0` by passing 
 a `pipeline description` to the `from_desc` constructor:
 
+
+
+```python
+from mixtape import AsyncPlayer as Player
+
+
+desc = "videotestsrc num-buffers=100 ! fakesink"
+
+async def main(self):
+    p = Player.from_desc(desc)
+    await p.play()
+    asyncio.sleep(5)
+    await p.stop()
+
+
+asyncio.run(main())
+
+```
+
+The run classmethod is a shortcut for setting up the asyncio boilerplate and 
+running a pipeline until an eos event or error: 
+
 ```python
 from mixtape import AsyncPlayer as Player
 
@@ -52,7 +74,7 @@ p = Player.from_desc(desc)  # creates a player from a pipeline description
 p.run(autoplay=True)  # init of pipeline (i.e. bus) and sets the pipeline to playing state (default)
 ```
 
-To gain more control over the player you can run the main loop in a background thread:
+You can run a loop and the player in a background thread:
 
 ```python
 from mixtape import AsyncPlayer as Player
@@ -66,10 +88,9 @@ t.daemon = True  # set the thread to background
 t.start()
 seq = ['play', 'pause', 'play', 'stop']
 for step in seq:
-    s = getattr(p, step)
-    s()  # set the pipeline to `play`, `pause`, `play` and `stop`
     sleep(3)
-sleep(10)
+    s = getattr(p, "call_%s" % step) # call_x schedules the coroutine
+    s()  # set the pipeline to `play`, `pause`, `play` and `stop`
 t.join()
 ```
 

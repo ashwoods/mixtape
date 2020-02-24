@@ -25,10 +25,11 @@ import os.path
 PARENT_DIR = dirname(abspath(__file__))
 
 def get_version():
-    return "0.1.0"
+    return "0.3.0"
 
 test_deps = [
     'pytest',
+    'colorlog',
     'pytest-cov',
     'pytest-flake8',
     'flake8-bugbear',
@@ -37,6 +38,7 @@ test_deps = [
     'pytest-benchmark',
     'pytest-profiling',
     'pytest-leaks',
+    'pytest-bandit',
     'memory_profiler',
     'pytest-xdist',
     'teamcity-messages',
@@ -61,9 +63,9 @@ setup(
     extras_require=extras,
     install_requires=[
         'attrs',
-        'colorlog',
-        'result',
-        'pkgconfig'
+        'pkgconfig',
+        'pampy',
+        'beppu'
         ],
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",

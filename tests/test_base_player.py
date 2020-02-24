@@ -3,23 +3,55 @@ import threading
 from time import sleep
 import os
 
+import gi
+gi.require_version('Gst', '1.0')
+gi.require_version('GLib', '2.0')
+from gi.repository import Gst, GObject, GLib  # noqa
 
-N_BUFFER_PIPELINE_DESCRIPTION = """videotestsrc num-buffers=100 ! tee name=tee ! queue ! fakevideosink"""
-SIMPLE_PIPELINE_DESCRIPTION   = """videotestsrc ! fakevideosink"""
+
+N_BUFFER_PIPELINE_DESCRIPTION = """videotestsrc num-buffers=100 ! tee name=tee ! queue ! autovideosink"""
+SIMPLE_PIPELINE_DESCRIPTION   = """videotestsrc ! queue ! autovideosink"""
 
 
-def test_async_player(player):
+@pytest.mark.asyncio
+async def test_async_player(player):
+    p = player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
+
+    await p.async_play()
+    sleep(5)
+    assert p.state[1] == Gst.State.PLAYING
+    await p.async_stop()
+    assert p.pipeline is None 
+
+def test_player_run(player):
     p = player.from_description(N_BUFFER_PIPELINE_DESCRIPTION)
     p.run()
+    assert p.pipeline is None
 
-def test_background_thread_async_player(player):
+def test_player_in_thread(player):
     p = player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
     t = threading.Thread(target=lambda: p.run(autoplay=False))
     t.daemon = True
     t.start()
     seq = ['play', 'pause', 'play', 'stop']
     for step in seq:
-        getattr(p, step)()
         sleep(2)
-    sleep(1)
+        getattr(p, step)()
     t.join()
+    assert p.pipeline is None
+
+@pytest.mark.asyncio
+async def test_multiple_players(player):
+    p = player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
+    await p.async_play()
+    sleep(5)
+    assert p.state[1] == Gst.State.PLAYING
+    await p.async_stop()
+    assert p.pipeline is None
+    
+    p = player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
+    await p.async_play()
+    sleep(5)
+    assert p.state[1] == Gst.State.PLAYING
+    await p.async_stop()
+    assert p.pipeline is None

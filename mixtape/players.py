@@ -1,166 +1,140 @@
-from abc import ABC, abstractmethod
 import asyncio
-import attr
+import logging
+import warnings
 import gi
+import attr
+import typing
+import functools
 gi.require_version('Gst', '1.0')
-from abc import ABC, abstractmethod
 gi.require_version('GLib', '2.0')
 from gi.repository import Gst, GObject, GLib  # noqa
-from time import sleep
-import logging
+from .bus import Bus, PipelineStates
 
 logger = logging.getLogger(__name__)
 
 
+class AsyncPlayer:
 
-class PlayerBase(ABC):
 
-    def __init__(self, pipeline, features=None, *args, **kwargs):
-        """
-        Player abstract class. 
+    def __init__(self, pipeline, *args, **kwargs):
+        self.pipeline = pipeline  
+        
+        # TODO: configuration for set_auto_flush_bus
+        # as the application depends on async bus messages
+        # we want to handle flushing the bus ourselves,
+        # otherwise setting the pipeline to `Gst.State.NULL`
+        # flushes the bus including the state change messages
+        # self.pipeline.set_auto_flush_bus(False)        
 
-        - Creates a gstreamer python application with `pipeline` and enables 
-        `features`. 
-        - Provides the basic controls of a gstreamer application:
-        `play`, `pause`, `stop`. 
-        - Provides basic `eos` and error handling.
+        self._loop = None
+        self.bus = None
 
-        Initializes a bus but registering readers or event callbacks 
-        is left to the subclasses.
+    @property
+    def state(self):
+        return self.pipeline.get_state(0)
 
-        Parameters
-        ----------
-        pipeline: `gi.overrides.Gst.Pipeline`
-            The gstreamer pipeline object.
-        features: `list`
-            A list containing feature classes.
-        """
-        self.pipeline = pipeline
-        self._bus = self.pipeline.get_bus()
-        self._eos = None
-        self._features = []
-        if features is None:
-            features = [] 
-        self._init_features(features)
+    @property
+    def is_eos(self):
+        if self.bus:
+            return self.bus.events.eos.is_set()
+    
+    @property
+    def is_error(self):
+        if self.bus:
+            return self.bus.events.error.is_set()
+    
+    async def play(self):
+        if self.bus is None:
+            self._setup()
+        self.pipeline.set_state(Gst.State.PLAYING)
+        await self.bus.state.wait_for(PipelineStates(Gst.State.PLAYING))
 
-    @abstractmethod
-    def run(self, *args, **kwargs):
-        pass
+    async def pause(self):
+        self.pipeline.set_state(Gst.State.PAUSED)
+        await self.bus.state.wait_for(PipelineStates(Gst.State.PAUSED))
+    
+    async def stop(self, send_eos=True, teardown=True):
+        logger.debug("Stopping pipeline...")
+        if send_eos and not self.is_eos:
+            logger.debug("Sending eos before stop")
+            # only send EOS in PLAYING.STATE?
+            assert self.state[1] == Gst.State.PLAYING
+            await self.send_eos()
+            logger.debug("Sent eos event")
+        
+        # we don't await the NULL state as it never returns
+        # async, and by default it also clears the bus 
+        self.pipeline.set_state(Gst.State.NULL)
+        if teardown:
+           self._teardown()
+        logger.debug("Stopped pipeline")
+        
+    async def play_until_eos(self):
+        """Will play and exit automatically after eos or error"""
+        await self.async_play()
+        await self.bus.events.eos.wait()
+        await self.async_stop(send_eos=False)
 
-    @abstractmethod
-    def cleanup(self):
-        pass
+    async def send_eos(self):
+        self.pipeline.send_event(Gst.Event.new_eos())
+        logger.debug("Sent eos message")
+        await self.bus.events.eos.wait()
+
+    def _setup(self):
+        assert isinstance(self.pipeline, Gst.Pipeline)
+        self.bus = Bus(pipeline=self.pipeline)
+        logger.debug("Setup complete")
+
+    def _teardown(self):
+        """Cleanup player references to loop and gst resources"""
+        self.bus.teardown() 
+        self.bus = None
+        self._loop = None
+        self.pipeline = None
+        logger.debug("Teardown complete")
+
+
+    # -- Helpers -- #
 
     @classmethod 
-    def from_description(cls, description: str, features: list=None):
+    def from_description(cls, description):
         pipeline = Gst.parse_launch(description)
         assert isinstance(pipeline, gi.overrides.Gst.Pipeline)
-        return cls(pipeline=pipeline, features=features)
+        return cls(pipeline=pipeline)
 
-    def play(self, raise_exception: bool=False) -> bool:
-        """
-        Set gstreamer pipeline to playing.
-
-        :param raise_exception: Raise a runtime exception in failure cases.
-        :return: `True` if the state change was successful.
-        """
-        return self._set_state(Gst.State.PLAYING, raise_exception)
-
-    def pause(self, raise_exception: bool=False) -> bool:
-        logger.debug("Pausing pipeline.")
-        return self._set_state(Gst.State.PAUSED, raise_exception)
-
-    def stop(self, raise_exception: bool=False) -> bool:
-        logger.debug("Stopping pipeline.")
-        self.pipeline.send_event(Gst.Event.new_eos())
-
-
-    def _set_state(self, state: Gst.State, raise_exception: bool=False) -> bool:
-        """
-        Set gstreamer pipeline state.
-
-        :param raise_exception: Raise a runtime exception in failure cases.
-        :return: `True` if the state change was successful.
-        """
-        rs = self.pipeline.set_state(state)
-        if rs == Gst.StateChangeReturn.SUCCESS:
-            return True
-
-        new_state = None
-        while rs == Gst.StateChangeReturn.ASYNC:
-            rs, new_state, _ = self.pipeline.get_state(state)
-        if new_state == state:
-            return True
-
-        if raise_exception:
-            raise RuntimeError("Unable to set the pipeline to the playing state.")
-        return False
-    
-    def _on_state_changed(self, bus, message):
-        old, new, _ = message.parse_state_changed()
-        if message.src != self.pipeline:
-            return
-        logger.debug(
-            "State changed from %s to %s", 
-            Gst.Element.state_get_name(old),
-            Gst.Element.state_get_name(new)
-            )
-
-    def _on_error(self, bus, message):
-        err, debug = message.parse_error()
-        self._exc = err.message 
-
-        logger.error(
-            "Error received from element %s:%s", 
-            message.src.get_name(), 
-            err.message
-            )
-        if debug is not None:
-            logger.error("Debugging information: %s", debug)
-        self.cleanup()
-
-    def _on_eos(self, bus, message):
-        logger.info("End-Of-Stream reached")
-        self.cleanup()
-
-    # -- feature management -- #
-
-    def _init_features(self, features):
-        for feature in features:
-            f = feature(self.pipeline)
-            self._features.append(f)
-            setattr(self, f.NAME, f)
-
-
-class AsyncPlayer(PlayerBase):
-    
+    @classmethod
+    def as_playbin(cls, uri):
+        """A play almost everything playbin Player"""
+        playbin = Gst.ElementFactory.make('playbin', 'playbin')
+        playbin.set_property('uri', uri)
+        p = cls(pipeline=playbin)
+        return p 
 
     def run(self, autoplay=True):
-        self.pollfd = self._bus.get_pollfd()
-        loop = asyncio.new_event_loop()
-        loop.add_reader(self.pollfd.fd, self._poll_cb)
-        if autoplay:
-            self.play() 
-        loop.run_forever()        
-
-    def cleanup(self):
-        loop = asyncio.get_event_loop()
-        loop.remove_reader(self.pollfd.fd)
-        loop.call_soon_threadsafe(loop.stop)
-        self._set_state(Gst.State.NULL)
-
-    def _poll_cb(self):
-        msg = self._bus.pop()
-        if msg:
-            if msg.type == Gst.MessageType.ERROR:
-                self._on_error(self._bus, msg)
-            elif msg.type == Gst.MessageType.EOS:
-                self._on_eos(self._bus, msg)
-            elif msg.type == Gst.MessageType.STATE_CHANGED:
-                self._on_state_changed(self._bus, msg)
-            else:
-                print(msg.type)
+        if autoplay==True:
+            asyncio.run(self.play_until_eos())
         else:
-            self.cleanup()
+            asyncio.run(self.startup())
+
+    # -- Non asyncio helpers -- #
+
+    def call_play(self):
+        return asyncio.run_coroutine_threadsafe(self.play(), loop=self.bus.loop)
+
+    def call_stop(self):
+        return asyncio.run_coroutine_threadsafe(self.stop(), loop=self.bus.loop)
+
+    def call_pause(self):
+        return asyncio.run_coroutine_threadsafe(self.pause(), loop=self.bus.loop)
+   
+    async def startup(self):
+        self._setup()
+        await self.bus.events.teardown.wait()
 
 
+
+    
+    
+   
+
+  

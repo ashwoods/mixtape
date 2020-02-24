@@ -24,8 +24,8 @@ import os.path
 
 PARENT_DIR = dirname(abspath(__file__))
 
-def get_version():
-    return "0.3.0"
+def get_version():  # move versioning into __init__.py
+    return "0.4.0"
 
 test_deps = [
     'pytest',

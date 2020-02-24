@@ -17,10 +17,10 @@ SIMPLE_PIPELINE_DESCRIPTION   = """videotestsrc ! queue ! autovideosink"""
 async def test_async_player(player):
     p = player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
 
-    await p.async_play()
+    await p.play()
     sleep(5)
     assert p.state[1] == Gst.State.PLAYING
-    await p.async_stop()
+    await p.stop()
     assert p.pipeline is None 
 
 def test_player_run(player):
@@ -33,7 +33,7 @@ def test_player_in_thread(player):
     t = threading.Thread(target=lambda: p.run(autoplay=False))
     t.daemon = True
     t.start()
-    seq = ['play', 'pause', 'play', 'stop']
+    seq = ['call_play', 'call_pause', 'call_play', 'call_stop']
     for step in seq:
         sleep(2)
         getattr(p, step)()
@@ -43,15 +43,15 @@ def test_player_in_thread(player):
 @pytest.mark.asyncio
 async def test_multiple_players(player):
     p = player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
-    await p.async_play()
+    await p.play()
     sleep(5)
     assert p.state[1] == Gst.State.PLAYING
-    await p.async_stop()
+    await p.stop()
     assert p.pipeline is None
     
     p = player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
-    await p.async_play()
+    await p.play()
     sleep(5)
     assert p.state[1] == Gst.State.PLAYING
-    await p.async_stop()
+    await p.stop()
     assert p.pipeline is None

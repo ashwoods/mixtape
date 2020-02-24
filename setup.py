@@ -1,21 +1,7 @@
 #!/usr/bin/env python
 
 """
-mixtape: awesome mix vol 1 -> python gstreamer application mini-framework 
-
- ....___.___.___.___.___.__....
- |:                          :|
- |:    Awesome mix vol 1     :|
- |:     ,-.   _____   ,-.    :|
- |:    ( `)) [_____] ( `))   :|
- |:     `-`   ' ' '   `-`    :|
- |:     ,______________.     :|
- |...../::::o::::::o::::\.....|
- |..../:::O::::::::::O:::\....|
- |---/----.----.----.-----`---|
-
-We are Groot.
-=====
+mixtape: awesome mix vol 1 -> python asyncio gstreamer application mini-framework 
 
 """
 from setuptools import setup, find_packages
@@ -25,7 +11,7 @@ import os.path
 PARENT_DIR = dirname(abspath(__file__))
 
 def get_version():  # move versioning into __init__.py
-    return "0.4.0"
+    return "0.4.1"
 
 test_deps = [
     'pytest',

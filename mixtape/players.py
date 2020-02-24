@@ -26,7 +26,6 @@ class AsyncPlayer:
         # flushes the bus including the state change messages
         # self.pipeline.set_auto_flush_bus(False)        
 
-        self._loop = None
         self.bus = None
 
     @property
@@ -60,20 +59,21 @@ class AsyncPlayer:
             # only send EOS in PLAYING.STATE?
             assert self.state[1] == Gst.State.PLAYING
             await self.send_eos()
-            logger.debug("Sent eos event")
+            logger.debug("Sent eos before event")
         
         # we don't await the NULL state as it never returns
         # async, and by default it also clears the bus 
-        self.pipeline.set_state(Gst.State.NULL)
+        ret = self.pipeline.set_state(Gst.State.NULL)
+        logger.debug("Set state to null result %s", ret)
         if teardown:
            self._teardown()
         logger.debug("Stopped pipeline")
         
     async def play_until_eos(self):
         """Will play and exit automatically after eos or error"""
-        await self.async_play()
+        await self.play()
         await self.bus.events.eos.wait()
-        await self.async_stop(send_eos=False)
+        await self.stop(send_eos=False)
 
     async def send_eos(self):
         self.pipeline.send_event(Gst.Event.new_eos())
@@ -89,7 +89,6 @@ class AsyncPlayer:
         """Cleanup player references to loop and gst resources"""
         self.bus.teardown() 
         self.bus = None
-        self._loop = None
         self.pipeline = None
         logger.debug("Teardown complete")
 

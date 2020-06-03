@@ -1,10 +1,8 @@
 import asyncio
 import logging
-import gi
 import enum
-import sys
-import colorlog
-import pytest
+import colorlog  # type: ignore
+import pytest  # type: ignore
 
 from pathlib import Path
 
@@ -24,17 +22,18 @@ logger.setLevel(logging.DEBUG)
 
 
 @pytest.fixture
-def gst():
+def Gst():
     import gi
 
     gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
+    from gi.repository import Gst as GstCls
 
-    Gst.init(None)
-    return Gst
+    GstCls.init(None)
+    return GstCls
 
 
 @pytest.fixture
-def player(gst):
+def player(Gst):
     from mixtape.players import AsyncPlayer
+
     return AsyncPlayer

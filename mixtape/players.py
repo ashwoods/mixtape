@@ -1,139 +1,178 @@
 import asyncio
 import logging
-import warnings
-import gi
+from typing import Any, Optional, Type, TypeVar, Tuple, Callable, List
+
 import attr
-import typing
-import functools
-gi.require_version('Gst', '1.0')
-gi.require_version('GLib', '2.0')
-from gi.repository import Gst, GObject, GLib  # noqa
-from .bus import Bus, PipelineStates
+from pampy import match, ANY
+
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst  # noqa
+
+from .base import BasePlayer
+from .exceptions import PlayerAlreadyConfigured, PlayerNotConfigured, PlayerPipelineError
+from .events import PlayerEvents
+
 
 logger = logging.getLogger(__name__)
 
+AsyncPlayerType = TypeVar("AsyncPlayerType", bound="AsyncPlayer")
 
-class AsyncPlayer:
 
+@attr.s
+class AsyncPlayer(BasePlayer):
 
-    def __init__(self, pipeline, *args, **kwargs):
-        self.pipeline = pipeline  
-        
-        # TODO: configuration for set_auto_flush_bus
-        # as the application depends on async bus messages
-        # we want to handle flushing the bus ourselves,
-        # otherwise setting the pipeline to `Gst.State.NULL`
-        # flushes the bus including the state change messages
-        # self.pipeline.set_auto_flush_bus(False)        
+    futures: List[Any] = attr.ib(init=False, default=attr.Factory(list))
+    events: PlayerEvents = attr.ib(init=False, default=attr.Factory(PlayerEvents))
+    loop: Optional[asyncio.AbstractEventLoop] = attr.ib(init=False, default=None, repr=False)
+    pollfd: Any = attr.ib(init=False, default=None, repr=False)
 
-        self.bus = None
+    # -- overriding base state shortcuts and pipeline methods with asyncio -- #
 
-    @property
-    def state(self):
-        return self.pipeline.get_state(0)
+    async def ready(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        ret = super().ready()
+        await self.events.state.wait_for(self.events.state(Gst.State.READY))
+        return ret
 
-    @property
-    def is_eos(self):
-        if self.bus:
-            return self.bus.events.eos.is_set()
-    
-    @property
-    def is_error(self):
-        if self.bus:
-            return self.bus.events.error.is_set()
-    
-    async def play(self):
-        if self.bus is None:
-            self._setup()
-        self.pipeline.set_state(Gst.State.PLAYING)
-        await self.bus.state.wait_for(PipelineStates(Gst.State.PLAYING))
+    async def play(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        ret = super().play()
+        await self.events.wait_for_state(Gst.State.PLAYING)
+        return ret
 
-    async def pause(self):
-        self.pipeline.set_state(Gst.State.PAUSED)
-        await self.bus.state.wait_for(PipelineStates(Gst.State.PAUSED))
-    
-    async def stop(self, send_eos=True, teardown=True):
-        logger.debug("Stopping pipeline...")
-        if send_eos and not self.is_eos:
-            logger.debug("Sending eos before stop")
-            # only send EOS in PLAYING.STATE?
-            assert self.state[1] == Gst.State.PLAYING
+    async def pause(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        ret = super().pause()
+        await self.events.state.wait_for(self.events.state(Gst.State.PAUSED))
+        return ret
+
+    async def stop(
+        self, send_eos: bool = True, teardown: bool = False
+    ) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        if send_eos:
             await self.send_eos()
-            logger.debug("Sent eos before event")
-        
-        # we don't await the NULL state as it never returns
-        # async, and by default it also clears the bus 
-        ret = self.pipeline.set_state(Gst.State.NULL)
-        logger.debug("Set state to null result %s", ret)
+        ret = self.set_state(Gst.State.NULL)
+
         if teardown:
-           self._teardown()
-        logger.debug("Stopped pipeline")
-        
-    async def play_until_eos(self):
-        """Will play and exit automatically after eos or error"""
-        await self.play()
-        await self.bus.events.eos.wait()
-        await self.stop(send_eos=False)
+            self.teardown()
 
-    async def send_eos(self):
-        self.pipeline.send_event(Gst.Event.new_eos())
-        logger.debug("Sent eos message")
-        await self.bus.events.eos.wait()
+        return ret
 
-    def _setup(self):
-        assert isinstance(self.pipeline, Gst.Pipeline)
-        self.bus = Bus(pipeline=self.pipeline)
+    async def send_eos(self) -> bool:  # type: ignore
+        ret = self.pipeline.send_event(Gst.Event.new_eos())
+        await self.events.eos.wait()
+        return ret
+
+    # -- bus message handling -- #
+
+    def handle(self) -> None:
+        """
+        Asyncio reader callback, called when a message is available on
+        the bus.
+        """
+        msg = self.bus.pop()
+        if msg:
+            # fmt: off
+            handler = match(msg.type,
+                Gst.MessageType.ERROR, lambda x: self.on_error,  # noqa: E128
+                Gst.MessageType.EOS, lambda x: self.on_eos,
+                Gst.MessageType.STATE_CHANGED, lambda x: self.on_state_changed,
+                Gst.MessageType.ASYNC_DONE, lambda x: self.on_async_done,
+                ANY, lambda x: self.on_unhandled_msg)
+            # fmt: on
+            handler(self.bus, msg)
+
+    def on_state_changed(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+        """
+        Handler for `state_changed` messages
+        By default will only log to `debug`
+        """
+        old, new, _ = message.parse_state_changed()
+
+        if message.src != self.pipeline:
+            return
+        logger.debug(
+            "State changed from %s to %s",
+            Gst.Element.state_get_name(old),
+            Gst.Element.state_get_name(new),
+        )
+
+        self.events.pick_state(new)
+
+    def on_error(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+        """
+        Handler for `error` messages
+        By default it will parse the error message,
+        log to `error` and append to `self.errors`
+        """
+        err, debug = message.parse_error()
+        # self.errors.append((err, debug))
+        self.events.error.set()
+        logger.error("Error received from element %s:%s", message.src.get_name(), err.message)
+        if debug is not None:
+            logger.error("Debugging information: %s", debug)
+        raise PlayerPipelineError(err)
+
+    def on_eos(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+        """
+        Handler for eos messages
+        By default it sets the eos event
+        """
+        self.events.eos.set()
+        logger.info("End-Of-Stream reached")
+
+    def on_async_done(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+        """
+        Handler for `async_done` messages
+        By default, it will pop any futures available in `self.futures` 
+        and call their result.
+        """
+        logger.debug("Unhandled ASYNC_DONE message: %s", message.parse_async_done())
+
+    def on_unhandled_msg(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+        """
+        Handler for all other messages.
+        By default will just log with `debug`
+        """
+        logger.debug("Unhandled msg: %s", message.type)
+
+    # -- setup and teaddown -- #
+
+    def setup(self) -> None:
+        """Setup needs a running asyncio loop"""
+        super().setup()
+        self.loop = asyncio.get_running_loop()
+        self.pollfd = self.bus.get_pollfd()
+        self.loop.add_reader(self.pollfd.fd, self.handle)
+        self.events.setup.set()
         logger.debug("Setup complete")
 
-    def _teardown(self):
+    def teardown(self) -> None:
         """Cleanup player references to loop and gst resources"""
-        self.bus.teardown() 
-        self.bus = None
-        self.pipeline = None
+        super().teardown()
+        self.loop.remove_reader(self.pollfd.fd)
+        self.pollfd = None
+        self.loop = None
+        self.events.teardown.set()
         logger.debug("Teardown complete")
 
+    # -- sync helpers -- #
 
-    # -- Helpers -- #
+    def call_play(self) -> Any:
+        return asyncio.run_coroutine_threadsafe(self.play(), loop=self.loop)
 
-    @classmethod 
-    def from_description(cls, description):
-        pipeline = Gst.parse_launch(description)
-        assert isinstance(pipeline, gi.overrides.Gst.Pipeline)
-        return cls(pipeline=pipeline)
+    def call_stop(self) -> Any:
+        return asyncio.run_coroutine_threadsafe(self.stop(), loop=self.loop)
 
-    @classmethod
-    def as_playbin(cls, uri):
-        """A play almost everything playbin Player"""
-        playbin = Gst.ElementFactory.make('playbin', 'playbin')
-        playbin.set_property('uri', uri)
-        p = cls(pipeline=playbin)
-        return p 
+    def call_pause(self) -> Any:
+        return asyncio.run_coroutine_threadsafe(self.pause(), loop=self.loop)
 
-    def run(self, autoplay=True):
-        if autoplay==True:
-            asyncio.run(self.play_until_eos())
-        else:
-            asyncio.run(self.startup())
+    # -- util -- #
 
-    # -- Non asyncio helpers -- #
-
-    def call_play(self):
-        return asyncio.run_coroutine_threadsafe(self.play(), loop=self.bus.loop)
-
-    def call_stop(self):
-        return asyncio.run_coroutine_threadsafe(self.stop(), loop=self.bus.loop)
-
-    def call_pause(self):
-        return asyncio.run_coroutine_threadsafe(self.pause(), loop=self.bus.loop)
-   
-    async def startup(self):
-        self._setup()
-        await self.bus.events.teardown.wait()
-
-
-
-    
-    
-   
-
-  
+    def create_async_future(self):  # type: ignore
+        """
+        Creates a future and appends it to `futures`.
+        Will `result` with a async_done message.
+        """
+        ft = self.loop.create_future()
+        self.futures.append(ft)
+        return ft

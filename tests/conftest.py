@@ -1,10 +1,8 @@
-import asyncio
+# type: ignore
 import logging
-import enum
-import colorlog  # type: ignore
-import pytest  # type: ignore
+import colorlog
+import pytest
 
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 handler = colorlog.StreamHandler()
@@ -21,8 +19,13 @@ logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
 
+# flake8 plugin is way too verbose
+def pytest_configure(config):
+    logging.getLogger("flake8").setLevel(logging.WARN)
+
+
 @pytest.fixture
-def Gst():
+def Gst():  # noqa
     import gi
 
     gi.require_version("Gst", "1.0")

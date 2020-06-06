@@ -1,13 +1,12 @@
 #!/usr/bin/env python
-
+# type: ignore
 """
-mixtape: awesome mix vol 1 -> python asyncio gstreamer application mini-framework 
-
+mixtape: awesome mix vol 1 -> python asyncio gstreamer application mini-framework
 """
 from setuptools import setup, find_packages
 
 
-test_deps = [
+TEST_DEPS = [
     "pytest==5.4.2",
     "pytest-asyncio==0.12.0",
     "pytest-benchmark==3.2.3",
@@ -25,8 +24,8 @@ test_deps = [
     "PyGObject-stubs==0.0.2",
     "pdbpp",
 ]
-extras = {
-    "test": test_deps,
+EXTRAS = {
+    "test": TEST_DEPS,
 }
 
 setup(
@@ -42,8 +41,8 @@ setup(
     package_data={"mixtape": ["py.typed"]},
     zip_safe=False,
     license="MIT",
-    tests_require=test_deps,
-    extras_require=extras,
+    tests_require=TEST_DEPS,
+    extras_require=EXTRAS,
     install_requires=["attrs", "pampy", "beppu"],
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",

@@ -1,11 +1,11 @@
 import logging
-from typing import Any, Callable, Iterable, Optional, Tuple, Type, TypeVar
+from typing import Tuple, Type, TypeVar
 
 import attr
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst
+from gi.repository import Gst  # type: ignore
 
 from .exceptions import PlayerSetStateError
 
@@ -38,10 +38,12 @@ class BasePlayer:
 
     @property
     def bus(self) -> Gst.Bus:
+        """Convenience property for the pipeline Gst.Bus"""
         return self.pipeline.get_bus()
 
     @property
     def state(self) -> Gst.State:
+        """Convenience property for the current pipeline Gst.State"""
         return self.pipeline.get_state(0)[1]
 
     def set_state(self, state: Gst.State) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
@@ -52,24 +54,29 @@ class BasePlayer:
         return ret
 
     def setup(self) -> None:
-        pass
+        """Player setup: meant to be used with hooks or subclassed"""
 
     def teardown(self) -> None:
+        """Player teardown: by default sets the pipeline to Gst.State.NULL"""
         if self.state is not Gst.State.NULL:
             self.set_state(Gst.State.NULL)
 
     def ready(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
+        """Set pipeline to state to Gst.State.READY"""
         return self.set_state(Gst.State.READY)
 
     def play(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
+        """Set pipeline to state to Gst.State.PLAY"""
         return self.set_state(Gst.State.PLAYING)
 
     def pause(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
+        """Set pipeline to state to Gst.State.PAUSED"""
         return self.set_state(Gst.State.PAUSED)
 
-    def stop(
-        self, send_eos: bool = False, teardown: bool = False
-    ) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
+    # fmt: off
+    def stop(self, send_eos: bool = False, teardown: bool = False) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
+        """Set pipeline to state to Gst.State.NULL, with the option of sending eos and teardown"""
+    # fmt: on
         if send_eos:
             self.send_eos()
 
@@ -81,16 +88,19 @@ class BasePlayer:
         return ret
 
     def send_eos(self) -> bool:
+        """Send a eos event to the pipeline"""
         return self.pipeline.send_event(Gst.Event.new_eos())
 
     @classmethod
     def create(cls: Type[BasePlayerType], pipeline: Gst.Pipeline) -> BasePlayerType:
+        """Player factory from a given pipeline that calls setup by default"""
         player = cls(pipeline)
         player.setup()
         return player
 
     @classmethod
     def from_description(cls: Type[BasePlayerType], description: str) -> BasePlayerType:
+        """Player factory from a pipeline description"""
         pipeline = Gst.parse_launch(description)
         assert isinstance(pipeline, Gst.Pipeline)
         return cls.create(pipeline=pipeline)

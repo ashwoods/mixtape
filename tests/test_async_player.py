@@ -3,7 +3,6 @@ import asyncio
 import pytest
 
 from mixtape.players import AsyncPlayer as Player
-from mixtape.exceptions import PlayerSetStateError
 
 SIMPLE_PIPELINE_DESCRIPTION = """videotestsrc ! queue ! fakesink"""
 ERROR_PIPELINE_DESCRIPTION = "filesrc ! queue ! fakesink"

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Optional, Type, TypeVar, Tuple, Callable, List
+from typing import Any, Optional, TypeVar, Tuple, List
 
 import attr
 from pampy import match, ANY
@@ -8,10 +8,10 @@ from pampy import match, ANY
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst  # noqa
+from gi.repository import Gst  # type: ignore
 
 from .base import BasePlayer
-from .exceptions import PlayerAlreadyConfigured, PlayerNotConfigured, PlayerPipelineError
+from .exceptions import PlayerPipelineError, PlayerNotConfigured
 from .events import PlayerEvents
 
 
@@ -31,23 +31,27 @@ class AsyncPlayer(BasePlayer):
     # -- overriding base state shortcuts and pipeline methods with asyncio -- #
 
     async def ready(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        """Async override of base.ready"""
         ret = super().ready()
         await self.events.state.wait_for(self.events.state(Gst.State.READY))
         return ret
 
     async def play(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        """Async override of base.play"""
         ret = super().play()
         await self.events.wait_for_state(Gst.State.PLAYING)
         return ret
 
     async def pause(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        """Async override of base.pause"""
         ret = super().pause()
         await self.events.state.wait_for(self.events.state(Gst.State.PAUSED))
         return ret
 
-    async def stop(
-        self, send_eos: bool = True, teardown: bool = False
-    ) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+    # fmt: off
+    async def stop(self, send_eos: bool = True, teardown: bool = False) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
+        """Async override of base.stop"""
+    # fmt: on
         if send_eos:
             await self.send_eos()
         ret = self.set_state(Gst.State.NULL)
@@ -74,10 +78,10 @@ class AsyncPlayer(BasePlayer):
             # fmt: off
             handler = match(msg.type,
                 Gst.MessageType.ERROR, lambda x: self.on_error,  # noqa: E128
-                Gst.MessageType.EOS, lambda x: self.on_eos,
-                Gst.MessageType.STATE_CHANGED, lambda x: self.on_state_changed,
-                Gst.MessageType.ASYNC_DONE, lambda x: self.on_async_done,
-                ANY, lambda x: self.on_unhandled_msg)
+                Gst.MessageType.EOS, lambda x: self.on_eos,  # noqa: E128
+                Gst.MessageType.STATE_CHANGED, lambda x: self.on_state_changed,  # noqa: E128
+                Gst.MessageType.ASYNC_DONE, lambda x: self.on_async_done,  # noqa: E128
+                ANY, lambda x: self.on_unhandled_msg)  # noqa: E128
             # fmt: on
             handler(self.bus, msg)
 
@@ -105,7 +109,6 @@ class AsyncPlayer(BasePlayer):
         log to `error` and append to `self.errors`
         """
         err, debug = message.parse_error()
-        # self.errors.append((err, debug))
         self.events.error.set()
         logger.error("Error received from element %s:%s", message.src.get_name(), err.message)
         if debug is not None:
@@ -123,7 +126,7 @@ class AsyncPlayer(BasePlayer):
     def on_async_done(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
         """
         Handler for `async_done` messages
-        By default, it will pop any futures available in `self.futures` 
+        By default, it will pop any futures available in `self.futures`
         and call their result.
         """
         logger.debug("Unhandled ASYNC_DONE message: %s", message.parse_async_done())
@@ -149,7 +152,8 @@ class AsyncPlayer(BasePlayer):
     def teardown(self) -> None:
         """Cleanup player references to loop and gst resources"""
         super().teardown()
-        self.loop.remove_reader(self.pollfd.fd)
+        if self.loop:
+            self.loop.remove_reader(self.pollfd.fd)
         self.pollfd = None
         self.loop = None
         self.events.teardown.set()
@@ -158,13 +162,22 @@ class AsyncPlayer(BasePlayer):
     # -- sync helpers -- #
 
     def call_play(self) -> Any:
-        return asyncio.run_coroutine_threadsafe(self.play(), loop=self.loop)
+        if self.loop:
+            return asyncio.run_coroutine_threadsafe(self.play(), loop=self.loop)
+        else:
+            raise PlayerNotConfigured("Player setup without running loop not allowed")
 
     def call_stop(self) -> Any:
-        return asyncio.run_coroutine_threadsafe(self.stop(), loop=self.loop)
+        if self.loop:
+            return asyncio.run_coroutine_threadsafe(self.stop(), loop=self.loop)
+        else:
+            raise PlayerNotConfigured("Player setup without running loop not allowed")
 
     def call_pause(self) -> Any:
-        return asyncio.run_coroutine_threadsafe(self.pause(), loop=self.loop)
+        if self.loop:
+            return asyncio.run_coroutine_threadsafe(self.pause(), loop=self.loop)
+        else:
+            raise PlayerNotConfigured("Player setup without running loop not allowed")
 
     # -- util -- #
 
@@ -173,6 +186,9 @@ class AsyncPlayer(BasePlayer):
         Creates a future and appends it to `futures`.
         Will `result` with a async_done message.
         """
-        ft = self.loop.create_future()
+        if self.loop:
+            ft = self.loop.create_future()
+        else:
+            raise PlayerNotConfigured("Player setup without running loop not allowed")
         self.futures.append(ft)
         return ft

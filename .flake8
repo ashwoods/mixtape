@@ -24,3 +24,6 @@ select = N,B,C,E,F,W,T4,B9
 # options don't properly override it, so if we don't specify it we get
 # half of the config from mypy.ini and half from flake8-mypy.
 mypy_config = mypy.ini
+
+per-file-ignores =
+  tests/*: N803 

@@ -6,27 +6,18 @@ mixtape: awesome mix vol 1 -> python asyncio gstreamer application mini-framewor
 from setuptools import setup, find_packages
 
 
-TEST_DEPS = [
-    "pytest==5.4.2",
-    "pytest-asyncio==0.12.0",
-    "pytest-benchmark==3.2.3",
-    "pytest-black==0.3.9",
-    "pytest-cov==2.9.0",
-    "pytest-flake8==1.0.6",
-    "pytest-forked==1.1.3",
-    "pytest-leaks==0.3.1",
-    "pytest-mock==3.1.0",
-    "pytest-mypy==0.6.2",
-    "pytest-mypy-plugins==1.3.0",
-    "pytest-profiling==1.7.0",
-    "colorlog==4.1.0",
-    "flake8-bugbear==20.1.4",
-    "PyGObject-stubs==0.0.2",
-    "pdbpp",
-]
+def parse_requirements(filename):
+    """ load requirements from a pip requirements file """
+    lineiter = (line.strip() for line in open(filename))
+    return [line for line in lineiter if line and not line.startswith("#")]
+
+
+TEST_DEPS = parse_requirements("req-test.txt")
+INSTALL_DEPS = parse_requirements("req-install.txt")
 EXTRAS = {
     "test": TEST_DEPS,
 }
+
 
 setup(
     name="mixtape",
@@ -43,7 +34,7 @@ setup(
     license="MIT",
     tests_require=TEST_DEPS,
     extras_require=EXTRAS,
-    install_requires=["attrs", "pampy", "beppu"],
+    install_requires=INSTALL_DEPS,
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
         "Intended Audience :: Developers",

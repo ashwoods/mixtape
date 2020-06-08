@@ -1,9 +1,8 @@
 import asyncio
 import logging
-from typing import Any, Optional, TypeVar, Tuple, List
+from typing import Any, Optional, TypeVar, Tuple, List, Callable, MutableMapping
 
 import attr
-from pampy import match, ANY
 
 import gi
 
@@ -27,13 +26,27 @@ class AsyncPlayer(BasePlayer):
     events: PlayerEvents = attr.ib(init=False, default=attr.Factory(PlayerEvents))
     loop: Optional[asyncio.AbstractEventLoop] = attr.ib(init=False, default=None, repr=False)
     pollfd: Any = attr.ib(init=False, default=None, repr=False)
+    handlers: MutableMapping[Gst.MessageType, Callable[[Gst.Bus, Gst.Message], None]] = attr.ib(
+        init=False, repr=False
+    )
+
+    # -- defaults -- #
+
+    @handlers.default
+    def _handlers(self) -> MutableMapping[Gst.MessageType, Callable[[Gst.Bus, Gst.Message], None]]:
+        return {
+            Gst.MessageType.ERROR: self.on_error,
+            Gst.MessageType.EOS: self.on_eos,
+            Gst.MessageType.STATE_CHANGED: self.on_state_changed,
+            Gst.MessageType.ASYNC_DONE: self.on_async_done,
+        }
 
     # -- overriding base state shortcuts and pipeline methods with asyncio -- #
 
     async def ready(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
         """Async override of base.ready"""
         ret = super().ready()
-        await self.events.state.wait_for(self.events.state(Gst.State.READY))
+        await self.events.wait_for_state(Gst.State.READY)
         return ret
 
     async def play(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
@@ -45,7 +58,7 @@ class AsyncPlayer(BasePlayer):
     async def pause(self) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:  # type: ignore
         """Async override of base.pause"""
         ret = super().pause()
-        await self.events.state.wait_for(self.events.state(Gst.State.PAUSED))
+        await self.events.wait_for_state(Gst.State.PAUSED)
         return ret
 
     # fmt: off
@@ -75,14 +88,7 @@ class AsyncPlayer(BasePlayer):
         """
         msg = self.bus.pop()
         if msg:
-            # fmt: off
-            handler = match(msg.type,
-                Gst.MessageType.ERROR, lambda x: self.on_error,  # noqa: E128
-                Gst.MessageType.EOS, lambda x: self.on_eos,  # noqa: E128
-                Gst.MessageType.STATE_CHANGED, lambda x: self.on_state_changed,  # noqa: E128
-                Gst.MessageType.ASYNC_DONE, lambda x: self.on_async_done,  # noqa: E128
-                ANY, lambda x: self.on_unhandled_msg)  # noqa: E128
-            # fmt: on
+            handler = self.handlers.get(msg.type, self.on_unhandled_msg)
             handler(self.bus, msg)
 
     def on_state_changed(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
@@ -102,7 +108,7 @@ class AsyncPlayer(BasePlayer):
 
         self.events.pick_state(new)
 
-    def on_error(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+    def on_error(self, bus: Gst.Bus, message: Gst.Message) -> None:
         """
         Handler for `error` messages
         By default it will parse the error message,
@@ -110,33 +116,33 @@ class AsyncPlayer(BasePlayer):
         """
         err, debug = message.parse_error()
         self.events.error.set()
-        logger.error("Error received from element %s:%s", message.src.get_name(), err.message)
+        logger.error("Error received from element %s:%s on %s", message.src.get_name(), err.message, bus)
         if debug is not None:
             logger.error("Debugging information: %s", debug)
         raise PlayerPipelineError(err)
 
-    def on_eos(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+    def on_eos(self, bus: Gst.Bus, message: Gst.Message) -> None:
         """
         Handler for eos messages
         By default it sets the eos event
         """
         self.events.eos.set()
-        logger.info("End-Of-Stream reached")
+        logger.info("EOS message: %s received from pipeline on %s", message, bus)
 
-    def on_async_done(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+    def on_async_done(self, bus: Gst.Bus, message: Gst.Message) -> None:
         """
         Handler for `async_done` messages
         By default, it will pop any futures available in `self.futures`
         and call their result.
         """
-        logger.debug("Unhandled ASYNC_DONE message: %s", message.parse_async_done())
+        logger.debug("Unhandled ASYNC_DONE message: %s on %s", message.parse_async_done(), bus)
 
-    def on_unhandled_msg(self, bus: Gst.Bus, message: Gst.Message) -> None:  # pylint: disable=unused-argument
+    def on_unhandled_msg(self, bus: Gst.Bus, message: Gst.Message) -> None:
         """
         Handler for all other messages.
         By default will just log with `debug`
         """
-        logger.debug("Unhandled msg: %s", message.type)
+        logger.debug("Unhandled msg: %s on %s", message.type, bus)
 
     # -- setup and teaddown -- #
 

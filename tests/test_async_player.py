@@ -2,7 +2,7 @@
 import asyncio
 import pytest
 
-from mixtape.players import AsyncPlayer as Player
+from mixtape import AsyncPlayer as Player
 from mixtape.exceptions import PlayerSetStateError
 
 SIMPLE_PIPELINE_DESCRIPTION = """videotestsrc ! queue ! fakesink"""
@@ -45,3 +45,4 @@ async def test_async_player_exception(Gst):
 
     with pytest.raises(PlayerSetStateError):
         await player.play()
+    player.teardown()

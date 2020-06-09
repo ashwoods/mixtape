@@ -13,7 +13,6 @@ from .base import BasePlayer
 from .exceptions import PlayerPipelineError, PlayerNotConfigured
 from .events import PlayerEvents
 
-
 logger = logging.getLogger(__name__)
 
 AsyncPlayerType = TypeVar("AsyncPlayerType", bound="AsyncPlayer")
@@ -21,6 +20,12 @@ AsyncPlayerType = TypeVar("AsyncPlayerType", bound="AsyncPlayer")
 
 @attr.s
 class AsyncPlayer(BasePlayer):
+    """
+    A asyncio compatible player.
+    Interfaces with the `Gst.Bus` with an asyncio file descriptor,
+    which is used to set `asyncio.Event` when received for the bus,
+    allowing for asyncio compatible methods.
+    """
 
     futures: List[Any] = attr.ib(init=False, default=attr.Factory(list))
     events: PlayerEvents = attr.ib(init=False, default=attr.Factory(PlayerEvents))
@@ -135,7 +140,8 @@ class AsyncPlayer(BasePlayer):
         By default, it will pop any futures available in `self.futures`
         and call their result.
         """
-        logger.debug("Unhandled ASYNC_DONE message: %s on %s", message.parse_async_done(), bus)
+        msg = message.parse_async_done()
+        logger.debug("Unhandled ASYNC_DONE message: %s on %s", msg, bus)
 
     def on_unhandled_msg(self, bus: Gst.Bus, message: Gst.Message) -> None:
         """
@@ -168,18 +174,21 @@ class AsyncPlayer(BasePlayer):
     # -- sync helpers -- #
 
     def call_play(self) -> Any:
+        """Convencience method to call play from another thread"""
         if self.loop:
             return asyncio.run_coroutine_threadsafe(self.play(), loop=self.loop)
         else:
             raise PlayerNotConfigured("Player setup without running loop not allowed")
 
     def call_stop(self) -> Any:
+        """Convencience method to call stop from another thread"""
         if self.loop:
             return asyncio.run_coroutine_threadsafe(self.stop(), loop=self.loop)
         else:
             raise PlayerNotConfigured("Player setup without running loop not allowed")
 
     def call_pause(self) -> Any:
+        """Convencience method to call pause from another thread"""
         if self.loop:
             return asyncio.run_coroutine_threadsafe(self.pause(), loop=self.loop)
         else:

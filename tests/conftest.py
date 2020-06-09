@@ -1,12 +1,8 @@
-import asyncio
+# type: ignore
 import logging
-import gi
-import enum
-import sys
 import colorlog
 import pytest
 
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 handler = colorlog.StreamHandler()
@@ -23,18 +19,26 @@ logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
 
+# flake8 plugin is way too verbose
+def pytest_configure(config):
+    logging.getLogger("flake8").setLevel(logging.WARN)
+    logging.getLogger("bandit").setLevel(logging.WARN)
+    logging.getLogger("blib2to3").setLevel(logging.WARN)
+
+
 @pytest.fixture
-def gst():
+def Gst():  # noqa
     import gi
 
     gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
+    from gi.repository import Gst as GstCls
 
-    Gst.init(None)
-    return Gst
+    GstCls.init(None)
+    return GstCls
 
 
 @pytest.fixture
-def player(gst):
+def player(Gst):
     from mixtape.players import AsyncPlayer
+
     return AsyncPlayer

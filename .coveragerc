@@ -1,0 +1,4 @@
+[run]
+include = mixtape/*
+omit = tests/*
+branch = True

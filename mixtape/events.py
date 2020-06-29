@@ -6,7 +6,7 @@ import beppu
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst  # type: ignore
+from gi.repository import Gst
 
 
 class States(enum.Enum):

@@ -5,7 +5,7 @@ import attr
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst  # type: ignore
+from gi.repository import Gst
 
 from .exceptions import PlayerSetStateError
 
@@ -27,6 +27,7 @@ class BasePlayer:
     # self.pipeline.set_auto_flush_bus(False)
 
     pipeline: Gst.Pipeline = attr.ib()
+    init: bool = attr.ib(init=False, default=False)
 
     def __del__(self) -> None:
         """
@@ -48,13 +49,20 @@ class BasePlayer:
 
     def set_state(self, state: Gst.State) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
         """Set pipeline state"""
+        if not self.init:
+            logger.warning("Calling set_state without calling setup. Trying to do this now.")
+            self.setup()
         ret = self.pipeline.set_state(state)
         if ret == Gst.StateChangeReturn.FAILURE:
             raise PlayerSetStateError
         return ret
 
     def setup(self) -> None:
-        """Player setup: meant to be used with hooks or subclassed"""
+        """
+        Player setup: meant to be used with hooks or subclassed
+        Call super() after custom code.
+        """
+        self.init = True
 
     def teardown(self) -> None:
         """Player teardown: by default sets the pipeline to Gst.State.NULL"""

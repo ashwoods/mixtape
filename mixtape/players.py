@@ -1,13 +1,12 @@
 import asyncio
 import logging
 from typing import Any, Optional, TypeVar, Tuple, List, Callable, MutableMapping
-
 import attr
 
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst  # type: ignore
+from gi.repository import Gst
 
 from .base import BasePlayer
 from .exceptions import PlayerPipelineError, PlayerNotConfigured
@@ -40,6 +39,7 @@ class AsyncPlayer(BasePlayer):
     @handlers.default
     def _handlers(self) -> MutableMapping[Gst.MessageType, Callable[[Gst.Bus, Gst.Message], None]]:
         return {
+            Gst.MessageType.QOS: self.on_qos,
             Gst.MessageType.ERROR: self.on_error,
             Gst.MessageType.EOS: self.on_eos,
             Gst.MessageType.STATE_CHANGED: self.on_state_changed,
@@ -120,10 +120,12 @@ class AsyncPlayer(BasePlayer):
         log to `error` and append to `self.errors`
         """
         err, debug = message.parse_error()
-        self.events.error.set()
         logger.error("Error received from element %s:%s on %s", message.src.get_name(), err.message, bus)
         if debug is not None:
             logger.error("Debugging information: %s", debug)
+
+        self.teardown()
+        self.events.error.set()
         raise PlayerPipelineError(err)
 
     def on_eos(self, bus: Gst.Bus, message: Gst.Message) -> None:
@@ -150,14 +152,31 @@ class AsyncPlayer(BasePlayer):
         """
         logger.debug("Unhandled msg: %s on %s", message.type, bus)
 
+    def on_qos(self, bus: Gst.Bus, message: Gst.Message) -> None:
+        """
+        Handler for `qos` messages
+        By default it will parse the error message,
+        log to `error` and append to `self.errors`
+        """
+        live, running_time, stream_time, timestamp, duration = message.parse_qos()
+        logger.warning(
+            "Qos message: live:%s - running:%s - stream:%s - timestamp:%s - duration:%s received from %s on %s",
+            live,
+            running_time,
+            stream_time,
+            timestamp,
+            duration,
+            message.src.get_name(),
+            bus)
+
     # -- setup and teaddown -- #
 
     def setup(self) -> None:
         """Setup needs a running asyncio loop"""
-        super().setup()
         self.loop = asyncio.get_running_loop()
         self.pollfd = self.bus.get_pollfd()
         self.loop.add_reader(self.pollfd.fd, self.handle)
+        super().setup()
         self.events.setup.set()
         logger.debug("Setup complete")
 

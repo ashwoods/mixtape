@@ -46,3 +46,15 @@ async def test_async_player_exception(Gst):
     with pytest.raises(PlayerSetStateError):
         await player.play()
     player.teardown()
+
+
+@pytest.mark.asyncio
+async def test_async_setup_call(Gst, mocker):
+    player = Player.from_description(SIMPLE_PIPELINE_DESCRIPTION)
+    spy = mocker.spy(player.pipeline, "set_state")
+    await player.play()
+
+    assert player.init
+    assert spy.asert_called_with(Gst.State.PLAYING)
+
+    await player.stop()

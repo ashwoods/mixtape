@@ -19,5 +19,4 @@ flake8==3.8.2
 flake8-bandit==2.1.2
 flake8-bugbear==20.1.4
 flake8-aaa==0.10.0
-PyGObject-stubs==0.0.2
 pdbpp==0.10.2

@@ -27,5 +27,5 @@ RUN pip3 install -e /src[test]
 WORKDIR /src
 
 RUN groupadd -g 999 mixtape && \
-    useradd -r -u 999 -g mixtape mixtape
-USER mixtape
+    useradd -m -u 999 -g mixtape mixtape
+# #iUSER mixtapei

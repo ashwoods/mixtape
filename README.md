@@ -1,6 +1,6 @@
 # mixtape: awesome mix vol. 1 🎵📼 
 
-![Pypi page] ![Pypi license] ![Pypi version]
+![Pypi page] ![Pypi license] ![Pypi version] ![Build Status]
 
 |[●▪▪●]| A python based `gstreamer` **player**-mini-framework.
 
@@ -201,3 +201,4 @@ We are Groot.
 [Pypi page]: https://img.shields.io/pypi/v/mixtape.svg
 [Pypi license]: https://img.shields.io/pypi/l/mixtape.svg
 [Pypi version]: https://img.shields.io/pypi/pyversions/mixtape.svg
+[Build Status]: https://travis-ci.org/ashwoods/mixtape.svg?branch=master

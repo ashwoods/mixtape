@@ -7,5 +7,5 @@ services:
     command: python3 -m pytest /src/tests
     volumes:
       - .:/src
-  environment:
-    - CODECOV_TOKEN
+    environment:
+      - CODECOV_TOKEN

@@ -1,16 +1,9 @@
 version: "3.7"
 services:
-  # https://yaml.org/type/merge.html
   test: &FULL
-    image: ashwoods/mix-tape-vol-1
     build:
       context: .
       dockerfile: Dockerfile
-    command: python3 -m pytest -s
+    command: python3 -m pytest /src/tests
     volumes:
       - .:/src
-      - type: bind
-        source: /run/host-services/ssh-auth.sock
-        target: /run/host-services/ssh-auth.sock
-    environment:
-      - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock  

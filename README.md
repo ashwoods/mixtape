@@ -1,6 +1,6 @@
 # mixtape: awesome mix vol. 1 🎵📼 
 
-![Pypi page] ![Pypi license] ![Pypi version] ![Build Status] ![Quality Gate Status]
+![Pypi page] ![Pypi license] ![Pypi version] ![Build Status] ![Quality Gate Status] ![Codecov]
 
 |[●▪▪●]| A python based `gstreamer` **player**-mini-framework.
 
@@ -204,3 +204,5 @@ We are Groot.
 [Build Status]: https://travis-ci.org/ashwoods/mixtape.svg?branch=master
 [Quality Gate Status]: https://sonarcloud.io/api/project_badges/measure?project=ashwoods_mixtape&metric=alert_status
 [Requirements Status]: https://requires.io/github/ashwoods/mixtape/requirements.svg?branch=master
+[Codecov]: https://codecov.io/gh/ashwoods/mixtape/branch/master/graph/badge.svg
+

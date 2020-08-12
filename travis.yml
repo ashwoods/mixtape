@@ -2,13 +2,13 @@ language: python
 dist: bionic
 python:
   - "3.8"
-
 cache:
   pip: true
-
-before_install:
-  - sudo apt-get -y install 
-        
+install:
+  - pip install -r req-install.txt
+  - pip install -r req-test.txt
+script:
+  - pytest
 addons:
   apt:
     update: true
@@ -22,9 +22,3 @@ addons:
       - libgstreamer-plugins-base1.0
       - libgstreamer1.0-0 
       - python3-gst-1.0
-install:
-  - pip install -r req-install.txt
-  - pip install -r req-test.txt
-# command to run tests
-script:
-  - pytest

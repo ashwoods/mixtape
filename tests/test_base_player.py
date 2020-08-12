@@ -39,7 +39,11 @@ def test_base_player_state_setter_and_getter(Gst, pipeline, mocker):
 
     player.set_state(Gst.State.PLAYING)
     ret = player.pipeline.get_state(0)
-    assert ret == (Gst.StateChangeReturn.ASYNC, Gst.State.READY, Gst.State.PLAYING) or (Gst.StateChangeReturn.SUCCESS, Gst.State.READY, Gst.State.PLAYING)
+    assert ret == (Gst.StateChangeReturn.ASYNC, Gst.State.READY, Gst.State.PLAYING) or (
+        Gst.StateChangeReturn.SUCCESS,
+        Gst.State.READY,
+        Gst.State.PLAYING,
+    )
 
     sleep(1)  # Player getting started in the background
     assert player.state == Gst.State.PLAYING

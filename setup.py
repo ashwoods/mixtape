@@ -21,7 +21,7 @@ EXTRAS = {
 
 setup(
     name="mixtape",
-    version="0.5.1",
+    version="0.6.0.dev",
     author="Ashley Camba Garrido",
     author_email="ashwoods@gmail.com",
     url="https://github.com/ashwoods/mixtape",

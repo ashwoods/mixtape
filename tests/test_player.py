@@ -15,7 +15,13 @@ def test_base_player_init_and_default_props(pipeline):
     player = Player(pipeline=pipeline)
     assert player.pipeline == pipeline
     assert player.state == Gst.State.NULL
+    assert len(player.sinks) == 1
+    assert len(player.sources) == 1
+    assert len(player.elements) == 3
     assert isinstance(player.bus, Gst.Bus)
+
+    t_queue = Gst.ElementFactory.make("queue").get_factory().get_element_type()
+    assert len(player.get_elements_by_gtype(t_queue)) == 1
 
 
 @pytest.mark.asyncio

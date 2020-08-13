@@ -1,0 +1,66 @@
+# type: ignore
+import asyncio
+import pytest
+
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+
+from mixtape.players import Player
+from mixtape.exceptions import PlayerSetStateError, PlayerNotConfigured
+
+
+def test_base_player_init_and_default_props(pipeline):
+    player = Player(pipeline=pipeline)
+    assert player.pipeline == pipeline
+    assert player.state == Gst.State.NULL
+    assert isinstance(player.bus, Gst.Bus)
+
+
+@pytest.mark.asyncio
+async def test_error_state_change_before_setup(pipeline):
+    player = Player(pipeline=pipeline)
+    with pytest.raises(PlayerNotConfigured):
+        await player.set_state(Gst.State.PLAYING)
+
+
+@pytest.mark.asyncio
+async def test_gst_error_on_start_exception(error_pipeline):
+    player = Player(error_pipeline)
+    player.setup()
+
+    with pytest.raises(PlayerSetStateError):
+        await player.play()
+    player.teardown()
+
+
+@pytest.mark.asyncio
+async def test_async_player_sequence(pipeline, mocker):
+    player = Player(pipeline)
+    player.setup()
+    spy = mocker.spy(player.pipeline, "set_state")
+
+    await player.ready()
+    spy.assert_called_with(Gst.State.READY)
+
+    await player.play()
+    await asyncio.sleep(1)
+    spy.assert_called_with(Gst.State.PLAYING)
+
+    await player.pause()
+    spy.assert_called_with(Gst.State.PAUSED)
+
+    await player.stop()
+    spy.assert_called_with(Gst.State.NULL)
+
+
+@pytest.mark.asyncio
+async def test_player_send_eos(pipeline, mocker):
+    player = Player(pipeline=pipeline)
+    player.setup()
+    spy = mocker.spy(player.pipeline, "send_event")
+    await player.play()
+    await player.send_eos()
+    spy.assert_called()
+    await player.stop()

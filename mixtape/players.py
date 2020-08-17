@@ -237,10 +237,14 @@ class Player:
     @classmethod
     async def from_description(cls: Type[PlayerType], description: str) -> PlayerType:
         """Player factory from a pipeline description"""
-        pipeline = Gst.parse_launch(description)
-        assert isinstance(pipeline, Gst.Pipeline)
-        return await cls.create(pipeline=pipeline)
+        return await cls.create(pipeline=cls.parse_description(description))
 
+    @staticmethod
+    def parse_description(description: str) -> Gst.Pipeline:
+        pipeline = Gst.parse_launch(description)
+        if not isinstance(pipeline, Gst.Pipeline):
+            raise ValueError("Invalid pipeline description")
+        return pipeline
 
 class AsyncPlayer(Player):
     def __init_subclass__(cls) -> None:

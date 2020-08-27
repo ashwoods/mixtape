@@ -1,3 +1,4 @@
 attrs
 beppu
-click
+click==7.1.2
+prompt-toolkit==3.0.6

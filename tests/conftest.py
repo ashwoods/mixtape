@@ -21,7 +21,7 @@ logger.setLevel(logging.INFO)
 
 # flake8 plugin is way too verbose
 def pytest_configure(config):
-    logging.getLogger("flake8").setLevel(logging.WARN)
+    logging.getLogger("flake8").setLevel(logging.ERROR)
     logging.getLogger("bandit").setLevel(logging.WARN)
     logging.getLogger("blib2to3").setLevel(logging.WARN)
     logging.getLogger("stevedore").setLevel(logging.WARN)

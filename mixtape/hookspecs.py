@@ -1,74 +1,29 @@
-import attr
-from typing import Any, Iterable
-from pluggy import HookspecMarker
-from .players import PlayerType, Gst
+# type: ignore
+from typing import Any, Callable, cast, TypeVar
+import pluggy
+from .core import Context, Player
+import gi
 
-hookspec = HookspecMarker("mixtape")
-
-@attr.s
-class Option:
-    name: str = attr.ib()
-    required: bool = attr.ib(default=False)
-    type: Any = attr.ib(default=str)
-
-# plugins and config
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
 
 
-# @hookspec
-# def mixtape_addhooks():
-#     """
-#     Register a plugin hook
-#     """
-
-@hookspec
-def mixtape_addoptions(player: PlayerType) -> Iterable[Option]:
-    """
-    Register an option
-    """
-
-# @hookspec
-# def mixtape_plugin_registered(player, pipeline, options):
-#     pass
-
-# @hookspec
-# def mixtape_plugin_autoload(player, pipeline, options):
-#     pass
-
-
-
-# @hookspec
-# def mixtape_configure():
-#     pass
-
-# pipeline creation and signals
-
-# @hookspec
-# def mixtape_create_pipeline(player):
-#     pass
-
-# @hookspec
-# def mixtape_on_element_added(player, element):
-#     pass
-
-# @hookspec
-# def mixtape_on_deep_element_added(player, element):
-#     pass
-
-# @hookspec
-# def mixtape_on_deep_element_removed(player, element):
-#     pass
+F = TypeVar("F", bound=Callable[..., Any])
+hookspec = cast(Callable[[F], F], pluggy.HookspecMarker("mixtape"))
 
 
 # player init and teardown
 
+
 @hookspec
-def mixtape_setup(player: PlayerType):
+def mixtape_setup(player: Player, ctx: Context):
     """
     Hook called on player setup
     """
 
+
 @hookspec
-def mixtape_teardown(player: PlayerType):
+def mixtape_teardown(player: Player, ctx: Context):
     """
     Hook called on player teardown
     """
@@ -76,22 +31,30 @@ def mixtape_teardown(player: PlayerType):
 
 # pipeline control and event hooks
 
+
 @hookspec
-def mixtape_before_state_changed(player: PlayerType, state: Gst.State):
+def mixtape_before_state_changed(player: Player, ctx: Context, state: Gst.State):
     """
     Hook called before a `set_state` call.
     """
 
+
 @hookspec
-def mixtape_on_state_changed(player: PlayerType, state: Gst.State):
+def mixtape_on_state_changed(player: Player, ctx: Context, state: Gst.State):
     """
     Hook called on state changed
     """
 
-def mixtape_on_bus_message(player: PlayerType, msg: Gst.Message):
-    """
-    Hook called on bus message
-    """
+
+@hookspec
+def mixtape_register_commands(player: Player, ctx: Context):
+    pass
+
+
+# def mixtape_on_bus_message(player: Player,ctx: Context, msg: Gst.Message):
+#     """
+#     Hook called on bus message
+#     """
 
 # @hookspec
 # def mixtape_on_eos(player: PlayerType):
@@ -100,10 +63,6 @@ def mixtape_on_bus_message(player: PlayerType, msg: Gst.Message):
 
 # player actions and properties
 
-
-# @hookspec
-# def mixtape_register_method():
-#     pass
 
 # @hookspec
 # def mixtape_register_property():

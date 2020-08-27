@@ -35,9 +35,7 @@ setup(
     tests_require=TEST_DEPS,
     extras_require=EXTRAS,
     install_requires=INSTALL_DEPS,
-    entry_points={
-        'console_scripts': ['mixtape = mixtape.cli:play'],
-        },
+    entry_points={"console_scripts": ["mixtape = mixtape.cli:play"]},
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
         "Intended Audience :: Developers",

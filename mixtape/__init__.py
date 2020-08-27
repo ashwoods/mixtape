@@ -1,20 +1,24 @@
-from .core import BoomBox
-
-from typing import (Any, Callable, List, Mapping, MutableMapping, Optional,
-                    Tuple, Type, TypeVar)
+from typing import (
+    Any,
+    Sequence,
+    Optional,
+)
 
 import pluggy
 
 from . import hookspecs
+from .core import BoomBox, Player
 
-hookimpl = pluggy.HookimplMarker("mixtape")
+hookimpl = pluggy.HookimplMarker(__name__)
 
-def load_plugin_manager(plugins=None):
+__all__ = ["hookimpl", "hookspecs", "Player", "BoomBox", "load_mixtape_plugins"]
+
+
+def load_mixtape_plugins(plugins: Optional[Sequence[Any]] = None) -> pluggy.PluginManager:
     """Init mixtape plugin manager"""
-
     if plugins is None:
         plugins = []
     pm = pluggy.PluginManager(__name__)
     pm.add_hookspecs(hookspecs)
-    pm.load_setuptools_entrypoints(group=__name__) 
+    pm.load_setuptools_entrypoints(group=__name__)
     return pm

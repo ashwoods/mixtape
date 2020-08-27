@@ -7,7 +7,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
-from mixtape.players import Player
+from mixtape import Player
 from mixtape.exceptions import PlayerSetStateError, PlayerNotConfigured
 
 

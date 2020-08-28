@@ -7,6 +7,8 @@ import colorlog
 from prompt_toolkit import HTML
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit import PromptSession
+import string
+from typing import Dict, List
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
@@ -52,9 +54,26 @@ class MixtapeCommand(click.Command):
         return params
 
 
-def bottom_toolbar():
+def bottom_toolbar(keyboard_mapping: Dict):
     """Returns formatted bottom toolbar"""
-    return HTML('Mixtape <b><style bg="ansired">Commands:</style></b>!')
+    available_commands = ', '.join(f'{v} [{k}]' for k,v in keyboard_mapping.items())
+    return HTML(f'Mixtape <b><style bg="ansired">Commands:</style></b>{available_commands}!')
+
+
+def get_key_command_mapping(commands: List) -> Dict:
+    """Returns a mapping of keys to commands"""
+    keyboard_mapping = {}
+    for command in commands:
+        if command[0] not in keyboard_mapping.keys():
+            keyboard_mapping[command[0]] = command
+        else:
+            available_letters = [l for l in string.ascii_lowercase if l not in keyboard_mapping.keys()]
+            try:
+                keyboard_mapping[available_letters[0]] = command
+            except IndexError:
+                raise Exception('More commands than lowercase letters!')
+    return keyboard_mapping
+
 
 
 @click.command(cls=MixtapeCommand)
@@ -69,19 +88,22 @@ def play(ctx, description, **kwargs):
         boombox = BoomBox(player=player, pm=ctx.pm)
         help_text = "Press key:"
         boombox.setup()
+
+        commands = boombox._context.commands
+        key_command_mapping = get_key_command_mapping(list(commands))
         session = PromptSession()
         while True:
             with patch_stdout():
 
+                toolbar = bottom_toolbar(key_command_mapping)
                 result = await session.prompt_async(
-                    help_text, bottom_toolbar=lambda: bottom_toolbar
+                    help_text, bottom_toolbar=toolbar
                 )
                 print("You said: %s" % result)
-            if result == "p":
-                await boombox.play()
-            if result == "s":
-                await boombox.stop()
-                break
+            if result in key_command_mapping:
+                await commands[key_command_mapping[result]]()
+                if key_command_mapping[result] == 'stop':
+                    break
         boombox.teardown()
 
     asyncio.run(main(description))

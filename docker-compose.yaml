@@ -8,4 +8,5 @@ services:
     volumes:
       - .:/src
     environment:
+      - GST_PLUGIN_PATH=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0
       - CODECOV_TOKEN

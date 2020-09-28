@@ -35,6 +35,8 @@ class Context:
     def register_command(self, name: str, value: Any) -> None:
         self.commands[name] = value
 
+    def clear_commands(self):
+        self.commands = {}
 
 @attr.s
 class Player:
@@ -279,12 +281,14 @@ class BoomBox:
         self._player = player
         self._pm = pm
         self._context = Context()
-        for cmd in self.DEFAULT_PLAYER_COMMANDS:
-            self._context.register_command(cmd, getattr(self._player, cmd))
-        results = self._hook.mixtape_register_commands(player=self._player, ctx=self._context)
-        results = list(itertools.chain(*results))
-        for name, method in results:
-            self._context.register_command(name, method)
+        # init all the plugins
+        self._hook.mixtape_plugin_init(player=self._player, ctx=self._context)
+
+        # rename and monkeypatch default set state
+        self._player._set_state = self._player.set_state
+        self._player.set_state = self.set_state
+        # register initial commands
+        self._register_commands()
 
     def __getattr__(self, name: str) -> Any:
         """
@@ -300,6 +304,16 @@ class BoomBox:
         """Convenience shortcut for pm hook"""
         return self._pm.hook
 
+    def _register_commands(self) -> None:
+        # register all the commands
+        self._context.clear_commands()
+        for cmd in self.DEFAULT_PLAYER_COMMANDS:
+            self._context.register_command(cmd, getattr(self._player, cmd))
+        results = self._hook.mixtape_register_commands(player=self._player, ctx=self._context)
+        results = list(itertools.chain(*results))
+        for name, method in results:
+            self._context.register_command(name, method)
+
     def setup(self) -> None:
         self._player.setup()
         self._hook.mixtape_setup(player=self._player, ctx=self._context)
@@ -310,6 +324,8 @@ class BoomBox:
 
     async def set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
         self._hook.mixtape_before_state_changed(player=self._player, ctx=self._context, state=state)
-        ret = await self._player.set_state(state)
+        ret = await self._player._set_state(state)
         self._hook.mixtape_on_state_changed(player=self._player, ctx=self._context, state=state)
+        logger.info("Registering commands on state change")
+        self._register_commands()
         return ret

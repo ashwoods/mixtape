@@ -74,7 +74,29 @@ def get_key_command_mapping(commands: List) -> Dict:
                 raise Exception('More commands than lowercase letters!')
     return keyboard_mapping
 
+async def main(description, ctx):
+    Gst.init(None)
+    player = await Player.from_description(description)
+    boombox = BoomBox(player=player, pm=ctx.pm)
+    help_text = "Press key:"
+    boombox.setup()
 
+    commands = boombox._context.commands
+    key_command_mapping = get_key_command_mapping(list(commands))
+    session = PromptSession()
+    while True:
+        with patch_stdout():
+
+            toolbar = bottom_toolbar(key_command_mapping)
+            result = await session.prompt_async(
+                help_text, bottom_toolbar=toolbar
+            )
+            print("You said: %s" % result)
+        if result in key_command_mapping:
+            await commands[key_command_mapping[result]]()
+            if key_command_mapping[result] == 'stop':
+                break
+    boombox.teardown()
 
 @click.command(cls=MixtapeCommand)
 @click.argument("description", nargs=-1, type=click.UNPROCESSED, required=True)
@@ -82,28 +104,4 @@ def get_key_command_mapping(commands: List) -> Dict:
 def play(ctx, description, **kwargs):
     description = " ".join(description)
 
-    async def main(description):
-        Gst.init(None)
-        player = await Player.from_description(description)
-        boombox = BoomBox(player=player, pm=ctx.pm)
-        help_text = "Press key:"
-        boombox.setup()
-
-        commands = boombox._context.commands
-        key_command_mapping = get_key_command_mapping(list(commands))
-        session = PromptSession()
-        while True:
-            with patch_stdout():
-
-                toolbar = bottom_toolbar(key_command_mapping)
-                result = await session.prompt_async(
-                    help_text, bottom_toolbar=toolbar
-                )
-                print("You said: %s" % result)
-            if result in key_command_mapping:
-                await commands[key_command_mapping[result]]()
-                if key_command_mapping[result] == 'stop':
-                    break
-        boombox.teardown()
-
-    asyncio.run(main(description))
+    asyncio.run(main(description, ctx))

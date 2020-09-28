@@ -11,6 +11,15 @@ from gi.repository import Gst
 F = TypeVar("F", bound=Callable[..., Any])
 hookspec = cast(Callable[[F], F], pluggy.HookspecMarker("mixtape"))
 
+# plugin 
+
+@hookspec
+def mixtape_plugin_init(player: Player, ctx: Context):
+    pass
+
+@hookspec
+def mixtape_plugin_autoload(player: Player, ctx: Context):
+    pass
 
 # player init and teardown
 
@@ -50,6 +59,9 @@ def mixtape_on_state_changed(player: Player, ctx: Context, state: Gst.State):
 def mixtape_register_commands(player: Player, ctx: Context):
     pass
 
+# @hookspec
+# def mixtape_register_conditions(player: Player, ctx: Context):
+#     pass
 
 # def mixtape_on_bus_message(player: Player,ctx: Context, msg: Gst.Message):
 #     """

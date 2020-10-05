@@ -4,6 +4,7 @@ import asyncio
 from mixtape.core import BoomBox
 
 from mixtape import load_mixtape_plugins, hookimpl
+from mixtape.core import Command
 
 
 class ExamplePlugin:
@@ -27,7 +28,7 @@ class ExamplePlugin:
 
     @hookimpl
     def mixtape_register_commands(self, player, ctx):
-        return [("clear", self.clear), ("call", self.call)]
+        return [Command("clear", self.clear), Command("call", self.call)]
 
 
 @pytest.mark.asyncio

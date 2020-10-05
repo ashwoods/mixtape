@@ -38,6 +38,18 @@ class Context:
     def clear_commands(self):
         self.commands = {}
 
+
+@attr.s
+class Command:
+    name: str = attr.ib()
+    method: Callable = attr.ib()
+    availability_check: Callable = attr.ib(default=None)
+
+    def register_command(self, ctx):
+        if self.availability_check and self.availability_check():
+            ctx.register_command(self.name, self.method)
+
+
 @attr.s
 class Player:
     """Player base player"""
@@ -311,8 +323,8 @@ class BoomBox:
             self._context.register_command(cmd, getattr(self._player, cmd))
         results = self._hook.mixtape_register_commands(player=self._player, ctx=self._context)
         results = list(itertools.chain(*results))
-        for name, method in results:
-            self._context.register_command(name, method)
+        for command in results:
+            command.register_command(self._context)
 
     def setup(self) -> None:
         self._player.setup()

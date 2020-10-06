@@ -21,6 +21,14 @@ def mixtape_plugin_init(player: Player, ctx: Context):
 def mixtape_plugin_autoload(player: Player, ctx: Context):
     pass
 
+# interface options
+
+@hookspec
+def mixtape_add_option(player: Player, ctx: Context):
+    """
+    Hook called on setup to add interface options exposed by plug-ins.
+    """
+
 # player init and teardown
 
 

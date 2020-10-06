@@ -1,7 +1,7 @@
 import asyncio
 import itertools
 import logging
-from typing import Any, Callable, List, MutableMapping, Tuple, Type, TypeVar
+from typing import Any, Callable, List, MutableMapping, Tuple, Type, TypeVar, Dict
 
 import attr
 import gi
@@ -28,6 +28,7 @@ class Context:
     def __init__(self) -> None:
         self.properties: MutableMapping[str, Any] = dict()
         self.commands: MutableMapping[str, Any] = dict()
+        self.options: MutableMapping[str, Any] = dict()
 
     def register_property(self, name: str, value: Any) -> None:
         self.properties[name] = value
@@ -37,6 +38,10 @@ class Context:
 
     def clear_commands(self):
         self.commands = {}
+
+    def add_option(self, option: Dict):
+        name = option.pop('name')
+        self.options[name] = option
 
 
 @attr.s
@@ -293,6 +298,8 @@ class BoomBox:
         self._player = player
         self._pm = pm
         self._context = Context()
+        # add all options
+        self._hook.mixtape_add_options(player=self._player, ctx=self._context)
         # init all the plugins
         self._hook.mixtape_plugin_init(player=self._player, ctx=self._context)
 

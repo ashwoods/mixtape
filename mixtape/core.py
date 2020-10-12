@@ -47,10 +47,16 @@ class Context:
 class Command:
     name: str = attr.ib()
     method: Callable = attr.ib()
-    availability_check: Callable = attr.ib(default=None)
+    availability_check: Callable = attr.ib()
+
+    @availability_check.default
+    def default_for_availability_check(self):
+        def default_true():
+            return True
+        return default_true
 
     def register_command(self, ctx):
-        if self.availability_check and self.availability_check():
+        if self.availability_check():
             ctx.register_command(self.name, self.method)
 
 

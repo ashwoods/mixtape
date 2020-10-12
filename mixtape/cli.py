@@ -82,11 +82,8 @@ def get_key_command_mapping(commands: List) -> Dict:
 async def main(description, ctx, options):
     Gst.init(None)
     
-    pipeline_string = ctx.pm.hook.mixtape_get_pipeline(description=description, options=options)
-    if not pipeline_string:
-        pipeline_string = description
-    player = await Player.from_description(pipeline_string)
-    boombox = BoomBox(player=player, pm=ctx.pm, options=options)
+    options["description"] = description
+    boombox = BoomBox(player=None, pm=ctx.pm, options=options)
     help_text = "Press key:"
     boombox.setup()
 

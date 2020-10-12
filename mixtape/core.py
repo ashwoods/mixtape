@@ -299,12 +299,14 @@ class BoomBox:
     DEFAULT_PLAYER_COMMANDS: List[str] = ["play", "pause", "stop", "ready"]
     DEFAULT_PLAYER_ATTRIBUTES: List[Any] = []
 
-    def __init__(self, player: Player, pm: Type[pluggy.PluginManager], options:dict):
+    def __init__(self, player: Player, pm: Type[pluggy.PluginManager], options: Dict=None):
         self._player = player
         self._pm = pm
-        self._options = options 
+        self._options = options
+        if self._options is None:
+            self._options = dict()
         self._context = Context()
-        for name, value in options.items():
+        for name, value in self._options.items():
             self._context.add_option(name, value)
         # init all the plugins
         self._hook.mixtape_plugin_init(player=self._player, ctx=self._context)

@@ -90,12 +90,11 @@ async def main(description, ctx, options):
     help_text = "Press key:"
     boombox.setup()
 
-    commands = boombox._context.commands
-    key_command_mapping = get_key_command_mapping(list(commands))
     session = PromptSession()
     while True:
         with patch_stdout():
-
+            commands = boombox._context.commands
+            key_command_mapping = get_key_command_mapping(list(commands))
             toolbar = bottom_toolbar(key_command_mapping)
             result = await session.prompt_async(
                 help_text, bottom_toolbar=toolbar

@@ -63,9 +63,30 @@ def mixtape_before_state_changed(player: Player, ctx: Context, state: Gst.State)
 
 
 @hookspec
-def mixtape_on_state_changed(player: Player, ctx: Context, state: Gst.State):
+def mixtape_on_state_changed_to_NULL(player: Player, ctx: Context):
     """
-    Hook called on state changed
+    Hook called on state changed to NULL
+    """
+
+
+@hookspec
+def mixtape_on_state_changed_to_READY(player: Player, ctx: Context):
+    """
+    Hook called on state changed to READY
+    """
+
+
+@hookspec
+def mixtape_on_state_changed_to_PAUSED(player: Player, ctx: Context):
+    """
+    Hook called on state changed to PAUSED
+    """
+
+
+@hookspec
+def mixtape_on_state_changed_to_PLAYING(player: Player, ctx: Context):
+    """
+    Hook called on state changed to PLAYING
     """
 
 

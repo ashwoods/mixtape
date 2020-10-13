@@ -363,7 +363,14 @@ class BoomBox:
     async def set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
         self._hook.mixtape_before_state_changed(player=self._player, ctx=self._context, state=state)
         ret = await self._player._set_state(state)
-        self._hook.mixtape_on_state_changed(player=self._player, ctx=self._context, state=state)
+        if ret == Gst.State.NULL:
+            self._hook.mixtape_on_state_changed_to_NULL(player=self._player, ctx=self._context)
+        elif ret == Gst.State.PAUSED:
+            self._hook.mixtape_on_state_changed_to_PAUSED(player=self._player, ctx=self._context)
+        elif ret == Gst.State.READY:
+            self._hook.mixtape_on_state_changed_to_READY(player=self._player, ctx=self._context)
+        elif ret == Gst.State.PLAYING:
+            self._hook.mixtape_on_state_changed_to_PLAYING(player=self._player, ctx=self._context)
         logger.info("Registering commands on state change")
         self._register_commands()
         return ret

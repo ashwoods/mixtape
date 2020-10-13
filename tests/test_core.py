@@ -70,5 +70,5 @@ def test_init_boombox_with_predefined_pipeline_from_plugin(player):
     pm = load_mixtape_plugins()
     plugin = ExamplePlugin()
     pm.register(plugin)
-    b = BoomBox(player=None, pm=pm, options={"pipeline": "test"})
+    b = BoomBox(player=None, pm=pm, pipeline="test")
     assert b

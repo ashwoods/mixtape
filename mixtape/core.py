@@ -299,7 +299,7 @@ class BoomBox:
     DEFAULT_PLAYER_COMMANDS: List[str] = ["play", "pause", "stop", "ready"]
     DEFAULT_PLAYER_ATTRIBUTES: List[Any] = []
 
-    def __init__(self, player: Player, pm: Type[pluggy.PluginManager], options: Dict = None):
+    def __init__(self, player: Player, pm: Type[pluggy.PluginManager], **options):
         self._player = player
         self._pm = pm
         self._options = options

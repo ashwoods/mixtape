@@ -83,7 +83,7 @@ async def main(description, ctx, options):
     Gst.init(None)
     
     options["description"] = description
-    boombox = BoomBox(player=None, pm=ctx.pm, options=options)
+    boombox = BoomBox(player=None, pm=ctx.pm, **options)
     help_text = "Press key:"
     boombox.setup()
 

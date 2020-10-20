@@ -47,10 +47,16 @@ class Context:
 class Command:
     name: str = attr.ib()
     method: Callable = attr.ib()
-    availability_check: Callable = attr.ib(default=None)
+    availability_check: Callable = attr.ib()
+
+    @availability_check.default
+    def default_for_availability_check(self):
+        def default_true():
+            return True
+        return default_true
 
     def register_command(self, ctx):
-        if self.availability_check and self.availability_check():
+        if self.availability_check():
             ctx.register_command(self.name, self.method)
 
 
@@ -293,15 +299,28 @@ class BoomBox:
     DEFAULT_PLAYER_COMMANDS: List[str] = ["play", "pause", "stop", "ready"]
     DEFAULT_PLAYER_ATTRIBUTES: List[Any] = []
 
-    def __init__(self, player: Player, pm: Type[pluggy.PluginManager], options:dict):
+    def __init__(self, player: Player, pm: Type[pluggy.PluginManager], **options):
         self._player = player
         self._pm = pm
-        self._options = options 
+        self._options = options
+        if self._options is None:
+            self._options = dict()
         self._context = Context()
-        for name, value in options.items():
+        for name, value in self._options.items():
             self._context.add_option(name, value)
         # init all the plugins
         self._hook.mixtape_plugin_init(player=self._player, ctx=self._context)
+
+        if not self._player:
+            pipeline_str = self._hook.mixtape_get_pipeline(ctx=self._context)
+            if not pipeline_str:
+                pipeline_str = self._context.options.get('description')
+            try:
+                pipeline = Gst.parse_launch(pipeline_str)
+            except TypeError:
+                #TODO raise correct Exception
+                raise Exception("PlayerNotAvailable: No pipeline description")
+            self._player = Player(pipeline=pipeline)
 
         # rename and monkeypatch default set state
         self._player._set_state = self._player.set_state

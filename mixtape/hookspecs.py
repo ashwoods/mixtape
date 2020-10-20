@@ -30,7 +30,7 @@ def mixtape_add_options():
     """
 
 @hookspec(firstresult=True)
-def mixtape_get_pipeline(description, options):
+def mixtape_get_pipeline(ctx: Context):
     """
     Hook allowing a plugin to return a pipeline
     """

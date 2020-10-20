@@ -8,6 +8,8 @@ from mixtape.core import Command
 
 
 class ExamplePlugin:
+    PIPELINE_STR = "videotestsrc ! fakesink"
+
     def __init__(self):
         self.state = None
 
@@ -29,6 +31,12 @@ class ExamplePlugin:
     @hookimpl
     def mixtape_register_commands(self, player, ctx):
         return [Command("clear", self.clear), Command("call", self.call)]
+
+    @hookimpl
+    def mixtape_get_pipeline(self, ctx):
+        pipeline_name = ctx.options.get("pipeline")
+        if pipeline_name == "test":
+            return self.PIPELINE_STR
 
 
 @pytest.mark.asyncio
@@ -55,4 +63,12 @@ async def test_boombox_plugin_hooks(player, pipeline, mocker):
 
     await b.stop()
     await b.clear()
+    assert b
+
+
+def test_init_boombox_with_predefined_pipeline_from_plugin(player):
+    pm = load_mixtape_plugins()
+    plugin = ExamplePlugin()
+    pm.register(plugin)
+    b = BoomBox(player=None, pm=pm, pipeline="test")
     assert b

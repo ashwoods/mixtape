@@ -1,7 +1,7 @@
 import asyncio
 import itertools
 import logging
-from typing import Any, Callable, List, MutableMapping, Tuple, Type, TypeVar
+from typing import Any, Callable, List, MutableMapping, Tuple, Type, TypeVar, Dict
 
 import attr
 import gi
@@ -28,6 +28,7 @@ class Context:
     def __init__(self) -> None:
         self.properties: MutableMapping[str, Any] = dict()
         self.commands: MutableMapping[str, Any] = dict()
+        self.options: MutableMapping[str, Any] = dict()
 
     def register_property(self, name: str, value: Any) -> None:
         self.properties[name] = value
@@ -37,6 +38,9 @@ class Context:
 
     def clear_commands(self):
         self.commands = {}
+
+    def add_option(self, name: str, value: Any) -> None:
+        self.options[name] = value
 
 
 @attr.s
@@ -74,8 +78,8 @@ class Player:
         """
         Make sure that the gstreamer pipeline is always cleaned up
         """
-        if self.state is not Gst.State.NULL:
-            self.teardown()
+    #    if self.state is not Gst.State.NULL:
+    #        self.teardown()
 
     @property
     def bus(self) -> Gst.Bus:
@@ -289,10 +293,13 @@ class BoomBox:
     DEFAULT_PLAYER_COMMANDS: List[str] = ["play", "pause", "stop", "ready"]
     DEFAULT_PLAYER_ATTRIBUTES: List[Any] = []
 
-    def __init__(self, player: Player, pm: Type[pluggy.PluginManager]):
+    def __init__(self, player: Player, pm: Type[pluggy.PluginManager], options:dict):
         self._player = player
         self._pm = pm
+        self._options = options 
         self._context = Context()
+        for name, value in options.items():
+            self._context.add_option(name, value)
         # init all the plugins
         self._hook.mixtape_plugin_init(player=self._player, ctx=self._context)
 

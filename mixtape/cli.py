@@ -51,6 +51,11 @@ class MixtapeCommand(click.Command):
             name = ctx.pm.get_name(plugin)
             option = click.Option([f"--{name}/--no-{name}"], default=True)
             params.append(option)
+        plugin_options = ctx.pm.hook.mixtape_add_options()
+        for option_group in plugin_options:
+            for option in option_group:
+                o = click.Option([f"--{option['name']}"])
+                params.append(o)
         return params
 
 
@@ -74,19 +79,22 @@ def get_key_command_mapping(commands: List) -> Dict:
                 raise Exception('More commands than lowercase letters!')
     return keyboard_mapping
 
-async def main(description, ctx):
+async def main(description, ctx, options):
     Gst.init(None)
-    player = await Player.from_description(description)
-    boombox = BoomBox(player=player, pm=ctx.pm)
+    
+    pipeline_string = ctx.pm.hook.mixtape_get_pipeline(description=description, options=options)
+    if not pipeline_string:
+        pipeline_string = description
+    player = await Player.from_description(pipeline_string)
+    boombox = BoomBox(player=player, pm=ctx.pm, options=options)
     help_text = "Press key:"
     boombox.setup()
 
-    commands = boombox._context.commands
-    key_command_mapping = get_key_command_mapping(list(commands))
     session = PromptSession()
     while True:
         with patch_stdout():
-
+            commands = boombox._context.commands
+            key_command_mapping = get_key_command_mapping(list(commands))
             toolbar = bottom_toolbar(key_command_mapping)
             result = await session.prompt_async(
                 help_text, bottom_toolbar=toolbar
@@ -99,9 +107,10 @@ async def main(description, ctx):
     boombox.teardown()
 
 @click.command(cls=MixtapeCommand)
-@click.argument("description", nargs=-1, type=click.UNPROCESSED, required=True)
+@click.argument("description", nargs=-1, type=click.UNPROCESSED, required=False)
 @click.pass_context
 def play(ctx, description, **kwargs):
     description = " ".join(description)
 
-    asyncio.run(main(description, ctx))
+    asyncio.run(main(description, ctx, kwargs))
+    

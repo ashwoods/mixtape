@@ -303,14 +303,13 @@ class BoomBox:
         self._player = player
         self._pm = pm
         self._options = options
+        self._context = Context()
+        # init options
         if self._options is None:
             self._options = dict()
-        self._context = Context()
         for name, value in self._options.items():
             self._context.add_option(name, value)
-        # init all the plugins
-        self._hook.mixtape_plugin_init(player=self._player, ctx=self._context)
-
+        # init player
         if not self._player:
             pipeline_str = self._hook.mixtape_get_pipeline(ctx=self._context)
             if not pipeline_str:
@@ -321,6 +320,9 @@ class BoomBox:
                 #TODO raise correct Exception
                 raise Exception("PlayerNotAvailable: No pipeline description")
             self._player = Player(pipeline=pipeline)
+
+        # init all the plugins
+        self._hook.mixtape_plugin_init(player=self._player, ctx=self._context)
 
         # rename and monkeypatch default set state
         self._player._set_state = self._player.set_state
@@ -363,7 +365,15 @@ class BoomBox:
     async def set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
         self._hook.mixtape_before_state_changed(player=self._player, ctx=self._context, state=state)
         ret = await self._player._set_state(state)
-        self._hook.mixtape_on_state_changed(player=self._player, ctx=self._context, state=state)
+        # check if ret is SUCCESS
+        if state == Gst.State.NULL:
+            self._hook.mixtape_on_state_changed_to_NULL(player=self._player, ctx=self._context)
+        elif state == Gst.State.PAUSED:
+            self._hook.mixtape_on_state_changed_to_PAUSED(player=self._player, ctx=self._context)
+        elif state == Gst.State.READY:
+            self._hook.mixtape_on_state_changed_to_READY(player=self._player, ctx=self._context)
+        elif state == Gst.State.PLAYING:
+            self._hook.mixtape_on_state_changed_to_PLAYING(player=self._player, ctx=self._context)
         logger.info("Registering commands on state change")
         self._register_commands()
         return ret

@@ -10,6 +10,8 @@ from gi.repository import Gst
 
 
 class States(enum.Enum):
+    """Python enum representing the Gst.Pipeline states"""
+
     VOID_PENDING = 0
     NULL = 1
     READY = 2
@@ -36,10 +38,10 @@ class TearDownEvent(asyncio.Event):
 @attr.s(auto_attribs=True, slots=True, frozen=True)
 class PlayerEvents:
     """
-    Async event syncronization flags
+    Player async event synchronization flags
     """
 
-    # simple events
+    # core events
     setup: asyncio.Event = attr.Factory(SetupEvent)
     eos: asyncio.Event = attr.Factory(EosEvent)
     error: asyncio.Event = attr.Factory(ErrorEvent)

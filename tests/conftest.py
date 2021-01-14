@@ -49,16 +49,7 @@ def pipeline(Gst):
 
 
 @pytest.fixture
-def error_pipeline(Gst):
-    """Error pipeline"""
-    ERROR_PIPELINE_DESCRIPTION = "filesrc ! queue ! fakesink"
-    pipeline = Gst.parse_launch(ERROR_PIPELINE_DESCRIPTION)
-    assert isinstance(pipeline, Gst.Pipeline)
-    return pipeline
-
-
-@pytest.fixture
 def player(Gst):
-    from mixtape.players import AsyncPlayer
+    from mixtape import Player
 
-    return AsyncPlayer
+    return Player

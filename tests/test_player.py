@@ -32,8 +32,9 @@ async def test_error_state_change_before_setup(pipeline):
 
 
 @pytest.mark.asyncio
-async def test_gst_error_on_start_exception(error_pipeline):
-    player = Player(error_pipeline)
+async def test_gst_error_on_start_exception(Gst):
+    pipeline = Gst.parse_launch("filesrc ! fakesink")
+    player = Player(pipeline)
     player.setup()
 
     with pytest.raises(PlayerSetStateError):

@@ -1,5 +1,5 @@
 class MixTapeError(Exception):
-    """Mixtape exception base clase"""
+    """Mixtape exception base class"""
 
 
 class PlayerNotConfigured(MixTapeError):
@@ -16,3 +16,7 @@ class PlayerSetStateError(MixTapeError):
 
 class PlayerPipelineError(MixTapeError):
     """Error originating from Gst Pipeline"""
+
+
+class BoomBoxNotConfigured(MixTapeError):
+    """Boombox improperly configured"""

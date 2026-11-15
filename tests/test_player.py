@@ -18,6 +18,7 @@ from mixtape.exceptions import (
     PlayerDescriptionError,
     PlayerNotConfigured,
     PlayerPipelineError,
+    PlayerSetStateError,
 )
 
 LIVE = "videotestsrc is-live=true ! fakesink sync=true"
@@ -251,6 +252,19 @@ async def test_error_ends_a_play_until_eos():
         await bounded(asyncio.to_thread(post_error, player.pipeline))
         with pytest.raises(PlayerPipelineError, match="boom"):
             await bounded(task)
+
+
+@pytest.mark.asyncio
+async def test_stop_interrupts_a_pending_play_and_play_until_eos():
+    async with Player.from_description(NEVER_PREROLLS) as player:
+        stream = player.events()
+        play = asyncio.create_task(player.play())
+        until_eos = asyncio.create_task(player.play_until_eos())
+        await wait_for_event(stream, StateChanged)
+        await bounded(player.stop())
+        for task in (play, until_eos):
+            with pytest.raises(PlayerSetStateError, match="Interrupted by a change to null"):
+                await bounded(task)
 
 
 # -- eos -- #

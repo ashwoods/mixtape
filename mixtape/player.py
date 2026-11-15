@@ -207,6 +207,7 @@ class Player:
         future = asyncio.get_running_loop().create_future()
         waiter = (state, future)
         self._state_waiters.append(waiter)
+        self._interrupt_waits(state)
         self._target = state
         self._buffering = False
         try:
@@ -271,6 +272,17 @@ class Player:
             await future
         finally:
             self._discard_eos_waiter(future)
+
+    def _interrupt_waits(self, state: Gst.State) -> None:
+        """Fail the waits a change to `state` ends: other targets, and EOS on NULL."""
+        futures = [future for target, future in self._state_waiters if target != state]
+        if state == Gst.State.NULL:
+            futures += self._eos_waiters
+        error = PlayerSetStateError(f"Interrupted by a change to {state.value_nick}")
+        for future in futures:
+            if not future.done():
+                future.set_exception(error)
+                future.exception()  # mark it retrieved: nobody may be awaiting it
 
     def _discard_eos_waiter(self, future: asyncio.Future[None]) -> None:
         future.cancel()

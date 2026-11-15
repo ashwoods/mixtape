@@ -352,7 +352,8 @@ def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Comm
         name=name,
         description=(inspect.getdoc(method) or "").partition("\n")[0] or None,
         parameters=args.model_json_schema(),
-        result=None if returns is type(None) else TypeAdapter(returns).json_schema(),
+        # built-ins return Gst values (StateChangeReturn) that are no interface's business
+        result=None if builtin or returns is type(None) else TypeAdapter(returns).json_schema(),
         builtin=builtin,
     )
     return Command(spec, args)

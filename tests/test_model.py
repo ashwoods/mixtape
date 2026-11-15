@@ -239,7 +239,8 @@ def test_bad_declarations_fail_when_the_class_is_defined():
 async def test_builtin_play_and_stop_commands_move_the_state(Gst):
     async with Player.from_description("videotestsrc is-live=true ! fakesink") as player:
         assert player.get("state") == "null"
-        await bounded(player.invoke("play"))
+        assert player.describe().commands["play"].result is None
+        assert await bounded(player.invoke("play")) is None  # not a Gst.StateChangeReturn
         assert player.get("state") == "playing"
         assert player.get("position") is None or player.get("position") >= 0
         await bounded(player.invoke("stop"))

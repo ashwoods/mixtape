@@ -284,10 +284,12 @@ class Player:
 
     @command
     async def pause(self) -> Gst.StateChangeReturn:
+        """Pause the pipeline."""
         return await self.set_state(Gst.State.PAUSED)
 
     @command
     async def play(self) -> Gst.StateChangeReturn:
+        """Play the pipeline."""
         return await self.set_state(Gst.State.PLAYING)
 
     @command
@@ -416,7 +418,9 @@ class Player:
             raise InvalidValueError(f"Invalid value for {path!r}: {problems[0].message}")
 
     async def invoke(self, name: str, **args: Any) -> Any:
-        """Call the command `name` with validated `args` and return its result."""
+        """Call the command `name` with validated `args` and return its result.
+
+        Built-in commands return None, as their specs say."""
         self.setup()
         if (declared := self._declarations().commands.get(name)) is None:
             raise UnknownNameError(f"Unknown command {name!r}")
@@ -428,7 +432,9 @@ class Player:
         result = getattr(self, name)(
             **{k: getattr(validated, k) for k in type(validated).model_fields}
         )
-        return await result if inspect.isawaitable(result) else result
+        if inspect.isawaitable(result):
+            result = await result
+        return None if declared.spec.builtin else result
 
     def _exposed_elements(self) -> dict[str, Gst.Element]:
         """The elements the model exposes: the named ones, or all with `expose_all`."""

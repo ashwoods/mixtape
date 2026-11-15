@@ -25,6 +25,8 @@ This release breaks the API.
   plays until EOS and tears down; `autoplay` and the `call_x` helpers are gone.
 - New: `setup()` attaches to the running loop, and every async method attaches lazily.
   `teardown()` is idempotent, safe after the loop closed, and the player can be re-used.
+- New: the `mixtape run "<pipeline>"` command (also `python -m mixtape`) plays a pipeline until EOS
+  or an error like `gst-launch-1.0 -e`, and makes video windows appear on macOS.
 - New: `add_handler`, `call_soon_threadsafe`, `run_coroutine_threadsafe`, `ensure_init`,
   and the `pending`, `loop` and `error` properties.
 - New default bus policy: errors are stored, logged and published, set the pipeline to NULL, and

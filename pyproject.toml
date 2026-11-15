@@ -19,6 +19,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.scripts]
+mixtape = "mixtape.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/ashwoods/mixtape"
 

@@ -7,7 +7,7 @@ import inspect
 import logging
 import warnings
 from collections import Counter
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterator
 from typing import Any, ClassVar, Self
 
 import gi
@@ -477,9 +477,18 @@ class Player:
         it, else the dotted names from below the pipeline (`a.q`). Over all elements, so the
         keys do not depend on what is exposed. The pipeline's key is always its name, and a
         top-level child of the same name has it prefixed (`pipeline0.pipeline0`)."""
+
+        def walk(bin: Gst.Bin) -> Iterator[Gst.Element]:
+            # in the order they were added, sources first in a launch line (bins list
+            # their newest child first), each bin before its children
+            for child in reversed(list(bin.iterate_elements())):
+                yield child
+                if isinstance(child, Gst.Bin):
+                    yield from walk(child)
+
         while True:
             try:  # a streaming thread adding elements (decodebin) makes the walk RESYNC
-                elements = (self.pipeline, *self.pipeline.iterate_recurse())
+                elements = (self.pipeline, *walk(self.pipeline))
                 break
             except Gst.IteratorError:
                 continue

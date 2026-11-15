@@ -542,10 +542,12 @@ class Player:
 
     def _call_soon(self, callback: Callable[..., object], *args: object) -> None:
         """`call_soon_threadsafe` for signal handlers on any thread, a no-op once detached.
-        It reads the loop once: `teardown` may clear it on the loop thread meanwhile."""
+        It reads the loop once: `teardown` may clear it on the loop thread meanwhile.
+        A loop that closed meanwhile raises RuntimeError; one the garbage collector is
+        half way through clearing (signals of a pipeline freed with it) AttributeError."""
         loop = self._loop
         if loop is not None:
-            with contextlib.suppress(RuntimeError):  # the loop closed meanwhile
+            with contextlib.suppress(RuntimeError, AttributeError):
                 loop.call_soon_threadsafe(callback, *args)
 
     def _publish(self, event: events.Event) -> None:

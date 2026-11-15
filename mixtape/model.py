@@ -6,13 +6,14 @@ types. They come from GObject introspection of the pipeline's elements plus the
 bindings (codecs, argument models) stay out of the specs, in this module.
 """
 
+import enum
 import functools
 import inspect
 import operator
 import re
 import types
 import typing
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, NamedTuple, Self, overload
 
@@ -143,12 +144,19 @@ def _to_string(value: Any) -> str | None:
 def _adapter(annotation: Any, *constraints: Any) -> TypeAdapter[Any]:
     """An adapter for a type built at runtime, with pydantic constraints on it."""
     if constraints:
-        annotation = Annotated.__getitem__((annotation, *constraints))
+        annotation = Annotated[annotation, *constraints]
     return TypeAdapter(annotation)
 
 
 def _literal(nicks: tuple[str, ...]) -> Any:
-    return Literal.__getitem__(nicks)
+    return Literal[nicks]
+
+
+def _members(gclass: Any, values: str) -> Iterable[Any]:
+    """The members of a GEnum or GFlags class. PyGObject 3.50 made them Python enums and
+    deprecated their `values` dict (`__enum_values__`, `__flags_values__`); 3.48, which
+    Ubuntu 24.04 ships, has only that dict."""
+    return gclass if isinstance(gclass, enum.EnumType) else getattr(gclass, values).values()
 
 
 def _make_codec(ps: Any) -> Codec | None:
@@ -166,7 +174,7 @@ def _make_codec(ps: Any) -> Codec | None:
         return Codec(_adapter(str | None), same, same, ps.default_value)
     if GObject.type_is_a(vt, GObject.TYPE_ENUM):
         enum_class = ps.enum_class  # kept alive by `nick`: PyGObject drops unreferenced ones
-        nicks = tuple(member.value_nick for member in enum_class)
+        nicks = tuple(member.value_nick for member in _members(enum_class, "__enum_values__"))
 
         def nick(value: Any) -> str:
             return str(enum_class(value).value_nick)
@@ -176,7 +184,7 @@ def _make_codec(ps: Any) -> Codec | None:
         flags_class = ps.flags_class  # kept alive by `combine`: PyGObject drops unreferenced ones
         zero = flags_class(0).value_nicks  # the "none" every value lists
         bits: dict[str, int] = {}
-        for member in flags_class:
+        for member in _members(flags_class, "__flags_values__"):
             if len(names := [n for n in member.value_nicks if n not in zero]) == 1:
                 bits[names[0]] = int(member)
         if not bits:

@@ -1,0 +1,10 @@
+{
+  "isolates": {
+    "worktree": {
+      "setup": ["scripts/check --collect-only -q >/dev/null 2>&1 || true"]
+    }
+  },
+  "lander": {
+    "checks": ["scripts/check"]
+  }
+}

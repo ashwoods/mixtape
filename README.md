@@ -115,12 +115,15 @@ Player.run("videotestsrc num-buffers=100 ! fakesink", timeout=30)
 
 Errors reach the code that awaits: `await player.play()` raises `PlayerPipelineError` with the
 element's message when the pipeline fails, and `player.error` keeps the last one.
-`await player.play_until_eos()` returns on the next EOS, and works again after `stop()`.
+`await player.play_until_eos()` returns on the next EOS. Calling it again plays the stream
+again, from READY when the pipeline is still at the earlier EOS.
 
 Every bus message is also an event. Subscribe with `events()` to build services on top
 of the player, and use `add_handler` to react to one kind of message:
 
 ```python
+import asyncio
+
 import gi
 
 gi.require_version("Gst", "1.0")
@@ -129,16 +132,21 @@ from gi.repository import Gst
 from mixtape import Player
 from mixtape.events import Eos, StateChanged
 
-async with Player.from_description("videotestsrc num-buffers=100 ! fakesink") as player:
-    events = player.events()
-    remove = player.add_handler(Gst.MessageType.TAG, lambda message: print(message))
-    await player.play()
-    async for event in events:
-        if isinstance(event, StateChanged):
-            print(event.old, "->", event.new)
-        elif isinstance(event, Eos):
-            break
-    remove()
+
+async def main() -> None:
+    async with Player.from_description("videotestsrc num-buffers=100 ! fakesink") as player:
+        events = player.events()
+        remove = player.add_handler(Gst.MessageType.TAG, lambda message: print(message))
+        await player.play()
+        async for event in events:
+            if isinstance(event, StateChanged):
+                print(event.old, "->", event.new)
+            elif isinstance(event, Eos):
+                break
+        remove()
+
+
+asyncio.run(main())
 ```
 
 Subclass `Player` to build an application. Override the state methods, take extra arguments,
@@ -188,21 +196,6 @@ src.link(sink)
 
 player = Player(pipe)
 ```
-
-## Player base interface (Draft)
-
-(WIP)
-
-    - Player.from_desc
-
-    - player.run
-
-    - player.play
-
-    - player.stop
-
-    - player.pause
-
 
 ## Feature interface (Draft)
 

@@ -66,6 +66,10 @@ def _setup_logging(verbose: int) -> None:
         logger.removeHandler(_log_handler)  # main() may run more than once in a process
     _log_handler = logging.StreamHandler(sys.stderr)
     _log_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    if not verbose:  # _play prints the pipeline error itself, without the debug string
+        _log_handler.addFilter(
+            lambda record: not (record.name == "mixtape.player" and record.levelno == logging.ERROR)
+        )
     logger.addHandler(_log_handler)
     logger.setLevel(level)
 

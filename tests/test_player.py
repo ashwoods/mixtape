@@ -283,6 +283,36 @@ async def test_play_until_eos_again_after_stop():
 
 
 @pytest.mark.asyncio
+async def test_play_until_eos_back_to_back():
+    async with Player.from_description("videotestsrc num-buffers=10 ! fakesink") as player:
+        await bounded(player.play_until_eos())
+        await bounded(player.play_until_eos())  # still PLAYING at EOS: restarts from READY
+
+
+@pytest.mark.asyncio
+async def test_pause_while_buffering_stays_paused(pipeline):
+    async with Player(pipeline) as player:
+        stream = player.events()
+
+        async def buffering(percent):
+            player.pipeline.post_message(Gst.Message.new_buffering(None, percent))
+            while (await wait_for_event(stream, Message)).message.type != Gst.MessageType.BUFFERING:
+                pass
+
+        def heading():
+            return player.state if player.pending == Gst.State.VOID_PENDING else player.pending
+
+        await bounded(player.play())
+        await buffering(50)
+        assert heading() == Gst.State.PAUSED
+        while player.state != Gst.State.PAUSED:
+            await wait_for_event(stream, StateChanged)
+        await bounded(player.pause())  # already PAUSED, by buffering
+        await buffering(100)  # the user's pause wins: no resume
+        assert heading() == Gst.State.PAUSED
+
+
+@pytest.mark.asyncio
 async def test_send_eos():
     async with Player.from_description(LIVE) as player:
         await bounded(player.play())

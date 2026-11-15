@@ -52,6 +52,7 @@ class Player:
         self._target = Gst.State.NULL  # what the caller asked for, to decide bus policy
         self._live = False
         self._buffering = False
+        self._eos = False  # the pipeline reached EOS and has not gone down since
         self._state_waiters: list[tuple[Gst.State, asyncio.Future[None]]] = []
         self._eos_waiters: list[asyncio.Future[None]] = []
         self._handlers: dict[object, tuple[Gst.MessageType, MessageCallback]] = {}
@@ -147,6 +148,7 @@ class Player:
             raise PlayerNotConfigured("setup needs a running asyncio loop") from exc
         if self._loop is not None and self._loop.is_closed():
             self._loop = self._fd = None  # the loop died without a teardown
+            self._events = events.Broadcast()  # and its subscribers with it
         if self._loop is loop:
             return
         if self._loop is not None:
@@ -159,7 +161,7 @@ class Player:
         """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after."""
         self.pipeline.set_state(Gst.State.NULL)
         self._target = Gst.State.NULL
-        self._live = self._buffering = False
+        self._live = self._buffering = self._eos = False
         loop, fd = self._loop, self._fd
         self._loop = self._fd = None
         waiters = [future for _, future in self._state_waiters] + self._eos_waiters
@@ -201,17 +203,19 @@ class Player:
     async def set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
         """Set the pipeline state, returning once the change is complete."""
         self.setup()
+        self._interrupt_waits(state)
+        self._target = state
+        self._buffering = False  # the caller's state wins over buffering's pause
         if self.state == state and self.pending == Gst.State.VOID_PENDING:
             return Gst.StateChangeReturn.SUCCESS
         error = self._error
         future = asyncio.get_running_loop().create_future()
         waiter = (state, future)
         self._state_waiters.append(waiter)
-        self._interrupt_waits(state)
-        self._target = state
-        self._buffering = False
         try:
             ret = self.pipeline.set_state(state)
+            if state in (Gst.State.NULL, Gst.State.READY):
+                self._eos = False  # going down flushes the stream
             if state == Gst.State.NULL:
                 self._live = False
             elif ret == Gst.StateChangeReturn.NO_PREROLL:
@@ -248,7 +252,10 @@ class Player:
                 logger.warning("No EOS after %s s, stopping anyway", timeout)
             except PlayerPipelineError:
                 pass  # already logged and the pipeline is already NULL
-        await self.set_state(Gst.State.NULL)
+            finally:
+                await self.set_state(Gst.State.NULL)
+        else:
+            await self.set_state(Gst.State.NULL)
 
     async def send_eos(self, timeout: float | None = None) -> None:
         """Send an EOS event and wait for the EOS message it causes."""
@@ -269,8 +276,12 @@ class Player:
             self._discard_eos_waiter(future)
 
     async def play_until_eos(self) -> None:
-        """Play and return on the next EOS; raise `PlayerPipelineError` on an error."""
+        """Play and return on the next EOS; raise `PlayerPipelineError` on an error.
+
+        A pipeline still at the EOS of an earlier run restarts from READY."""
         self.setup()
+        if self._eos:
+            await self.ready()
         future = asyncio.get_running_loop().create_future()
         self._eos_waiters.append(future)  # before playing, a short stream may end meanwhile
         try:
@@ -355,7 +366,7 @@ class Player:
         self._error = error
         logger.error("Error from element %s: %s (%s)", source, gerror.message, debug)
         self._target = Gst.State.NULL
-        self._live = self._buffering = False
+        self._live = self._buffering = self._eos = False
         self.pipeline.set_state(Gst.State.NULL)
         for future in [future for _, future in self._state_waiters] + self._eos_waiters:
             if not future.done():
@@ -365,6 +376,7 @@ class Player:
 
     def _on_eos(self) -> None:
         logger.info("EOS")
+        self._eos = True
         for future in self._eos_waiters:
             if not future.done():
                 future.set_result(None)

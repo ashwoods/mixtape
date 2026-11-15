@@ -277,6 +277,10 @@ async def test_stop_interrupts_a_pending_play_and_play_until_eos():
         for task in (play, until_eos):
             with pytest.raises(PlayerSetStateError, match="Interrupted by a change to null"):
                 await bounded(task)
+        # the bus flushes its messages on the way down: the player says it reached NULL
+        while (event := await wait_for_event(stream, StateChanged)).new != Gst.State.NULL:
+            pass
+        assert event.pending == Gst.State.VOID_PENDING
 
 
 # -- eos -- #

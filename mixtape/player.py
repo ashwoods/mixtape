@@ -279,7 +279,7 @@ class Player:
         waiter = (state, future)
         self._state_waiters.append(waiter)
         try:
-            ret = self.pipeline.set_state(state)
+            ret = self._set_null() if state == Gst.State.NULL else self.pipeline.set_state(state)
             if state in (Gst.State.NULL, Gst.State.READY):
                 self._eos = False  # going down flushes the stream
             if state == Gst.State.NULL:
@@ -380,6 +380,15 @@ class Player:
             await future
         finally:
             self._discard_eos_waiter(future)
+
+    def _set_null(self) -> Gst.StateChangeReturn:
+        """Set the pipeline to NULL, publishing the `StateChanged` the bus cannot: it
+        flushes its messages on the way down."""
+        old = self.state
+        ret = self.pipeline.set_state(Gst.State.NULL)
+        if old != Gst.State.NULL:
+            self._publish(events.StateChanged(old, Gst.State.NULL, Gst.State.VOID_PENDING))
+        return ret
 
     def _interrupt_waits(self, state: Gst.State) -> None:
         """Fail the waits a change to `state` ends: other targets, and EOS on NULL."""
@@ -687,7 +696,7 @@ class Player:
         logger.error("Error from element %s: %s (%s)", source, gerror.message, debug)
         self._target = Gst.State.NULL
         self._live = self._buffering = self._eos = False
-        self.pipeline.set_state(Gst.State.NULL)
+        self._set_null()
         for future in [future for _, future in self._state_waiters] + self._eos_waiters:
             if not future.done():
                 future.set_exception(error)

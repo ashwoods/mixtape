@@ -61,6 +61,11 @@ async def test_model_and_page(served: Served) -> None:
     assert response.status_code == 200
     assert response.json() == served.player.describe().model_dump(mode="json")
     assert "schema" in response.json()["elements"]["src"]["properties"]["pattern"]
+    graph = (await served.client.get("/api/graph")).json()
+    assert [(link["source"], link["sink"]) for link in graph["links"]] == [
+        ("src", "q"),
+        ("q", "sink"),
+    ]
     page = await served.client.get("/")
     assert page.status_code == 200 and "/api/model" in page.text
 

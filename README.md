@@ -138,7 +138,8 @@ own asyncio loop) controls a player from a browser:
 does not end it (errors are printed), so the page can play again. The first Ctrl-C sends EOS,
 stops and exits 0. In code: `async with mixtape.interfaces.http.serve(player, host, port)`.
 
-* `GET /` the control page, `GET /api/model` the player's `describe()`, `/docs` the OpenAPI.
+* `GET /` the control page, `GET /api/model` the player's `describe()`, `GET /api/graph` its
+  `graph()` (elements and the links between them, with their caps), `/docs` the OpenAPI.
   The page is generated from the model: transport and position, a form per command, a control
   per property, updated live. Press `/` to filter properties; "Modified" shows those that
   differ from their default.

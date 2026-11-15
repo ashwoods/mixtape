@@ -65,6 +65,10 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
     async def model() -> JSONResponse:
         return JSONResponse(player.describe().model_dump(mode="json"))
 
+    @app.get("/api/graph")
+    async def graph() -> JSONResponse:
+        return JSONResponse(player.graph().model_dump(mode="json"))
+
     for command in spec.commands.values():
 
         def make_route(name: str) -> Callable[[Request], Awaitable[dict[str, Any]]]:

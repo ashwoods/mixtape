@@ -84,6 +84,35 @@ class PlayerSpec(_Spec):
     elements: dict[str, ElementSpec]
 
 
+class NodeSpec(_Spec):
+    name: str
+    factory: str
+    parent: str | None = None
+    """The key of the bin it is in, None for the pipeline's own children"""
+    bin: bool = False
+    exposed: bool = False
+    """Whether the model has it among its elements"""
+
+
+class LinkSpec(_Spec):
+    """Data flowing between two elements that are not bins, through any bins' ghost pads."""
+
+    source: str
+    source_pad: str
+    sink: str
+    sink_pad: str
+    caps: str | None = None
+    """The negotiated caps, once there are some"""
+
+
+class GraphSpec(_Spec):
+    """A snapshot of the pipeline's topology, which changes as elements add pads."""
+
+    nodes: dict[str, NodeSpec]
+    """Every element under the pipeline by key, bins before their children"""
+    links: list[LinkSpec]
+
+
 # -- GObject value types -- #
 
 
@@ -249,12 +278,17 @@ def is_named(element: Gst.Element) -> bool:
 
 def is_user_named(element: Gst.Element) -> bool:
     """Named with `name=` by the user rather than by an element for its own children:
-    `is_named`, and inside the pipeline or a plain bin, not in playbin or decodebin
-    (whose `playsink` has no number). The pipeline itself has no parent and counts."""
+    `is_named`, and inside plain bins all the way up to the pipeline, not in playbin or
+    decodebin (whose `playsink` has no number), nor in the plain bins they make for
+    themselves (playsink's `vbin`). The pipeline itself has no parent and counts."""
+    if not is_named(element):
+        return False
     parent = element.get_parent()
-    return is_named(element) and (
-        parent is None or parent.__gtype__ in (Gst.Bin.__gtype__, Gst.Pipeline.__gtype__)
-    )
+    while parent is not None:
+        if parent.__gtype__ not in (Gst.Bin.__gtype__, Gst.Pipeline.__gtype__):
+            return False
+        parent = parent.get_parent()
+    return True
 
 
 def element_prop_spec(element: Gst.Element, key: str, ps: Any, codec: Codec) -> PropSpec:

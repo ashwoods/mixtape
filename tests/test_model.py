@@ -133,6 +133,29 @@ def test_playbins_internal_playsink_is_not_user_named(Gst):
     assert {"pb", "playsink"} <= set(everything.elements)
 
 
+def test_plain_bins_inside_an_element_are_not_the_users(Gst):
+    # playsink builds plain bins (vbin) with named children once it plays
+    player = Player.from_description("playbin name=pb uri=file:///x")
+    playsink = player.pipeline.get_by_name("playsink")
+    vbin = Gst.Bin.new("vbin")
+    vbin.add(Gst.ElementFactory.make("queue", "vqueue"))
+    playsink.add(vbin)
+    assert set(player.describe().elements) == {"pb"}
+
+
+@pytest.mark.asyncio
+async def test_the_graph_links_elements_through_bins(Gst):
+    player = Player.from_description("fakesrc ! bin.( name=a queue name=q ) ! fakesink name=k")
+    async with player:
+        await player.pause()
+        graph = player.graph()
+    assert graph.nodes["a"].bin and graph.nodes["q"].parent == "a" and graph.nodes["q"].exposed
+    (source,) = [key for key, node in graph.nodes.items() if node.factory == "fakesrc"]
+    assert not graph.nodes[source].exposed
+    assert [(link.source, link.sink) for link in graph.links] == [(source, "q"), ("q", "k")]
+    assert graph.links[0].source_pad == "src" and graph.links[0].sink_pad == "sink"
+
+
 COLLIDING = (
     "bin.( name=a queue name=q ! fakesink ) bin.( name=b queue name=q ! fakesink ) "
     "bin.( name=c queue name=only ! fakesink )"

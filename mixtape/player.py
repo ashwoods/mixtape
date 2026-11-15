@@ -7,7 +7,7 @@ import inspect
 import logging
 import warnings
 from collections import Counter
-from collections.abc import Callable, Coroutine, Iterator
+from collections.abc import Callable, Coroutine, Iterable, Iterator
 from typing import Any, ClassVar, Self
 
 import gi
@@ -33,10 +33,14 @@ from .model import (
     BUILTIN_PROPS,
     Codec,
     Declarations,
+    GraphSpec,
+    LinkSpec,
+    NodeSpec,
     PlayerSpec,
     codec_for,
     collect,
     command,
+    factory_name,
     describe_element,
     element_prop_spec,
     exposed_props,
@@ -52,6 +56,29 @@ def ensure_init() -> None:
     """Initialise GStreamer, once."""
     if not Gst.is_initialized():
         Gst.init(None)
+
+
+def _retrying[T](iterate: Callable[[], Iterable[T]]) -> list[T]:
+    """The items of a GStreamer iterator, walked again when it RESYNCs: the bin or element
+    changed under it, from a streaming thread."""
+    while True:
+        try:
+            return list(iterate())
+        except Gst.IteratorError:
+            continue
+
+
+def _real_peer(pad: Gst.Pad) -> Gst.Pad | None:
+    """The pad of an element that is not a bin that `pad` feeds, through ghost pads."""
+    peer = pad.get_peer()
+    while peer is not None:
+        if isinstance(peer, Gst.GhostPad):  # into a bin
+            peer = peer.get_target()
+        elif isinstance(ghost := peer.get_parent(), Gst.GhostPad):  # out of one
+            peer = ghost.get_peer()
+        else:
+            return peer
+    return None
 
 
 def _invalid(what: str, exc: ValidationError) -> InvalidValueError:
@@ -422,6 +449,39 @@ class Player:
             elements={key: describe_element(e, key) for key, e in self._exposed_elements().items()},
         )
 
+    def graph(self) -> GraphSpec:
+        """A snapshot of the pipeline's elements and the links between them."""
+        self.setup()
+        keys = {e: key for key, e in self._element_keys().items() if e is not self.pipeline}
+        nodes = {
+            key: NodeSpec(
+                name=e.get_name(),
+                factory=factory_name(e),
+                parent=keys.get(e.get_parent()),
+                bin=isinstance(e, Gst.Bin),
+                exposed=self._is_exposed(e),
+            )
+            for e, key in keys.items()
+        }
+        links = []
+        for element, key in keys.items():
+            if isinstance(element, Gst.Bin):
+                continue
+            for pad in _retrying(element.iterate_src_pads):
+                if (peer := _real_peer(pad)) is None or peer.get_parent_element() not in keys:
+                    continue
+                caps = pad.get_current_caps()
+                links.append(
+                    LinkSpec(
+                        source=key,
+                        source_pad=pad.get_name(),
+                        sink=keys[peer.get_parent_element()],
+                        sink_pad=peer.get_name(),
+                        caps=caps.to_string() if caps is not None else None,
+                    )
+                )
+        return GraphSpec(nodes=nodes, links=links)
+
     def get(self, path: str) -> Any:
         """Read a property by path: a built-in, an alias or `element.property`, as JSON-friendly."""
         if path in BUILTIN_PROPS:
@@ -481,17 +541,13 @@ class Player:
         def walk(bin: Gst.Bin) -> Iterator[Gst.Element]:
             # in the order they were added, sources first in a launch line (bins list
             # their newest child first), each bin before its children
-            for child in reversed(list(bin.iterate_elements())):
+            for child in reversed(_retrying(bin.iterate_elements)):
                 yield child
                 if isinstance(child, Gst.Bin):
                     yield from walk(child)
 
-        while True:
-            try:  # a streaming thread adding elements (decodebin) makes the walk RESYNC
-                elements = (self.pipeline, *walk(self.pipeline))
-                break
-            except Gst.IteratorError:
-                continue
+        # a streaming thread adding elements (decodebin) makes the walk RESYNC
+        elements = (self.pipeline, *_retrying(lambda: walk(self.pipeline)))
         counts = Counter(e.get_name() for e in elements)
         keys: dict[str, Gst.Element] = {}
         for element in elements:

@@ -255,10 +255,16 @@ class Player:
         self.setup()
         future = asyncio.get_running_loop().create_future()
         self._eos_waiters.append(future)
-        try:
-            if not self.pipeline.send_event(Gst.Event.new_eos()):
+
+        async def send_and_wait() -> None:
+            # A source blocked on a full downstream holds its lock, and send_event waits for
+            # it: send from a thread so the loop (and a second Ctrl-C) stays responsive.
+            if not await asyncio.to_thread(self.pipeline.send_event, Gst.Event.new_eos()):
                 raise MixTapeError("The pipeline did not handle the EOS event")
-            await asyncio.wait_for(future, timeout)
+            await future
+
+        try:
+            await asyncio.wait_for(send_and_wait(), timeout)
         finally:
             self._discard_eos_waiter(future)
 

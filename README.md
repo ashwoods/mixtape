@@ -77,7 +77,8 @@ Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI d
     python -m mixtape run -v videotestsrc ! fakesink
 
 It exits 0 on EOS, 1 on a pipeline error, 2 on a bad description or usage. The first Ctrl-C
-(or SIGTERM) sends EOS and stops; a second one stops at once and exits 130. `-v` logs at info
+(or SIGTERM) sends EOS and stops; a second one stops at once and exits 130, and a third kills it if
+GStreamer blocks while stopping. `-v` logs at info
 level and shows the error's debug string, `-vv` logs at debug level. On macOS, `mixtape run`
 runs the main run loop so video windows appear.
 

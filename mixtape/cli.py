@@ -39,6 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="run a pipeline until EOS or an error, like gst-launch-1.0 -e",
         description="Run a gst-launch style pipeline description until EOS or an error.",
     )
+    run.add_argument(  # also after the command; SUPPRESS keeps a count given before it
+        "-v", "--verbose", action="count", default=argparse.SUPPRESS, help="log more"
+    )
     run.add_argument("description", nargs="+", metavar="DESCRIPTION", help="the pipeline")
     run.set_defaults(handler=_run)
     return parser
@@ -90,8 +93,12 @@ async def _play(player: Player, verbose: int) -> int:
         if interrupts == 1:
             print("Interrupt: stopping (EOS)…", file=sys.stderr)
             stopping = loop.create_task(player.stop(eos=True))
-        elif main_task is not None:
-            main_task.cancel()
+        else:
+            # GStreamer can block in the teardown that follows (as it does in gst-launch):
+            # a third Ctrl-C then kills the process, as the default handler does.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            if main_task is not None:
+                main_task.cancel()
 
     signals = (signal.SIGINT, signal.SIGTERM)
     for sig in signals:

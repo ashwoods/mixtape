@@ -9,6 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 venv="${UV_PROJECT_ENVIRONMENT:-.venv}"
+[[ "$venv" = /* ]] || venv="$PWD/$venv"
 
 has_gst() {
   "$1" -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst' 2>/dev/null
@@ -16,7 +17,10 @@ has_gst() {
 
 if [[ ! -x "$venv/bin/python" ]] || ! has_gst "$venv/bin/python"; then
   python=""
-  brew_python="$(brew --prefix 2>/dev/null || true)/bin/python3"
+  brew_python=""
+  if command -v brew >/dev/null; then
+    brew_python="$(brew --prefix)/bin/python3"
+  fi
   for candidate in "${MIXTAPE_PYTHON:-}" "$brew_python" /usr/bin/python3; do
     if [[ -n "$candidate" && -x "$candidate" ]] && has_gst "$candidate"; then
       python="$candidate"
@@ -32,7 +36,14 @@ if [[ ! -x "$venv/bin/python" ]] || ! has_gst "$venv/bin/python"; then
   uv venv --clear --system-site-packages --python "$python" "$venv"
 fi
 
+# Pin uv to the venv's Python, so a UV_PYTHON or global `uv python pin`
+# cannot make `uv sync` replace the venv with one that has no gi.
+export UV_PYTHON="$venv/bin/python"
 uv sync --locked
+if ! has_gst "$venv/bin/python"; then
+  echo "uv sync replaced $venv with a Python that has no gi; remove it and run again." >&2
+  exit 1
+fi
 uv run --no-sync ruff check
 uv run --no-sync ruff format --check
 uv run --no-sync mypy

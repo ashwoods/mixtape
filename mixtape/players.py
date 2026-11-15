@@ -137,9 +137,11 @@ class Player:
             asyncio.create_task(self.events.eos.wait()),
             asyncio.create_task(self.events.error.wait()),
         }
-        _, pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
+        try:
+            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in waiters:
+                task.cancel()
 
     # -- bus message handling -- #
 

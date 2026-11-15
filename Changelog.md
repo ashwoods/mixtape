@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker test image based on Ubuntu 24.04 packages
 - Fix `Player.play_until_eos` on Python 3.11+
 
+Known issues:
+- On Python 3.14+, `Player(...)` raises `RuntimeError` outside a running event loop, because
+  `beppu.Basket` calls `asyncio.get_event_loop()`; its test is marked xfail there.
+
 ## 0.5.1 (2020-07-18)
 - Remove pygobject-stubs as test dependency
 

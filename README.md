@@ -61,7 +61,9 @@ The first run creates `.venv` from the Python that has `gi` (Homebrew's `python3
 `/usr/bin/python3`; set `MIXTAPE_PYTHON` to choose another) with `--system-site-packages`,
 so the venv sees PyGObject and GStreamer's Python overrides, then `uv sync`s the dev
 dependencies. Arguments go to pytest: `scripts/check -k eos`. After that, `uv run pytest`,
-`uv run ruff format` and `uv run mypy` work on their own.
+`uv run ruff format` and `uv run mypy` work on their own, unless `UV_PYTHON` or a global
+`uv python pin` asks for another Python (then uv replaces the venv; `scripts/check` guards
+against that). To switch to another Python, `rm -rf .venv` and run `scripts/check` again.
 
 Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI does):
 

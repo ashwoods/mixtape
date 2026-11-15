@@ -3,15 +3,1064 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
 <title>mixtape</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --surface: #f6f7f9; --hover: #f1f3f6;
+  --fg: #1c1e21; --muted: #626872; --faint: #959ba4;
+  --line: #e3e6ea; --line2: #cfd4da;
+  --accent: #2563d6; --accent-weak: #e8effc; --on-accent: #fff;
+  --ok: #158a4a; --warn: #9a6200; --warn-weak: #fcf3df; --err: #c92f2f; --err-weak: #fcebeb;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --c1: 240px; --c2: 320px; --bar-h: 56px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141518; --surface: #1b1d21; --hover: #1f2125;
+    --fg: #e2e4e8; --muted: #9aa0a9; --faint: #6b717a;
+    --line: #2a2d33; --line2: #3a3e45;
+    --accent: #6d9cff; --accent-weak: #1c2640; --on-accent: #0b1220;
+    --ok: #46c281; --warn: #e0a83c; --warn-weak: #2d2516; --err: #f06c6c; --err-weak: #331c1e;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.45 var(--sans); }
+button, input, select { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+.mono, .in { font-family: var(--mono); font-size: 12px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* -- top bar: name, state, transport, time, connection -- */
+.bar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+.bar-in {
+  max-width: 1240px; margin: 0 auto; padding: 10px 20px;
+  display: grid; align-items: center; gap: 8px 16px;
+  grid-template-columns: auto auto auto minmax(180px, 1fr) auto;
+  grid-template-areas: "brand state transport time conn";
+}
+.brand { grid-area: brand; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.brand .app { color: var(--faint); font-size: 12px; }
+.brand .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { grid-area: state; display: flex; align-items: center; gap: 6px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px;
+  border-radius: 12px; background: var(--surface); border: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12px; white-space: nowrap;
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.pill[data-state="playing"]::before { background: var(--ok); }
+.pill[data-state="paused"]::before { background: var(--warn); }
+.pill.pending::before { animation: pulse 1s ease-in-out infinite; }
+.pill .arrow { color: var(--faint); }
+.tag {
+  height: 20px; padding: 0 6px; border-radius: 4px; display: inline-flex; align-items: center;
+  font: 600 10.5px/1 var(--mono); letter-spacing: .04em; color: var(--muted); background: var(--surface); border: 1px solid var(--line);
+}
+.transport { grid-area: transport; display: flex; align-items: center; gap: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 7px; overflow: hidden; }
+.seg button + button { border-left: 1px solid var(--line2); }
+.tbtn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
+  background: var(--bg); border: 0; cursor: pointer; white-space: nowrap;
+}
+.tbtn:hover:not(:disabled) { background: var(--hover); }
+.tbtn:disabled { opacity: .45; cursor: default; }
+.tbtn svg { width: 12px; height: 12px; fill: currentColor; flex: none; }
+.tbtn[aria-pressed="true"] { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.tbtn.ghost { border: 1px solid var(--line2); border-radius: 7px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.tbtn.busy svg { display: none; }
+.tbtn.ghost.busy span { display: none; }
+.tbtn.busy::before, .busy-dot::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; flex: none; }
+.time { grid-area: time; display: flex; align-items: center; gap: 10px; min-width: 0; font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.time .dur { color: var(--muted); }
+.time input[type=range] { flex: 1; min-width: 60px; }
+.conn { grid-area: conn; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; justify-self: end; }
+.conn::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.conn[data-state="connecting"]::before { background: var(--faint); animation: pulse 1s infinite; }
+.conn[data-state="offline"] { color: var(--warn); }
+.conn[data-state="offline"]::before { background: var(--warn); animation: pulse 1s infinite; }
+.notices { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+.notices:not(:empty) { padding-bottom: 10px; }
+.notice {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; align-items: start; gap: 2px 10px;
+  padding: 6px 6px 6px 10px; border-radius: 6px; margin-top: 4px; background: var(--err-weak); color: var(--err);
+}
+.notice.warning { background: var(--warn-weak); color: var(--warn); }
+.notice .kind { font: 600 10.5px/18px var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.notice .msg { color: var(--fg); line-height: 18px; overflow-wrap: anywhere; }
+.notice .count { font: 11px/18px var(--mono); }
+.notice .when { font: 11px/18px var(--mono); color: var(--muted); }
+.notice pre { grid-column: 2 / -1; margin: 2px 0 0; font: 11px/1.4 var(--mono); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.link { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 18px; text-decoration: underline; text-decoration-color: var(--line2); text-underline-offset: 2px; }
+.link:hover { color: var(--fg); }
+.x { background: none; border: 0; width: 18px; height: 18px; border-radius: 4px; color: var(--muted); cursor: pointer; line-height: 1; padding: 0; font-size: 14px; }
+.x:hover { background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg); }
+
+/* -- page -- */
+main { max-width: 1240px; margin: 0 auto; padding: 4px 20px 64px; transition: opacity .15s; }
+body.offline main, body.offline .status, body.offline .time { opacity: .55; }
+.sec-h {
+  display: flex; align-items: center; gap: 8px; margin: 22px 0 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.sec-h .n { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint); }
+.empty { color: var(--muted); padding: 12px 8px; }
+.empty code { font-family: var(--mono); font-size: 12px; color: var(--fg); }
+
+/* -- rows: name | control | description, shared by commands and properties -- */
+.row {
+  display: grid; grid-template-columns: var(--c1) var(--c2) minmax(0, 1fr); grid-template-areas: "n c d";
+  gap: 0 16px; align-items: center; min-height: 34px; padding: 3px 10px; border-radius: 6px;
+}
+.row:hover { background: var(--hover); }
+.row > .n { grid-area: n; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.row > .c { grid-area: c; min-width: 0; }
+.row > .d { grid-area: d; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pn { font: 12px var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.row.mod .pn { color: var(--accent); }
+.row.mod .pn::after { content: " •"; }
+.row.ro .pn { color: var(--muted); }
+.d .range, .d .target { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-right: 8px; }
+.reset { visibility: hidden; margin-left: auto; flex: none; font-size: 11.5px; }
+.row.mod.rw:hover .reset, .row.mod.rw:focus-within .reset { visibility: visible; }
+.row .err { color: var(--err); font-size: 12px; padding-top: 2px; overflow-wrap: anywhere; }
+.row .busy-dot { display: none; color: var(--accent); flex: none; }
+.row.busy .busy-dot { display: inline-flex; }
+.ro-val { font: 12px var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; display: block; }
+.ro-val.null { color: var(--faint); }
+.ro-val.long { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.ro-val.long.open { display: block; }
+
+/* -- controls -- */
+.in {
+  height: 26px; width: 100%; padding: 0 8px; border: 1px solid var(--line2); border-radius: 5px;
+  background: var(--bg); min-width: 0;
+}
+.in:hover { border-color: var(--faint); }
+.in:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px var(--accent-weak); }
+.in.bad { border-color: var(--err); box-shadow: 0 0 0 2px var(--err-weak); }
+select.in { padding: 0 4px; cursor: pointer; }
+.in::placeholder { color: var(--faint); }
+.num { display: flex; align-items: center; gap: 10px; }
+.num .in { width: 96px; flex: none; }
+.num.wide .in { width: 180px; }
+input[type=range] { accent-color: var(--accent); margin: 0; height: 18px; min-width: 0; flex: 1; cursor: pointer; }
+input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+.switch {
+  appearance: none; -webkit-appearance: none; width: 30px; height: 18px; border-radius: 9px; flex: none;
+  background: var(--line2); position: relative; cursor: pointer; transition: background .12s; vertical-align: middle;
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .12s;
+}
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(12px); }
+.flags { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 4px 0; }
+.flag { display: inline-flex; align-items: center; gap: 5px; font: 12px var(--mono); cursor: pointer; white-space: nowrap; }
+.btn {
+  height: 26px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--line2); background: var(--bg);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none;
+}
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 500; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.busy::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+
+/* -- commands -- */
+.cmd { align-items: start; padding-top: 6px; padding-bottom: 6px; grid-template-areas: "n c c" "n d d"; }
+.cmd > .n { flex-direction: column; align-items: flex-start; gap: 0; padding-top: 4px; }
+.cmd .cn { font: 600 12px var(--mono); }
+.cmd .cdesc { color: var(--muted); font-size: 12px; }
+.cmd > .c { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.pf { display: inline-flex; align-items: center; gap: 6px; }
+.pf > span { font: 12px var(--mono); color: var(--muted); }
+.pf .in { width: 120px; }
+.pf .in.json { width: 200px; }
+.cmd > .d { white-space: normal; }
+.cmd .out:not(:empty) { padding-top: 6px; }
+.out { font: 12px var(--mono); color: var(--fg); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.out .ms { color: var(--faint); margin-left: 8px; }
+.out.err { color: var(--err); }
+
+/* -- elements -- */
+.tools {
+  position: sticky; top: var(--bar-h); z-index: 5; background: var(--bg);
+  display: flex; align-items: center; gap: 8px; padding: 10px 0;
+}
+.filter { position: relative; flex: 1; max-width: 420px; }
+.filter .in { height: 30px; padding-left: 28px; padding-right: 28px; font-family: var(--sans); font-size: 13px; }
+.filter svg { position: absolute; left: 9px; top: 9px; width: 12px; height: 12px; fill: none; stroke: var(--faint); stroke-width: 1.6; }
+.filter kbd { position: absolute; right: 7px; top: 6px; font: 11px/16px var(--mono); color: var(--faint); border: 1px solid var(--line2); border-radius: 4px; padding: 0 5px; }
+.filter .in:focus + kbd, .filter .in:not(:placeholder-shown) + kbd { display: none; }
+.toggle { height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line2); background: var(--bg); cursor: pointer; white-space: nowrap; font-size: 12px; }
+.toggle:hover { background: var(--hover); }
+.toggle[aria-pressed="true"] { background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 40%, var(--line2)); color: var(--accent); }
+.toggle .n { font-family: var(--mono); color: var(--faint); margin-left: 4px; }
+.toggle[aria-pressed="true"] .n { color: inherit; }
+.tools .sum { margin-left: auto; color: var(--faint); font: 12px var(--mono); white-space: nowrap; }
+.el { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+.el > summary {
+  display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; cursor: pointer; list-style: none;
+  border-radius: 7px; user-select: none;
+  position: sticky; top: calc(var(--bar-h) + var(--tools-h, 50px)); z-index: 4; background: var(--bg);
+}
+.el > summary::-webkit-details-marker { display: none; }
+.el > summary:hover { background: var(--surface); }
+.el[open] > summary { border-bottom: 1px solid var(--line); border-radius: 7px 7px 0 0; }
+.el > summary::before {
+  content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+  transform: translateY(-2px) rotate(-45deg); transition: transform .12s; flex: none; align-self: center;
+}
+.el[open] > summary::before { transform: translateY(-3px) rotate(45deg); }
+.ek { font: 600 13px var(--mono); }
+.ef { font: 12px var(--mono); color: var(--muted); }
+.ed { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ec { margin-left: auto; font: 12px var(--mono); color: var(--faint); white-space: nowrap; }
+.ec .m { color: var(--accent); margin-right: 10px; }
+.rows { padding: 4px 2px; }
+.rows .empty { padding: 6px 10px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0s !important; transition: none !important; } }
+
+@media (max-width: 1000px) {
+  :root { --c1: 200px; --c2: 280px; }
+}
+@media (max-width: 760px) {
+  .bar-in {
+    padding: 8px 12px; gap: 8px 10px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "brand brand conn" "state transport transport" "time time time";
+  }
+  .tbtn { padding: 0 10px; }
+  .tbtn .label { display: none; }
+  .transport { justify-self: end; }
+  .notices { padding: 0 12px; }
+  main { padding: 0 12px 48px; }
+  .row {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-areas: "n c" "d c";
+    gap: 0 12px; padding: 5px 8px;
+  }
+  .row > .d { font-size: 11.5px; }
+  .num.wide .in { width: 100%; }
+  .cmd { grid-template-columns: minmax(0, 1fr); grid-template-areas: "n" "c" "d"; gap: 6px; }
+  .cmd > .d:empty { display: none; }
+  .tools { flex-wrap: wrap; }
+  .filter { max-width: none; flex-basis: 100%; }
+  .filter kbd { display: none; }
+  .ed { display: none; }
+}
+</style>
 </head>
 <body>
-<h1>mixtape</h1>
-<pre id="model">loading /api/model…</pre>
+<header class="bar" id="bar">
+  <div class="bar-in">
+    <div class="brand"><span class="app">mixtape</span><span class="name" id="name">…</span></div>
+    <div class="status"><span class="pill" id="state" data-state="">—</span><span class="tag" id="eos" title="The pipeline reached end-of-stream" hidden>EOS</span></div>
+    <div class="transport" id="transport" role="group" aria-label="Transport"></div>
+    <div class="time" id="time">
+      <span id="pos">—</span>
+      <input type="range" id="seek" min="0" max="1" step="0.01" value="0" aria-label="Seek" hidden>
+      <span class="dur" id="dur" title="Duration"></span>
+    </div>
+    <div class="conn" id="conn" data-state="connecting" role="status">Connecting…</div>
+  </div>
+  <div class="notices" id="notices" aria-live="polite"></div>
+</header>
+<main id="main"></main>
 <script>
-fetch("/api/model")
-  .then((response) => response.json())
-  .then((model) => { document.getElementById("model").textContent = JSON.stringify(model, null, 2); });
+"use strict";
+
+// ---- JSON with exact 64-bit integers ------------------------------------------------------
+
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+
+/** JSON.parse, reading integers beyond 2^53 exactly as BigInt where the reviver gets the source. */
+const parseJSON = (text) => JSON.parse(text, (key, value, context) =>
+  typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
+    && context && /^-?\d+$/.test(context.source) ? BigInt(context.source) : value);
+
+/** JSON.stringify that writes BigInts as their digits. */
+const toJSON = (value, space) =>
+  JSON.stringify(value, (key, v) => typeof v === "bigint" ? `\u0000${v}\u0000` : v, space)
+    .replace(/"\\u0000(-?\d+)\\u0000"/g, "$1");
+
+/** A BigInt as a Number when that is exact. */
+const narrow = (b) => (b >= -MAX_SAFE && b <= MAX_SAFE ? Number(b) : b);
+
+// ---- small helpers -----------------------------------------------------------------------
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : String(v));
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid);
+  return el;
+}
+
+const svg = (d, cls) => {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 16 16");
+  s.setAttribute("aria-hidden", "true");
+  if (cls) s.setAttribute("class", cls);
+  s.innerHTML = d;
+  return s;
+};
+const ICONS = {
+  play: '<path d="M4.5 2.5v11l9-5.5z"/>',
+  pause: '<path d="M4 2.5h3v11H4zM9 2.5h3v11H9z"/>',
+  stop: '<path d="M3.5 3.5h9v9h-9z"/>',
+  search: '<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/>',
+};
+
+/** A float without float32 noise: 0.30000001192092896 reads 0.3. */
+function fmtNum(v) {
+  if (Number.isInteger(v)) return String(v);
+  const short = parseFloat(v.toPrecision(7));
+  return Math.fround(short) === Math.fround(v) ? String(short) : String(v);
+}
+
+function fmtTime(s) {
+  if (s == null || !Number.isFinite(s)) return "—";
+  const cs = Math.round(Math.max(0, s) * 100);
+  const hh = Math.floor(cs / 360000), mm = Math.floor(cs / 6000) % 60, ss = (cs % 6000) / 100;
+  const sec = ss.toFixed(2).padStart(5, "0");
+  return hh ? `${hh}:${String(mm).padStart(2, "0")}:${sec}` : `${mm}:${sec}`;
+}
+
+function ago(t) {
+  return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+/** The message of a failed request: the validation messages, or the detail. */
+function errText(e) {
+  if (e && Array.isArray(e.errors) && e.errors.length) {
+    return e.errors.map((x) => (x.loc && x.loc.length ? x.loc.join(".") + ": " : "") + x.msg).join("; ");
+  }
+  return (e && e.detail) || String(e);
+}
+
+// ---- schemas -----------------------------------------------------------------------------
+
+/** What control a value schema gets: {kind, s (the schema without its null branch), nullable}. */
+function describe(schema) {
+  let s = schema || {}, nullable = false;
+  if (Array.isArray(s.anyOf)) {
+    const rest = s.anyOf.filter((x) => !(x && x.type === "null"));
+    nullable = rest.length < s.anyOf.length;
+    if (rest.length !== 1) return { kind: "json", s, nullable };
+    const { anyOf, ...outer } = s;
+    s = { ...rest[0], ...outer };
+  }
+  let kind = "json";
+  if (Array.isArray(s.enum)) kind = "enum";
+  else if (s.type === "boolean") kind = "bool";
+  else if (s.type === "integer") kind = "int";
+  else if (s.type === "number") kind = "num";
+  else if (s.type === "string") kind = "text";
+  else if (s.type === "array" && s.items && Array.isArray(s.items.enum)) kind = "flags";
+  return { kind, s, nullable };
+}
+
+/** A bound the page can use; those beyond 2^53 (or not numbers) are open. */
+const bound = (b) => (typeof b === "number" && Math.abs(b) <= Number.MAX_SAFE_INTEGER ? b : null);
+
+const POWERS = new Map([[2147483647, "2³¹−1"], [-2147483648, "−2³¹"], [4294967295, "2³²−1"]]);
+function rangeText(s) {
+  const lo = bound(s.minimum), hi = bound(s.maximum), f = (x) => POWERS.get(x) || fmtNum(x);
+  if (lo != null && hi != null) return `${f(lo)} – ${f(hi)}`;
+  if (lo != null) return `≥ ${f(lo)}`;
+  if (hi != null) return `≤ ${f(hi)}`;
+  return "";
+}
+
+function fmtValue(v, d) {
+  if (v === undefined) return "";
+  if (v === null) return "null";
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "number") {
+    // only without the reviver's source: the digits past 2^53 are lost
+    if (d.kind === "int" && !Number.isSafeInteger(v)) return "≈ " + v;
+    return fmtNum(v);
+  }
+  if (typeof v === "string") return v;
+  if (typeof v === "boolean") return String(v);
+  if (Array.isArray(v) && d.kind === "flags") return v.length ? v.join(" | ") : "(none)";
+  return toJSON(v);
+}
+
+function parseText(text, d) {
+  const t = text.trim();
+  if (d.kind === "text") return { ok: true, value: text === "" && d.nullable ? null : text };
+  if (t === "") return d.nullable ? { ok: true, value: null } : { ok: false, error: "Enter a value" };
+  if (d.kind === "int") {
+    const m = /^([-+]?)(0x[0-9a-f]+|\d+)$/i.exec(t);
+    if (!m) return { ok: false, error: "Not an integer" };
+    const b = BigInt(m[2]);
+    return { ok: true, value: narrow(m[1] === "-" ? -b : b) };
+  }
+  if (d.kind === "num") {
+    const n = Number(t);
+    return Number.isFinite(n) ? { ok: true, value: n } : { ok: false, error: "Not a number" };
+  }
+  try { return { ok: true, value: parseJSON(t) }; } catch { return { ok: false, error: "Not valid JSON" }; }
+}
+
+const canon = (v) => toJSON(Array.isArray(v) ? [...v].sort() : v);
+
+// ---- controls ----------------------------------------------------------------------------
+// A control shows a value and reads one back. `onCommit(value)` fires when the user settles on
+// a value (a toggle, a select, Enter or blur in a field, a slider move); `editing()` is true
+// while the user holds a value the page must not overwrite.
+
+function makeControl(d, opts = {}) {
+  const { onCommit, onRevert, onEnter, param } = opts;
+  const s = d.s;
+  const commit = (v) => onCommit && onCommit(v);
+
+  if (d.kind === "bool") {
+    const el = h("input", { type: "checkbox", class: "switch", role: "switch" });
+    el.addEventListener("change", () => commit(el.checked));
+    return { el, show(v) { el.checked = v === true; }, read: () => ({ ok: true, value: el.checked }),
+      editing: () => false, accept() {}, fail() {}, empty: () => false };
+  }
+
+  if (d.kind === "enum") {
+    const el = h("select", { class: "in" });
+    el.append(h("option", { value: "", text: param && s.default !== undefined ? `${s.default} (default)` : "—" }));
+    s.enum.forEach((nick, i) => el.append(h("option", {
+      value: String(i), text: !param && nick === s.default ? `${nick}  (default)` : String(nick) })));
+    if (!param) el.firstChild.hidden = true;
+    el.addEventListener("change", () => el.value !== "" && commit(s.enum[+el.value]));
+    if (onEnter) el.addEventListener("keydown", (e) => e.key === "Enter" && onEnter());
+    return { el, show(v) { const i = s.enum.indexOf(v); el.value = i < 0 ? "" : String(i); },
+      read: () => ({ ok: true, value: s.enum[+el.value] }), editing: () => false, accept() {}, fail() {},
+      empty: () => el.value === "" };
+  }
+
+  if (d.kind === "flags") {
+    const boxes = s.items.enum.map((nick) => [nick, h("input", { type: "checkbox" })]);
+    const read = () => ({ ok: true, value: boxes.filter(([, cb]) => cb.checked).map(([n]) => n) });
+    const el = h("div", { class: "flags" },
+      boxes.map(([nick, cb]) => h("label", { class: "flag" }, cb, h("span", { text: nick }))));
+    for (const [, cb] of boxes) cb.addEventListener("change", () => commit(read().value));
+    return { el, show(v) { const on = new Set(Array.isArray(v) ? v : []); for (const [n, cb] of boxes) cb.checked = on.has(n); },
+      read, editing: () => false, accept() {}, fail() {}, empty: () => false };
+  }
+
+  // a text field: integers, numbers, strings, caps, structures and JSON
+  const numeric = d.kind === "int" || d.kind === "num";
+  const lo = bound(s.minimum), hi = bound(s.maximum);
+  const inp = h("input", {
+    type: "text", class: "in" + (d.kind === "json" ? " json" : ""), spellcheck: "false", autocomplete: "off",
+    autocapitalize: "off", inputmode: d.kind === "int" ? "numeric" : d.kind === "num" ? "decimal" : null,
+    "aria-label": opts.label,
+  });
+  if (opts.placeholder) inp.placeholder = opts.placeholder;
+  let slider = null;
+  if (!param && numeric && lo != null && hi != null && hi > lo && hi - lo <= 1000) {
+    const step = d.kind === "int" ? 1 : 10 ** Math.floor(Math.log10((hi - lo) / 200));
+    slider = h("input", { type: "range", min: lo, max: hi, step, tabindex: "-1", "aria-hidden": "true" });
+  }
+  let shown = "", sent = null, dragging = false;
+  const asText = (v) => (v === undefined || v === null ? "" : d.kind === "json" ? toJSON(v) : fmtValue(v, d));
+  const settle = () => {
+    if (inp.value === shown || inp.value === sent) return;
+    const r = parseText(inp.value, d);
+    if (!r.ok) { inp.classList.add("bad"); opts.onInvalid && opts.onInvalid(r.error); return; }
+    inp.classList.remove("bad");
+    sent = inp.value;
+    commit(r.value);
+  };
+  const step = (dir, big) => {
+    const r = parseText(inp.value || shown || "0", d);
+    if (!r.ok || r.value === null) return;
+    let v;
+    if (d.kind === "int") {
+      let b = BigInt(r.value) + BigInt(dir * (big ? 10 : 1));
+      if (lo != null && b < BigInt(lo)) b = BigInt(lo);
+      if (hi != null && b > BigInt(hi)) b = BigInt(hi);
+      v = narrow(b);
+    } else {
+      const unit = slider ? Number(slider.step) : 0.1;
+      v = parseFloat((r.value + dir * unit * (big ? 10 : 1)).toPrecision(12));
+      if (lo != null) v = Math.max(lo, v);
+      if (hi != null) v = Math.min(hi, v);
+    }
+    inp.value = asText(v);
+    if (slider) slider.value = String(v);
+    if (!param) settle();
+  };
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); param ? onEnter && onEnter() : settle(); }
+    else if (e.key === "Escape" && !param) { inp.value = shown; sent = null; inp.classList.remove("bad"); onRevert && onRevert(); }
+    else if (numeric && (e.key === "ArrowUp" || e.key === "ArrowDown")) { e.preventDefault(); step(e.key === "ArrowUp" ? 1 : -1, e.shiftKey); }
+  });
+  inp.addEventListener("input", () => inp.classList.remove("bad"));
+  if (!param) inp.addEventListener("blur", settle);
+  if (slider) {
+    slider.addEventListener("pointerdown", () => { dragging = true; });
+    const release = () => { dragging = false; };
+    slider.addEventListener("pointerup", release);
+    slider.addEventListener("pointercancel", release);
+    slider.addEventListener("change", release);
+    slider.addEventListener("input", () => {
+      const v = d.kind === "int" ? Number(slider.value) : parseFloat(Number(slider.value).toPrecision(12));
+      inp.value = asText(v);
+      inp.classList.remove("bad");
+      sent = inp.value;
+      commit(v);
+    });
+  }
+  const el = numeric && !param ? h("div", { class: "num" + (slider ? "" : " wide") }, inp, slider) : inp;
+  return {
+    el,
+    show(v) {
+      shown = asText(v);
+      inp.value = shown;
+      sent = null;
+      inp.classList.remove("bad");
+      if (slider && !dragging && typeof v === "number") slider.value = String(v);
+    },
+    read: () => parseText(inp.value, d),
+    editing: () => dragging || inp.value !== shown,
+    accept() { if (inp.value === sent) shown = inp.value; sent = null; },  // the value sent is now the value
+    fail() { sent = null; inp.classList.add("bad"); },
+    empty: () => inp.value.trim() === "",
+  };
+}
+
+// ---- state -------------------------------------------------------------------------------
+
+let model = null, modelText = null;
+let values = new Map();        // element path (or built-in name) → value
+let aliasTarget = new Map();   // alias name → element path
+let rowsByPath = new Map();    // element path → property rows showing it
+let allRows = [], sections = [];
+let pendingState = null, atEos = false, seekHold = false;
+const ui = { filter: "", modified: false, open: new Map() };
+
+const canonPath = (p) => aliasTarget.get(p) || p;
+
+function setValue(path, value) {
+  const p = canonPath(path);
+  values.set(p, value);
+  for (const row of rowsByPath.get(p) || []) row.update();
+  if (p === "state") updateTransport();
+  if (p === "position" || p === "duration") updateTime();
+  scheduleSummary();
+}
+
+// ---- connection --------------------------------------------------------------------------
+
+let ws = null, seq = 0, retry = 0;
+const replies = new Map();
+
+function request(msg) {
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return reject({ detail: "Not connected to the player" });
+    const id = ++seq;
+    replies.set(id, { resolve, reject });
+    ws.send(toJSON({ id, ...msg }));
+  });
+}
+
+function setConn(state) {
+  const el = document.getElementById("conn");
+  el.dataset.state = state;
+  el.textContent = { live: "Connected", connecting: "Connecting…", offline: "Disconnected · reconnecting…" }[state];
+  document.body.classList.toggle("offline", state !== "live");
+  document.getElementById("main").inert = state !== "live";
+  document.getElementById("transport").inert = state !== "live";
+  document.getElementById("seek").disabled = state !== "live";
+}
+
+async function connect() {
+  setConn(model ? "offline" : "connecting");
+  let text;
+  try {
+    const r = await fetch("/api/model", { cache: "no-store" });
+    if (!r.ok) throw new Error(String(r.status));
+    text = await r.text();
+  } catch {
+    return reconnectLater();
+  }
+  if (text !== modelText) { modelText = text; build(parseJSON(text)); }
+  const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/events`);
+  ws = sock;
+  sock.onmessage = (e) => onMessage(parseJSON(e.data));
+  sock.onclose = () => {
+    if (ws !== sock) return;
+    ws = null;
+    for (const { reject } of replies.values()) reject({ detail: "The connection was lost" });
+    replies.clear();
+    reconnectLater();
+  };
+}
+
+function reconnectLater() {
+  setConn(model ? "offline" : "connecting");
+  setTimeout(connect, Math.min(5000, 400 * 2 ** retry++));
+}
+
+function onMessage(m) {
+  switch (m.type) {
+    case "values":
+      retry = 0;
+      values = new Map();
+      for (const [p, v] of Object.entries(m.values)) values.set(canonPath(p), v);
+      pendingState = null;
+      atEos = false;  // unknown on a new connection: the server may have restarted
+      for (const row of allRows) row.update();
+      updateTransport(); updateTime(); scheduleSummary();
+      setConn("live");
+      break;
+    case "state":
+      values.set("state", m.new);
+      pendingState = m.pending && m.pending !== "void-pending" ? m.pending : null;
+      if (m.new !== m.old) atEos = false;
+      updateTransport();
+      break;
+    case "property": setValue(m.path, m.value); break;
+    case "position":
+      values.set("position", m.position);
+      values.set("duration", m.duration);
+      updateTime();
+      break;
+    case "eos": atEos = true; updateTransport(); break;
+    case "error": case "warning":
+      notice(m.type, m.source ? `${m.source}: ${m.message}` : m.message, m.debug);
+      if (m.type === "error") setTimeout(refreshState, 300); // a failed change posts no state event
+      break;
+    case "reply": {
+      const r = replies.get(m.id);
+      if (!r) break;
+      replies.delete(m.id);
+      "error" in m ? r.reject(m.error) : r.resolve(m.result);
+      break;
+    }
+  }
+}
+
+// ---- notices: pipeline errors and warnings, and failed transport commands -----------------
+
+let notices = [];
+
+function notice(kind, text, debug, fromReply = false, label = kind) {
+  const last = notices[0];
+  if (last && last.text === text) {
+    // a failed `play` replies with the error the bus posts too: one notice for the pair
+    const pair = last.fromReply !== fromReply && Date.now() - last.at < 3000;
+    if (!pair) { last.count++; last.at = Date.now(); }
+    last.debug = last.debug || debug;
+    last.fromReply = fromReply;
+  } else {
+    notices.unshift({ kind, label, text, debug, at: Date.now(), count: 1, open: false, fromReply });
+    notices = notices.slice(0, 5);
+  }
+  renderNotices();
+}
+const replyNotice = (command, text) => notice("error", text, null, true, `${command} failed`);
+
+function renderNotices() {
+  const box = document.getElementById("notices");
+  box.replaceChildren(...notices.map((n) => {
+    const item = h("div", { class: "notice " + n.kind, role: n.kind === "error" ? "alert" : null },
+      h("span", { class: "kind", text: n.label }),
+      h("span", { class: "msg", text: n.text }),
+      n.count > 1 ? h("span", { class: "count", text: `×${n.count}` }) : h("span"),
+      n.debug ? h("button", { class: "link", text: n.open ? "Hide details" : "Details",
+        onclick: () => { n.open = !n.open; renderNotices(); } }) : h("span"),
+      h("span", { class: "when", text: ago(n.at) }),
+    );
+    item.append(h("button", { class: "x", title: "Dismiss", "aria-label": "Dismiss", text: "×",
+      onclick: () => { notices = notices.filter((x) => x !== n); renderNotices(); } }));
+    if (n.open && n.debug) item.append(h("pre", { text: n.debug }));
+    return item;
+  }));
+  if (notices.length > 1) {
+    box.append(h("div", { style: "text-align:right;padding-top:4px" },
+      h("button", { class: "link", text: "Clear all", onclick: () => { notices = []; renderNotices(); } })));
+  }
+}
+
+// ---- transport ---------------------------------------------------------------------------
+
+const TRANSPORT = [
+  ["play", "Play", "playing"], ["pause", "Pause", "paused"], ["stop", "Stop", null],
+];
+
+function buildTransport() {
+  const box = document.getElementById("transport");
+  const seg = h("div", { class: "seg" });
+  for (const [name, label] of TRANSPORT) {
+    const c = model.commands[name];
+    if (!c || !c.builtin) continue;
+    seg.append(h("button", { class: "tbtn", "data-cmd": name, "aria-pressed": "false", title: c.description,
+      onclick: (e) => transport(e.currentTarget, name) }, svg(ICONS[name]), h("span", { class: "label", text: label })));
+  }
+  const eos = model.commands.eos;
+  box.replaceChildren(seg.childElementCount ? seg : "",
+    eos && eos.builtin ? h("button", { class: "tbtn ghost", "data-cmd": "eos", title: "Send end-of-stream and wait for it",
+      onclick: (e) => transport(e.currentTarget, "eos") }, h("span", { text: "EOS" })) : "");
+  document.getElementById("seek").hidden = true;
+}
+
+async function transport(button, name, args = {}) {
+  button && button.classList.add("busy");
+  try {
+    await request({ command: name, args });
+    if (name === "stop" || name === "seek") { atEos = false; updateTransport(); }
+  } catch (e) {
+    replyNotice(name, errText(e));
+  } finally {
+    button && button.classList.remove("busy");
+  }
+  await refreshState();
+}
+
+/** Read the state back: the change to NULL (`stop`) posts no state event. */
+async function refreshState() {
+  try {
+    const r = await fetch("/api/properties", { cache: "no-store" });
+    if (!r.ok) return;
+    const now = parseJSON(await r.text());
+    if (now.state && now.state !== values.get("state")) {
+      values.set("state", now.state);
+      pendingState = null;
+      updateTransport();
+    }
+  } catch { /* offline: the reconnect reads everything */ }
+}
+
+function updateTransport() {
+  const state = values.get("state");
+  const pill = document.getElementById("state");
+  pill.dataset.state = state || "";
+  pill.classList.toggle("pending", !!pendingState);
+  pill.replaceChildren(state || "—", ...(pendingState ? [h("span", { class: "arrow", text: "→" }), pendingState] : []));
+  pill.title = pendingState ? `State: ${state}, changing to ${pendingState}` : `State: ${state}`;
+  document.getElementById("eos").hidden = !atEos;
+  const eosButton = document.querySelector('#transport [data-cmd="eos"]');
+  if (eosButton) eosButton.disabled = state !== "playing" || atEos;
+  const target = pendingState || state;
+  for (const [name, , st] of TRANSPORT) {
+    const b = document.querySelector(`#transport [data-cmd="${name}"]`);
+    if (b) b.setAttribute("aria-pressed", String(st ? target === st : target === "null" || target === "ready"));
+  }
+  if (model) document.title = `${model.name} · ${state || "…"} — mixtape`;
+}
+
+function updateTime() {
+  const pos = values.get("position"), dur = values.get("duration");
+  const seek = document.getElementById("seek");
+  const seekable = dur != null && dur > 0 && model && model.commands.seek;
+  seek.hidden = !seekable;
+  document.getElementById("time").hidden = pos == null && !seekable;
+  if (!seekHold) document.getElementById("pos").textContent = fmtTime(pos);
+  document.getElementById("dur").textContent = seekable ? fmtTime(dur) : "";
+  if (seekable && !seekHold) { seek.max = String(dur); seek.value = String(pos || 0); }
+}
+
+function wireSeek() {
+  const seek = document.getElementById("seek");
+  seek.addEventListener("pointerdown", () => { seekHold = true; });
+  seek.addEventListener("input", () => {
+    seekHold = true;
+    document.getElementById("pos").textContent = fmtTime(Number(seek.value));
+  });
+  seek.addEventListener("change", async () => {
+    seekHold = true;
+    await transport(null, "seek", { position: Number(seek.value) });
+    seekHold = false;
+    updateTime();
+  });
+}
+
+// ---- property rows -----------------------------------------------------------------------
+
+function propertyRow(spec, label, extra) {
+  const d = describe(spec.schema);
+  const path = canonPath(spec.path);
+  const def = d.s.default;
+  const row = { spec, path, inflight: false, queued: null, mod: false };
+  const err = h("div", { class: "err", hidden: true });
+  const setError = (msg) => { err.textContent = msg || ""; err.hidden = !msg; };
+  let busyTimer = 0;
+  const range = d.kind === "int" || d.kind === "num" ? rangeText(d.s) : "";
+  const desc = spec.description || d.s.description || "";
+  let ctl = null, ro = null;
+
+  async function commit(value) {
+    if (row.inflight) { row.queued = { value }; return; }  // a slider: send the latest when this lands
+    row.inflight = true;
+    setError(null);
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(() => el.classList.add("busy"), 150);
+    try {
+      const result = await request({ set: { [spec.path]: value } });
+      if (!row.queued) ctl.accept();
+      for (const [p, v] of Object.entries(result || {})) setValue(p, v);
+    } catch (e) {
+      ctl.fail();
+      setError(errText(e));
+    }
+    row.inflight = false;
+    if (row.queued) { const q = row.queued; row.queued = null; return commit(q.value); }
+    clearTimeout(busyTimer);
+    el.classList.remove("busy");
+    row.update();
+  }
+
+  if (spec.writable) {
+    ctl = makeControl(d, { onCommit: commit, onRevert: () => { setError(null); row.update(); },
+      onInvalid: setError, label: spec.path });
+  } else {
+    ro = h("span", { class: "ro-val" });
+  }
+
+  const reset = spec.writable && spec.readable && def !== undefined
+    ? h("button", { class: "link reset", text: "reset", title: `Set to the default, ${fmtValue(def, d)}`,
+        onclick: () => { ctl.show(def); commit(def); } })
+    : null;
+
+  const el = h("div", { class: "row prop" + (spec.writable ? " rw" : " ro"), "data-path": spec.path },
+    h("div", { class: "n" },
+      h("span", { class: "pn", text: label, title: spec.path }), h("span", { class: "busy-dot" }), reset),
+    h("div", { class: "c" }, ctl ? ctl.el : ro, err),
+    h("div", { class: "d", title: [range, desc].filter(Boolean).join("  ·  ") || null },
+      extra ? h("span", { class: "target", text: extra }) : null,
+      !spec.readable ? h("span", { class: "target", text: "write-only" }) : null,
+      range ? h("span", { class: "range", text: range }) : null,
+      desc));
+
+  row.el = el;
+  row.search = `${spec.path} ${label} ${desc}`.toLowerCase();
+  row.update = () => {
+    const has = values.has(path), v = values.get(path);
+    if (ro) {
+      const text = has ? fmtValue(v, d) : "";
+      ro.textContent = text;
+      ro.classList.toggle("null", v == null);
+      ro.classList.toggle("long", text.length > 90);
+      ro.onclick = text.length > 90 ? () => ro.classList.toggle("open") : null;
+    } else if (!row.inflight && !ctl.editing()) {
+      ctl.show(spec.readable ? v : undefined);
+    }
+    row.mod = spec.readable && spec.writable && has && def !== undefined && canon(v) !== canon(def);
+    el.classList.toggle("mod", row.mod);
+  };
+  if (!rowsByPath.has(path)) rowsByPath.set(path, []);
+  rowsByPath.get(path).push(row);
+  allRows.push(row);
+  return row;
+}
+
+// ---- commands ----------------------------------------------------------------------------
+
+function commandRow(c) {
+  const params = (c.parameters && c.parameters.properties) || {};
+  const required = new Set((c.parameters && c.parameters.required) || []);
+  const out = h("div", { class: "out" });
+  let run;
+  const fields = Object.entries(params).map(([name, schema]) => {
+    const d = describe(schema);
+    const def = d.s.default;
+    const ctl = makeControl(d, {
+      param: true, label: name, onEnter: () => run(),
+      placeholder: def !== undefined ? fmtValue(def, d) : required.has(name) ? "required" : d.nullable ? "null" : "",
+    });
+    if (def !== undefined && (d.kind === "bool" || d.kind === "flags")) ctl.show(def);
+    const title = [schema.description, d.kind === "json" ? "JSON" : null].filter(Boolean).join(" · ") || null;
+    return { name, d, ctl, el: h("label", { class: "pf", title }, h("span", { text: name }), ctl.el) };
+  });
+  const button = h("button", { class: "btn primary", type: "button", text: "Run" });
+
+  run = async () => {
+    if (button.classList.contains("busy")) return;
+    const args = {};
+    for (const f of fields) {
+      f.ctl.el.classList && f.ctl.el.classList.remove("bad");
+      if (f.ctl.empty()) continue;  // the default, or the server says it is required
+      const r = f.ctl.read();
+      if (!r.ok) { f.ctl.fail(); out.className = "out err"; out.textContent = `${f.name}: ${r.error}`; return; }
+      args[f.name] = r.value;
+    }
+    button.classList.add("busy");
+    button.textContent = "Running";
+    out.className = "out";
+    const t0 = performance.now();
+    try {
+      const result = await request({ command: c.name, args });
+      const ms = Math.round(performance.now() - t0);
+      out.replaceChildren(result === null || result === undefined ? "✓ done" : "→ " + toJSON(result, 2),
+        h("span", { class: "ms", text: `${ms} ms` }));
+    } catch (e) {
+      out.className = "out err";
+      out.textContent = errText(e);
+      for (const x of (e && e.errors) || []) {
+        const f = fields.find((f) => x.loc && x.loc[0] === f.name);
+        if (f) f.ctl.fail();
+      }
+    } finally {
+      button.classList.remove("busy");
+      button.textContent = "Run";
+    }
+  };
+  button.addEventListener("click", run);
+
+  return h("div", { class: "row cmd" },
+    h("div", { class: "n" }, h("span", { class: "cn", text: c.name }),
+      c.description ? h("span", { class: "cdesc", text: c.description }) : null),
+    h("div", { class: "c" }, fields.map((f) => f.el), button),
+    h("div", { class: "d" }, out));
+}
+
+// ---- elements: filter, sections ----------------------------------------------------------
+
+let summaryQueued = false;
+function scheduleSummary() {
+  if (summaryQueued) return;
+  summaryQueued = true;
+  requestAnimationFrame(() => { summaryQueued = false; applyFilter(); });
+}
+
+function applyFilter() {
+  const q = ui.filter.trim().toLowerCase();
+  const filtering = q !== "" || ui.modified;
+  let shown = 0, total = 0, modified = 0, visibleSections = 0;
+  for (const sec of sections) {
+    const whole = q === "" || sec.search.includes(q);
+    let n = 0, m = 0;
+    for (const row of sec.rows) {
+      const vis = (whole || row.search.includes(q)) && (!ui.modified || row.mod);
+      row.el.hidden = !vis;
+      if (vis) n++;
+      if (row.mod) m++;
+    }
+    total += sec.rows.length; modified += m; shown += n;
+    const vis = !filtering || n > 0 || (whole && q !== "" && !ui.modified);
+    sec.el.hidden = !vis;
+    if (vis) visibleSections++;
+    sec.count.replaceChildren(m ? h("span", { class: "m", text: `${m} modified` }) : "",
+      filtering ? `${n} / ${sec.rows.length}` : String(sec.rows.length));
+    const open = filtering ? true : ui.open.has(sec.key) ? ui.open.get(sec.key) : sec.defaultOpen;
+    if (sec.el.open !== open) sec.el.open = open;
+  }
+  const tools = document.getElementById("tools");
+  if (!tools) return;
+  tools.querySelector(".mod-n").textContent = String(modified);
+  tools.querySelector(".sum").textContent = filtering
+    ? `${shown} of ${total} properties`
+    : `${total} properties · ${sections.length} element${sections.length === 1 ? "" : "s"}`;
+  const none = document.getElementById("no-match");
+  none.hidden = !filtering || visibleSections > 0;
+  none.textContent = ui.modified && q === "" ? "No property differs from its default."
+    : `No property matches “${ui.filter.trim()}”${ui.modified ? " among the modified ones" : ""}.`;
+  const all = tools.querySelector(".all");
+  all.hidden = filtering || sections.length < 2;
+  all.textContent = sections.some((s) => !s.el.open) ? "Expand all" : "Collapse all";
+}
+
+function buildElements(main) {
+  const elements = Object.entries(model.elements);
+  const total = elements.reduce((n, [, e]) => n + Object.keys(e.properties).length, 0);
+  main.append(h("h2", { class: "sec-h" }, "Elements"));
+  if (!elements.length) {
+    main.append(h("div", { class: "empty" }, "No element is exposed. Name one in the pipeline (",
+      h("code", { text: "videobalance name=bal" }), ") or run with ", h("code", { text: "--expose-all" }), "."));
+    return;
+  }
+  const filter = h("input", { class: "in", type: "search", placeholder: "Filter properties", "aria-label": "Filter properties",
+    value: ui.filter, oninput: (e) => { ui.filter = e.target.value; applyFilter(); },
+    onkeydown: (e) => { if (e.key === "Escape") { e.target.value = ui.filter = ""; applyFilter(); e.target.blur(); } } });
+  const modBtn = h("button", { class: "toggle", "aria-pressed": String(ui.modified), title: "Only properties that differ from their default",
+    onclick: () => { ui.modified = !ui.modified; modBtn.setAttribute("aria-pressed", String(ui.modified)); applyFilter(); } },
+    "Modified", h("span", { class: "n mod-n", text: "0" }));
+  const allBtn = h("button", { class: "toggle all", onclick: () => {
+    const open = sections.some((s) => !s.el.open);
+    for (const s of sections) ui.open.set(s.key, open);
+    applyFilter();
+  } });
+  main.append(h("div", { class: "tools", id: "tools" },
+    h("div", { class: "filter" }, svg(ICONS.search), filter, h("kbd", { text: "/" })), modBtn, allBtn, h("span", { class: "sum" })));
+  heights.observe(document.getElementById("tools"));
+  main.append(h("div", { class: "empty", id: "no-match", hidden: true }));
+
+  for (const [key, e] of elements) {
+    const props = Object.entries(e.properties);
+    const count = h("span", { class: "ec" });
+    const summary = h("summary", {},
+      h("span", { class: "ek", text: key }),
+      e.factory !== key ? h("span", { class: "ef", text: e.factory }) : null,
+      e.description ? h("span", { class: "ed", text: e.description }) : null,
+      count);
+    const rows = props.map(([name, spec]) => propertyRow(spec, name));
+    const el = h("details", { class: "el", "data-element": key }, summary,
+      h("div", { class: "rows" }, rows.length ? rows.map((r) => r.el) : h("div", { class: "empty", text: "No properties." })));
+    const sec = { key, el, rows, count, search: `${key} ${e.factory} ${e.description || ""}`.toLowerCase(),
+      defaultOpen: total <= 80 && rows.length > 0 };
+    summary.addEventListener("click", () => { ui.open.set(key, !el.open); setTimeout(applyFilter); });
+    sections.push(sec);
+    main.append(el);
+  }
+}
+
+function build(m) {
+  model = m;
+  aliasTarget = new Map(Object.values(m.properties).filter((p) => p.target).map((p) => [p.path, p.target]));
+  rowsByPath = new Map(); allRows = []; sections = [];
+  document.getElementById("name").textContent = m.name;
+  buildTransport();
+
+  const main = document.getElementById("main");
+  main.replaceChildren();
+  const commands = Object.values(m.commands).filter((c) => !(c.builtin && ["play", "pause", "stop", "eos", "seek"].includes(c.name)));
+  if (commands.length) {
+    main.append(h("h2", { class: "sec-h" }, "Commands"), ...commands.map(commandRow));
+  }
+  const aliases = Object.values(m.properties).filter((p) => p.target);
+  if (aliases.length) {
+    main.append(h("h2", { class: "sec-h" }, "Properties"),
+      ...aliases.map((p) => propertyRow(p, p.path, `→ ${p.target}`).el));
+  }
+  buildElements(main);
+  for (const row of allRows) row.update();
+  updateTransport(); updateTime(); applyFilter();
+}
+
+// ---- start -------------------------------------------------------------------------------
+
+// the sticky element headers sit below the bar and the filter tools, whose heights vary
+const heights = new ResizeObserver((entries) => {
+  for (const { target } of entries) {
+    document.documentElement.style.setProperty(target.id === "bar" ? "--bar-h" : "--tools-h", `${target.offsetHeight}px`);
+  }
+});
+heights.observe(document.getElementById("bar"));
+
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (e.key === "/" && !e.metaKey && !e.ctrlKey && !(t.matches && t.matches("input, select, textarea"))) {
+    const f = document.querySelector(".filter input");
+    if (f) { e.preventDefault(); f.focus(); f.select(); }
+  }
+});
+
+wireSeek();
+connect();
 </script>
 </body>
 </html>

@@ -14,6 +14,7 @@ from gi.repository import GLib, Gst
 from mixtape import Player
 from mixtape.events import Eos, Error, Message, Position, StateChanged, Warning
 from mixtape.exceptions import (
+    CommandError,
     MixTapeError,
     PlayerDescriptionError,
     PlayerNotConfigured,
@@ -208,6 +209,23 @@ async def test_stop_with_eos_on_a_paused_pipeline_stops_at_once(pipeline, mocker
         await bounded(player.stop(eos=True))
         spy.assert_not_called()
         assert player.state == Gst.State.NULL
+
+
+@pytest.mark.asyncio
+async def test_a_seek_after_the_eos_lets_it_end_again(Gst):
+    async with Player.from_description("videotestsrc ! fakesink sync=true") as player:
+        await bounded(player.play())
+        await bounded(player.invoke("eos", timeout=5))
+        with pytest.raises(CommandError):  # one EOS is all a stream gets
+            await player.invoke("eos")
+        await player.invoke("seek", position=0)
+
+        async def playing_again() -> None:  # the flush loses the state for a moment
+            while player.state != Gst.State.PLAYING or player.pending != Gst.State.VOID_PENDING:
+                await asyncio.sleep(0.01)
+
+        await bounded(playing_again())
+        await bounded(player.invoke("eos", timeout=5))
 
 
 @pytest.mark.asyncio

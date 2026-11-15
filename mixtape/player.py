@@ -374,6 +374,7 @@ class Player:
         flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT
         if not self.pipeline.seek_simple(Gst.Format.TIME, flags, int(position * Gst.SECOND)):
             raise CommandError(f"The pipeline could not seek to {position} s")
+        self._eos = False  # the flush clears it: the stream goes on
 
     async def send_eos(self, timeout: float | None = None) -> None:
         """Send an EOS event and wait for the EOS message it causes."""
@@ -410,10 +411,14 @@ class Player:
 
     def _set_null(self) -> Gst.StateChangeReturn:
         """Set the pipeline to NULL, publishing the `StateChanged` the bus cannot: it
-        flushes its messages on the way down."""
+        flushes its messages on the way down (unless `auto-flush-bus` is off)."""
         old = self.state
         ret = self.pipeline.set_state(Gst.State.NULL)
-        if old != Gst.State.NULL:
+        if (
+            old != Gst.State.NULL
+            and ret != Gst.StateChangeReturn.FAILURE
+            and self.pipeline.get_auto_flush_bus()
+        ):
             self._publish(events.StateChanged(old, Gst.State.NULL, Gst.State.VOID_PENDING))
         return ret
 
@@ -452,7 +457,8 @@ class Player:
     def graph(self) -> GraphSpec:
         """A snapshot of the pipeline's elements and the links between them."""
         self.setup()
-        keys = {e: key for key, e in self._element_keys().items() if e is not self.pipeline}
+        keys = {e: key for key, e in self._element_keys().items()}
+        pipeline_key = keys.pop(self.pipeline)
         nodes = {
             key: NodeSpec(
                 name=e.get_name(),
@@ -468,19 +474,21 @@ class Player:
             if isinstance(element, Gst.Bin):
                 continue
             for pad in _retrying(element.iterate_src_pads):
-                if (peer := _real_peer(pad)) is None or peer.get_parent_element() not in keys:
+                peer = _real_peer(pad)
+                # once: a streaming thread may unlink it meanwhile
+                if peer is None or (sink := peer.get_parent_element()) not in keys:
                     continue
                 caps = pad.get_current_caps()
                 links.append(
                     LinkSpec(
                         source=key,
                         source_pad=pad.get_name(),
-                        sink=keys[peer.get_parent_element()],
+                        sink=keys[sink],
                         sink_pad=peer.get_name(),
                         caps=caps.to_string() if caps is not None else None,
                     )
                 )
-        return GraphSpec(nodes=nodes, links=links)
+        return GraphSpec(pipeline=pipeline_key, nodes=nodes, links=links)
 
     def get(self, path: str) -> Any:
         """Read a property by path: a built-in, an alias or `element.property`, as JSON-friendly."""

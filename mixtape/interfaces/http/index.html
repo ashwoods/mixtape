@@ -709,7 +709,7 @@ function onMessage(m) {
     case "state":
       values.set("state", m.new);
       pendingState = m.pending && m.pending !== "void-pending" ? m.pending : null;
-      if (m.new !== m.old) atEos = false;
+      if (m.new === "ready" || m.new === "null") atEos = false;  // as the server clears it
       updateTransport();
       scheduleGraph();  // elements add pads and link up on the way to paused
       break;
@@ -840,15 +840,20 @@ function updateTime() {
 
 function wireSeek() {
   const seek = document.getElementById("seek");
+  let seeking = false;  // a seek request in flight
   seek.addEventListener("pointerdown", () => { seekHold = true; });
+  for (const type of ["pointerup", "pointercancel"]) {
+    // a press without a drag fires no change: let the position move again
+    seek.addEventListener(type, () => { if (!seeking) { seekHold = false; updateTime(); } });
+  }
   seek.addEventListener("input", () => {
     seekHold = true;
     document.getElementById("pos").textContent = fmtTime(Number(seek.value));
   });
   seek.addEventListener("change", async () => {
-    seekHold = true;
+    seekHold = seeking = true;
     await transport(null, "seek", { position: Number(seek.value) });
-    seekHold = false;
+    seekHold = seeking = false;
     updateTime();
   });
 }
@@ -1114,7 +1119,7 @@ function renderGraph() {
     return b;
   };
   // the pipeline itself is no node: when the model exposes it (playbin name=pb), it frames the rest
-  const pipe = model && Object.keys(model.elements).find((k) => !(k in nodes));
+  const pipe = model && Object.hasOwn(model.elements, g.pipeline) ? g.pipeline : null;
   const root = { key: null, open: true, root: true, children: (kids.get(null) || []).map(block),
     n: pipe ? { name: pipe, factory: model.elements[pipe].factory, exposed: true } : null };
 

@@ -18,6 +18,7 @@ Client to server:
 
 import asyncio
 import json
+import math
 import logging
 from collections.abc import Awaitable
 from typing import Any
@@ -160,7 +161,12 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
     forwarding = asyncio.create_task(forward())
     receiving = asyncio.create_task(receive())
     try:
-        await send({"type": "values", "values": all_values(player)})
+        values = {
+            path: value
+            for path, value in all_values(player).items()
+            if not (isinstance(value, float) and not math.isfinite(value))  # as forward() does
+        }
+        await send({"type": "values", "values": values})
         await asyncio.wait({forwarding, receiving}, return_when=asyncio.FIRST_COMPLETED)
     finally:
         stream.close()

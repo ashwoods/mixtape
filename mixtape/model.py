@@ -108,6 +108,8 @@ class LinkSpec(_Spec):
 class GraphSpec(_Spec):
     """A snapshot of the pipeline's topology, which changes as elements add pads."""
 
+    pipeline: str
+    """The pipeline's key: it holds the nodes and is none of them"""
     nodes: dict[str, NodeSpec]
     """Every element under the pipeline by key, bins before their children"""
     links: list[LinkSpec]

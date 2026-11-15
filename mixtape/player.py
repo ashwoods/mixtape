@@ -249,9 +249,10 @@ class Player:
         return asyncio.run_coroutine_threadsafe(coro, self._attached_loop())
 
     def _attached_loop(self) -> asyncio.AbstractEventLoop:
-        if self._loop is None or self._loop.is_closed():
+        loop = self._loop  # once: teardown may clear it while another thread is here
+        if loop is None or loop.is_closed():
             raise PlayerNotConfigured("The player is not attached to a running loop")
-        return self._loop
+        return loop
 
     # -- state -- #
 
@@ -425,7 +426,7 @@ class Player:
         if problems := [w for w in caught if issubclass(w.category, GObject.Warning)]:
             raise InvalidValueError(f"Invalid value for {path!r}: {problems[0].message}")
 
-    async def invoke(self, name: str, **args: Any) -> Any:
+    async def invoke(self, name: str, /, **args: Any) -> Any:
         """Call the command `name` with validated `args` and return its result.
 
         Built-in commands return None, as their specs say."""
@@ -444,12 +445,16 @@ class Player:
         return None if declared.spec.builtin else result
 
     def _exposed_elements(self) -> dict[str, Gst.Element]:
-        """The elements the model exposes: the named ones, or all with `expose_all`."""
+        """The elements the model exposes: the named ones, or all with `expose_all`.
+        The pipeline itself counts too: `playbin name=pb` is the pipeline."""
         return {
             e.get_name(): e
-            for e in self.pipeline.iterate_recurse()
-            if self._expose_all or is_named(e)
+            for e in (self.pipeline, *self.pipeline.iterate_recurse())
+            if self._is_exposed(e)
         }
+
+    def _is_exposed(self, element: Gst.Element) -> bool:
+        return self._expose_all or is_named(element)
 
     def _resolve(self, path: str) -> tuple[Gst.Element, Any, Codec]:
         """Like `_locate`, following an alias to its target, which is always exposed."""
@@ -459,7 +464,10 @@ class Player:
     def _locate(self, path: str, *, exposed: bool = True) -> tuple[Gst.Element, Any, Codec]:
         """The element, ParamSpec and codec of an `element.property` path."""
         name, _, prop_name = path.rpartition(".")
-        element = self.pipeline.get_by_name(name) if name else None
+        if name and name == self.pipeline.get_name():
+            element = self.pipeline  # get_by_name only searches the children
+        else:
+            element = self.pipeline.get_by_name(name) if name else None
         ps = element.find_property(prop_name) if element else None
         codec = codec_for(ps) if ps else None
         if element is None or ps is None or codec is None:
@@ -476,18 +484,47 @@ class Player:
         return value / Gst.SECOND if ok and value >= 0 else None
 
     def _connect_notify(self) -> None:
-        """Publish `PropertyChanged` for the readable properties of the exposed elements."""
+        """Publish `PropertyChanged` for the readable properties of the exposed elements,
+        also of those added later (decodebin's children), from `setup` to `teardown`."""
         self._disconnect_notify()
+        for signal, callback in (  # first, so no element is added unseen meanwhile
+            ("deep-element-added", self._watch),
+            ("deep-element-removed", self._unwatch),
+        ):
+            handler = self.pipeline.connect(signal, self._on_element_signal, callback)
+            self._notify_ids.append((self.pipeline, handler))
         for element in self._exposed_elements().values():
-            for ps, _ in exposed_props(element):
-                if ps.flags & GObject.ParamFlags.READABLE:
-                    handler = element.connect(f"notify::{ps.name}", self._on_notify)
-                    self._notify_ids.append((element, handler))
+            self._watch(element)
 
     def _disconnect_notify(self) -> None:
         for element, handler in self._notify_ids:
             element.disconnect(handler)
         self._notify_ids.clear()
+
+    def _on_element_signal(
+        self,
+        pipeline: Gst.Pipeline,
+        sub_bin: Gst.Bin,
+        element: Gst.Element,
+        callback: Callable[[Gst.Element], None],
+    ) -> None:
+        """On whatever thread added or removed the element: (un)watch it on the loop."""
+        self._call_soon(callback, element)
+
+    def _watch(self, element: Gst.Element) -> None:
+        if self._loop is None or not self._is_exposed(element):  # torn down meanwhile
+            return
+        if any(watched == element for watched, _ in self._notify_ids):
+            return  # added between connecting deep-element-added and the first walk
+        for ps, _ in exposed_props(element):
+            if ps.flags & GObject.ParamFlags.READABLE:
+                handler = element.connect(f"notify::{ps.name}", self._on_notify)
+                self._notify_ids.append((element, handler))
+
+    def _unwatch(self, element: Gst.Element) -> None:
+        for entry in [entry for entry in self._notify_ids if entry[0] == element]:
+            element.disconnect(entry[1])
+            self._notify_ids.remove(entry)
 
     def _on_notify(self, element: Gst.Element, ps: Any) -> None:
         """On whatever thread changed the property: read it there, publish on the loop."""
@@ -496,9 +533,17 @@ class Player:
             return
         name = element.get_name()
         value = codec.read(element.get_property(ps.name))
-        event = events.PropertyChanged(f"{name}.{ps.name}", name, ps.name, value)
-        with contextlib.suppress(PlayerNotConfigured, RuntimeError):  # detached or loop closed
-            self.call_soon_threadsafe(self._publish, event)
+        self._call_soon(
+            self._publish, events.PropertyChanged(f"{name}.{ps.name}", name, ps.name, value)
+        )
+
+    def _call_soon(self, callback: Callable[..., object], *args: object) -> None:
+        """`call_soon_threadsafe` for signal handlers on any thread, a no-op once detached.
+        It reads the loop once: `teardown` may clear it on the loop thread meanwhile."""
+        loop = self._loop
+        if loop is not None:
+            with contextlib.suppress(RuntimeError):  # the loop closed meanwhile
+                loop.call_soon_threadsafe(callback, *args)
 
     def _publish(self, event: events.Event) -> None:
         self._events.publish(event)

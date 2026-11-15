@@ -236,6 +236,8 @@ def _prop_row(player: Player, prop: PropSpec, name: str) -> list[str]:
 
 def _type(schema: dict[str, Any], *, keep_null: bool = False) -> str:
     """A compact type from a JSON Schema: `integer 1..8`, `a|b|c`, `flags a|b`."""
+    if str(schema.get("format", "")).startswith("gst-"):
+        return str(schema["format"]).removeprefix("gst-")  # caps, structure
     if "anyOf" in schema:
         options = [o for o in schema["anyOf"] if keep_null or o.get("type") != "null"]
         return " | ".join(_type(o, keep_null=keep_null) for o in options)
@@ -243,8 +245,6 @@ def _type(schema: dict[str, Any], *, keep_null: bool = False) -> str:
         return "|".join(map(str, schema["enum"]))
     if "const" in schema:
         return str(schema["const"])
-    if str(schema.get("format", "")).startswith("gst-"):
-        return str(schema["format"]).removeprefix("gst-")  # caps, structure
     kind = str(schema.get("type", "any"))
     if kind == "array" and "items" in schema:
         return f"flags {_type(schema['items'])}"

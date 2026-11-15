@@ -93,7 +93,7 @@ def test_schemas_of_the_supported_value_types(Gst):
     assert depth.value_schema["type"] == "integer"
     assert (depth.value_schema["minimum"], depth.value_schema["maximum"]) == (0, 2**32 - 1)
     assert depth.writable and depth.readable and depth.path == "nested.max-size-buffers"
-    assert cf["caps"].value_schema["type"] == "string"
+    assert {"type": "string"} in cf["caps"].value_schema["anyOf"]  # or null, unset
     assert cf["caps"].value_schema["format"] == "gst-caps"
     assert not nested["current-level-buffers"].writable
     assert "name" not in src
@@ -106,6 +106,30 @@ def test_flags_schema_and_values(Gst):
     schema = player.describe().elements["pb"].properties["flags"].value_schema
     assert schema["type"] == "array" and "audio" in schema["items"]["enum"]
     assert {"audio", "video"} <= set(player.get("pb.flags"))
+
+
+@pytest.mark.asyncio
+async def test_a_pipeline_element_at_the_top_is_exposed_too(Gst):
+    class Radio(Player):
+        muted = prop("pb.mute")
+
+    player = Radio.from_description("playbin name=pb")  # playbin is the pipeline itself
+    assert "pb" in player.describe().elements
+    await player.set("pb.volume", 0.5)
+    assert player.get("pb.volume") == 0.5
+    await player.set("muted", True)
+    assert player.get("pb.mute") is True
+    assert "pipeline0" not in Player.from_description("fakesink").describe().elements
+
+
+@pytest.mark.asyncio
+async def test_unset_caps_read_as_none(Gst):
+    player = Player.from_description("appsrc name=a ! fakesink")
+    assert player.get("a.caps") is None
+    await player.set("a.caps", "video/x-raw")
+    assert player.get("a.caps") == "video/x-raw"
+    await player.set("a.caps", None)
+    assert player.get("a.caps") is None
 
 
 def test_the_spec_serialises_to_plain_json(Gst):
@@ -206,6 +230,14 @@ async def test_prop_and_command_declarations(Gst):
     with pytest.raises(UnknownNameError):
         await player.invoke("nope")
 
+    class Named(Player):
+        @command
+        def hello(self, name: str) -> str:
+            return f"hi {name}"
+
+    named = Named.from_description(PIPELINE)
+    assert await named.invoke("hello", name="x") == "hi x"  # not invoke's own `name`
+
     await player.set("bitrate", 9)
     assert player.get("nested.max-size-buffers") == player.get("bitrate") == player.bitrate == 9
     with pytest.raises(AttributeError, match="player.set"):
@@ -264,6 +296,20 @@ async def test_property_changed_from_another_thread_arrives_on_the_loop(Gst):
         event = await next_change(stream, "src.pattern")
         thread.join()
         assert (event.element, event.property, event.value) == ("src", "pattern", "ball")
+
+
+@pytest.mark.asyncio
+async def test_property_changed_of_an_element_added_after_setup(Gst):
+    async with Player.from_description(PIPELINE) as player:
+        stream = player.events()
+        late = Gst.ElementFactory.make("identity", "late")
+        player.pipeline.add(late)
+        await asyncio.sleep(0)  # deep-element-added hands the element to the loop
+        threading.Thread(target=late.set_property, args=("sleep-time", 3)).start()
+        assert (await next_change(stream, "late.sleep-time")).value == 3
+        player.pipeline.remove(late)
+        await asyncio.sleep(0)
+        assert all(element != late for element, _ in player._notify_ids)
 
 
 @pytest.mark.asyncio

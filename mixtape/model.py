@@ -124,9 +124,16 @@ def _parse_caps(text: str) -> Any:
 
 def _parse_structure(text: str) -> Any:
     try:
-        return Gst.Structure.from_string(text)[0]
+        structure, rest = Gst.Structure.from_string(text)
     except TypeError:
         raise ValueError(f"invalid structure {text!r}") from None
+    if rest.strip():
+        raise ValueError(f"invalid structure {text!r}: unexpected {rest.strip()!r}")
+    return structure
+
+
+def _unless_none(parse: Callable[[str], Any]) -> Callable[[str | None], Any]:
+    return lambda text: None if text is None else parse(text)
 
 
 def _to_string(value: Any) -> str | None:
@@ -194,7 +201,9 @@ def _make_codec(ps: Any) -> Codec | None:
     ):
         if vt == gtype:
             schema = Field(json_schema_extra={"format": kind})
-            return Codec(_adapter(str, schema, AfterValidator(parse)), _to_string, same)
+            # None is what an unset caps reads as (appsrc), and clears it
+            adapter = _adapter(str | None, schema, AfterValidator(_unless_none(parse)))
+            return Codec(adapter, _to_string, same)
     return None
 
 

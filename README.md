@@ -293,7 +293,7 @@ We are Groot.
 [Pypi page]: https://img.shields.io/pypi/v/mixtape.svg
 [Pypi license]: https://img.shields.io/pypi/l/mixtape.svg
 [Pypi version]: https://img.shields.io/pypi/pyversions/mixtape.svg
-[Build Status]: https://github.com/ashwoods/mixtape/actions/workflows/ci.yml/badge.svg?branch=master
+[Build Status]: https://github.com/ashwoods/mixtape/actions/workflows/ci.yml/badge.svg?branch=main
 [Quality Gate Status]: https://sonarcloud.io/api/project_badges/measure?project=ashwoods_mixtape&metric=alert_status
-[Requirements Status]: https://requires.io/github/ashwoods/mixtape/requirements.svg?branch=master
+[Requirements Status]: https://requires.io/github/ashwoods/mixtape/requirements.svg?branch=main
 

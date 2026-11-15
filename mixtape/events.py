@@ -2,7 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Self
+from typing import Any, Self
 
 import gi
 
@@ -45,6 +45,20 @@ class Warning(Event):
     source: str
     message: str
     debug: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PropertyChanged(Event):
+    """An exposed element property changed, on whatever thread changed it.
+
+    `path` is the element path (`enc.bitrate`); aliases map to it via `PropSpec.target`.
+    """
+
+    path: str
+    element: str
+    property: str
+    value: Any
+    """The JSON-friendly value, as `Player.get` returns it"""
 
 
 @dataclass(frozen=True, slots=True)

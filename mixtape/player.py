@@ -3,22 +3,43 @@
 import asyncio
 import concurrent.futures
 import contextlib
+import inspect
 import logging
+import warnings
 from collections.abc import Callable, Coroutine
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import GLib, Gst
+from gi.repository import GLib, GObject, Gst
+from pydantic import NonNegativeFloat, ValidationError
 
 from . import events
 from .exceptions import (
+    CommandError,
+    InvalidValueError,
     MixTapeError,
+    NotReadableError,
+    NotWritableError,
     PlayerDescriptionError,
     PlayerNotConfigured,
     PlayerPipelineError,
     PlayerSetStateError,
+    UnknownNameError,
+)
+from .model import (
+    BUILTIN_PROPS,
+    Codec,
+    Declarations,
+    PlayerSpec,
+    codec_for,
+    collect,
+    command,
+    describe_element,
+    element_prop_spec,
+    exposed_props,
+    is_named,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,9 +60,28 @@ class Player:
     which happens lazily on the first `await` of any of its methods.
     Subclass it and override the state methods, or react to bus messages
     with `add_handler` and `events()`.
+
+    Its controls and state are described by `describe()`: the properties of the
+    named elements (all of them with `expose_all`), the aliases declared with
+    `prop()`, the commands declared with `@command`, and the built-ins.
     """
 
-    def __init__(self, pipeline: Gst.Pipeline) -> None:
+    description: ClassVar[str | None] = None
+    """The pipeline description of a subclass that carries its own, for `mixtape run`"""
+
+    _declared: ClassVar[Declarations]
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._declarations()  # a bad declaration fails when the class is defined
+
+    @classmethod
+    def _declarations(cls) -> Declarations:
+        if "_declared" not in cls.__dict__:
+            cls._declared = collect(cls, Player)
+        return cls._declared
+
+    def __init__(self, pipeline: Gst.Pipeline, *, expose_all: bool = False) -> None:
         ensure_init()
         if not isinstance(pipeline, Gst.Pipeline):
             raise TypeError(f"pipeline must be a Gst.Pipeline, not {type(pipeline).__name__}")
@@ -57,9 +97,13 @@ class Player:
         self._eos_waiters: list[asyncio.Future[None]] = []
         self._handlers: dict[object, tuple[Gst.MessageType, MessageCallback]] = {}
         self._events = events.Broadcast()
+        self._expose_all = expose_all
+        self._notify_ids: list[tuple[Gst.Element, int]] = []
+        for alias in self._declarations().props.values():
+            self._locate(alias.target, exposed=False)  # a typo fails here
 
     @classmethod
-    def from_description(cls, description: str) -> Self:
+    def from_description(cls, description: str, *, expose_all: bool = False) -> Self:
         """Build a player from a `gst-launch` style pipeline description."""
         ensure_init()
         try:
@@ -72,7 +116,7 @@ class Player:
             pipeline = Gst.Pipeline.new(None)
             pipeline.add(element)
             element = pipeline
-        return cls(element)
+        return cls(element, expose_all=expose_all)
 
     @classmethod
     def run(cls, description_or_pipeline: str | Gst.Pipeline, timeout: float | None = None) -> None:
@@ -156,9 +200,11 @@ class Player:
         fd = self.bus.get_pollfd().fd
         loop.add_reader(fd, self._drain)
         self._loop, self._fd = loop, fd
+        self._connect_notify()
 
     def teardown(self) -> None:
         """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after."""
+        self._disconnect_notify()
         self.pipeline.set_state(Gst.State.NULL)
         self._target = Gst.State.NULL
         self._live = self._buffering = self._eos = False
@@ -236,12 +282,15 @@ class Player:
     async def ready(self) -> Gst.StateChangeReturn:
         return await self.set_state(Gst.State.READY)
 
+    @command
     async def pause(self) -> Gst.StateChangeReturn:
         return await self.set_state(Gst.State.PAUSED)
 
+    @command
     async def play(self) -> Gst.StateChangeReturn:
         return await self.set_state(Gst.State.PLAYING)
 
+    @command
     async def stop(self, eos: bool = False, timeout: float | None = 5.0) -> None:
         """Set the pipeline to NULL, after an EOS when `eos` and it is running."""
         self.setup()
@@ -256,6 +305,18 @@ class Player:
                 await self.set_state(Gst.State.NULL)
         else:
             await self.set_state(Gst.State.NULL)
+
+    @command
+    async def eos(self, timeout: float | None = None) -> None:
+        """Send an EOS event and wait for the EOS message it causes."""
+        await self.send_eos(timeout)
+
+    @command
+    def seek(self, position: NonNegativeFloat) -> None:
+        """Seek to a position in seconds, flushing."""
+        flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT
+        if not self.pipeline.seek_simple(Gst.Format.TIME, flags, int(position * Gst.SECOND)):
+            raise CommandError(f"The pipeline could not seek to {position} s")
 
     async def send_eos(self, timeout: float | None = None) -> None:
         """Send an EOS event and wait for the EOS message it causes."""
@@ -305,6 +366,129 @@ class Player:
         future.cancel()
         with contextlib.suppress(ValueError):  # teardown may have cleared it
             self._eos_waiters.remove(future)
+
+    # -- the model: properties and commands -- #
+
+    def describe(self) -> PlayerSpec:
+        """A snapshot of the player's commands, properties and exposed elements."""
+        properties = dict(BUILTIN_PROPS)
+        for name, alias in self._declarations().props.items():
+            element, ps, codec = self._locate(alias.target, exposed=False)
+            properties[name] = alias.spec(element_prop_spec(element, ps, codec))
+        return PlayerSpec(
+            name=type(self).__name__,
+            commands={name: c.spec for name, c in self._declarations().commands.items()},
+            properties=properties,
+            elements={name: describe_element(e) for name, e in self._exposed_elements().items()},
+        )
+
+    def get(self, path: str) -> Any:
+        """Read a property by path: a built-in, an alias or `element.property`, as JSON-friendly."""
+        if path in BUILTIN_PROPS:
+            return self._read_builtin(path)
+        element, ps, codec = self._resolve(path)
+        if not ps.flags & GObject.ParamFlags.READABLE:
+            raise NotReadableError(f"{path!r} is write-only")
+        return codec.read(element.get_property(ps.name))
+
+    async def set(self, path: str, value: Any) -> None:
+        """Validate `value` and set the property. Nothing changes when it is rejected."""
+        self.setup()
+        if path in BUILTIN_PROPS:
+            raise NotWritableError(f"{path!r} is read-only")
+        element, ps, codec = self._resolve(path)
+        flags = int(ps.flags)
+        if not flags & GObject.ParamFlags.WRITABLE or flags & GObject.ParamFlags.CONSTRUCT_ONLY:
+            raise NotWritableError(f"{path!r} is read-only or can only be set on construction")
+        try:
+            validated = codec.adapter.validate_python(value)
+        except ValidationError as exc:
+            errors = exc.errors(include_url=False, include_context=False)
+            raise InvalidValueError(f"Invalid value for {path!r}: {exc}", errors) from exc
+        # GLib reports an out of range value as a warning and leaves the old one
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", GObject.Warning)
+            try:
+                element.set_property(ps.name, codec.write(validated))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise InvalidValueError(f"Invalid value for {path!r}: {exc}") from exc
+        if problems := [w for w in caught if issubclass(w.category, GObject.Warning)]:
+            raise InvalidValueError(f"Invalid value for {path!r}: {problems[0].message}")
+
+    async def invoke(self, name: str, **args: Any) -> Any:
+        """Call the command `name` with validated `args` and return its result."""
+        self.setup()
+        if (declared := self._declarations().commands.get(name)) is None:
+            raise UnknownNameError(f"Unknown command {name!r}")
+        try:
+            validated = declared.args.model_validate(args)
+        except ValidationError as exc:
+            errors = exc.errors(include_url=False, include_context=False)
+            raise InvalidValueError(f"Invalid arguments for {name!r}: {exc}", errors) from exc
+        result = getattr(self, name)(
+            **{k: getattr(validated, k) for k in type(validated).model_fields}
+        )
+        return await result if inspect.isawaitable(result) else result
+
+    def _exposed_elements(self) -> dict[str, Gst.Element]:
+        """The elements the model exposes: the named ones, or all with `expose_all`."""
+        return {
+            e.get_name(): e
+            for e in self.pipeline.iterate_recurse()
+            if self._expose_all or is_named(e)
+        }
+
+    def _resolve(self, path: str) -> tuple[Gst.Element, Any, Codec]:
+        """Like `_locate`, following an alias to its target, which is always exposed."""
+        alias = self._declarations().props.get(path)
+        return self._locate(alias.target, exposed=False) if alias else self._locate(path)
+
+    def _locate(self, path: str, *, exposed: bool = True) -> tuple[Gst.Element, Any, Codec]:
+        """The element, ParamSpec and codec of an `element.property` path."""
+        name, _, prop_name = path.rpartition(".")
+        element = self.pipeline.get_by_name(name) if name else None
+        ps = element.find_property(prop_name) if element else None
+        codec = codec_for(ps) if ps else None
+        if element is None or ps is None or codec is None:
+            raise UnknownNameError(f"Unknown property {path!r}")
+        if exposed and name not in self._exposed_elements():
+            raise UnknownNameError(f"{name!r} is not exposed: name it or use expose_all")
+        return element, ps, codec
+
+    def _read_builtin(self, path: str) -> Any:
+        if path == "state":
+            return str(self.state.value_nick)
+        query = self.pipeline.query_position if path == "position" else self.pipeline.query_duration
+        ok, value = query(Gst.Format.TIME)
+        return value / Gst.SECOND if ok and value >= 0 else None
+
+    def _connect_notify(self) -> None:
+        """Publish `PropertyChanged` for the readable properties of the exposed elements."""
+        self._disconnect_notify()
+        for element in self._exposed_elements().values():
+            for ps, _ in exposed_props(element):
+                if ps.flags & GObject.ParamFlags.READABLE:
+                    handler = element.connect(f"notify::{ps.name}", self._on_notify)
+                    self._notify_ids.append((element, handler))
+
+    def _disconnect_notify(self) -> None:
+        for element, handler in self._notify_ids:
+            element.disconnect(handler)
+        self._notify_ids.clear()
+
+    def _on_notify(self, element: Gst.Element, ps: Any) -> None:
+        """On whatever thread changed the property: read it there, publish on the loop."""
+        codec = codec_for(ps)
+        if codec is None:
+            return
+        name = element.get_name()
+        value = codec.read(element.get_property(ps.name))
+        event = events.PropertyChanged(f"{name}.{ps.name}", name, ps.name, value)
+        with contextlib.suppress(PlayerNotConfigured, RuntimeError):  # detached or loop closed
+            self.call_soon_threadsafe(self._publish, event)
+
+    def _publish(self, event: events.Event) -> None:
+        self._events.publish(event)
 
     # -- events and message handlers -- #
 

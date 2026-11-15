@@ -1,3 +1,5 @@
+from typing import Any
+
 from gi.repository import GLib
 
 
@@ -38,3 +40,32 @@ class PlayerPipelineError(MixTapeError):
     def __str__(self) -> str:
         text = f"{self.source}: {self.message}"
         return f"{text} ({self.debug})" if self.debug else text
+
+
+class ModelError(MixTapeError):
+    """Base of the errors of the declarative model: properties and commands"""
+
+
+class UnknownNameError(ModelError):
+    """A property path or command name does not exist, or is not exposed"""
+
+
+class InvalidValueError(ModelError):
+    """A value or an argument was rejected, and nothing was changed"""
+
+    def __init__(self, message: str, errors: list[Any] | None = None) -> None:
+        super().__init__(message)
+        self.errors: list[Any] = errors or []
+        """Pydantic's error list when validation failed, else empty"""
+
+
+class NotReadableError(ModelError):
+    """The property cannot be read"""
+
+
+class NotWritableError(ModelError):
+    """The property cannot be written: it is read-only or construct-only"""
+
+
+class CommandError(ModelError):
+    """A built-in command could not do what was asked"""

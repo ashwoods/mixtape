@@ -4,15 +4,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.7.0 (unreleased)
+
+The core is rewritten as one subclassable asyncio `Player` in `mixtape/player.py`.
+This release breaks the API.
+
+- **Breaking:** `BasePlayer` (`mixtape.base`), `AsyncPlayer` and `mixtape.players` are removed;
+  use `mixtape.Player`.
+- **Breaking:** `Player` is a plain class, no longer an `attrs` class. `from_description` is
+  a sync classmethod; `create` is removed. `attrs` and `beppu` are no longer dependencies, and
+  mixtape has none: PyGObject comes from the system.
+- **Breaking:** `Player.events` is now a method returning an async iterator of `mixtape.events`
+  dataclasses (`StateChanged`, `Eos`, `Error`, `Warning`, `Message`). `PlayerEvents`,
+  `States` and the asyncio event subclasses are removed.
+- **Breaking:** `PlayerAlreadyConfigured` is removed; `PlayerDescriptionError` is new, and
+  `PlayerPipelineError` carries `source`, `message`, `debug` and `gerror`.
+- **Breaking:** `stop(eos=False, timeout=5.0)` replaces `stop(send_eos, teardown)`; use
+  `teardown()` or `async with player` to clean up. `__del__` is removed.
+- **Breaking:** `Player.run(description_or_pipeline, timeout=None)` is a sync classmethod that
+  plays until EOS and tears down; `autoplay` and the `call_x` helpers are gone.
+- New: `setup()` attaches to the running loop, and every async method attaches lazily.
+  `teardown()` is idempotent, safe after the loop closed, and the player can be re-used.
+- New: `add_handler`, `call_soon_threadsafe`, `run_coroutine_threadsafe`, `ensure_init`,
+  and the `pending`, `loop` and `error` properties.
+- New default bus policy: errors are stored, logged and published, set the pipeline to NULL, and
+  reach the awaiting caller; warnings are logged; clock loss, latency and buffering are handled
+  as `gst-play` does.
+- Fix: a state wait could be satisfied by a stale state (play, stop, play).
+- Fix: pipeline errors were raised into the loop's exception handler and never reached callers.
+- Fix: EOS flags were never reset, so a second `play_until_eos` returned at once.
+- Fix: teardown from `__del__` failed outside a running loop.
+- Fix: `Player(...)` raised on Python 3.14+ outside a running loop.
 - Packaging moved to `pyproject.toml` managed by uv; Python 3.12+
 - Checks are ruff, mypy and pytest, run by `scripts/check`; CI moved to GitHub Actions
 - Docker test image based on Ubuntu 24.04 packages
 - Fix `Player.play_until_eos` on Python 3.11+
-
-Known issues:
-- On Python 3.14+, `Player(...)` raises `RuntimeError` outside a running event loop, because
-  `beppu.Basket` calls `asyncio.get_event_loop()`; its test is marked xfail there.
 
 ## 0.5.1 (2020-07-18)
 - Remove pygobject-stubs as test dependency

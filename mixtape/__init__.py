@@ -1,3 +1,3 @@
-from .players import AsyncPlayer
+from .player import Player
 
-__all__ = ["AsyncPlayer"]
+__all__ = ["Player"]

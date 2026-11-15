@@ -70,98 +70,110 @@ Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI d
     docker compose run --rm test
 
 ## Usage
-
-You can use `mixtape` similar to how you use `gst-launch-1.0` by passing 
-a `pipeline description` to the `from_desc` constructor:
-
-
+`Player` wraps a `Gst.Pipeline` and drives it from an asyncio loop. Create one from a
+`gst-launch` style description with `Player.from_description`; it needs no running loop.
+The first `await` on the player attaches it to the running loop, and `async with` tears it
+down (sets the pipeline to NULL) when the block ends:
 
 ```python
-from mixtape import AsyncPlayer as Player
+import asyncio
+
+from mixtape import Player
 
 
-desc = "videotestsrc num-buffers=100 ! fakesink"
-
-
-async def main(self):
-    p = Player.from_desc(desc)
-    await p.play()
-    asyncio.sleep(5)
-    await p.stop()
+async def main() -> None:
+    async with Player.from_description("videotestsrc ! fakesink") as player:
+        await player.play()
+        await asyncio.sleep(5)
+        await player.stop()
 
 
 asyncio.run(main())
 ```
 
-The run classmethod is a shortcut for setting up the asyncio boilerplate and 
-running a pipeline until an eos event or error: 
+`Player.run` is the shortcut for scripts: it plays a description (or a `Gst.Pipeline`) until
+EOS and tears the player down. A pipeline error raises `PlayerPipelineError`:
 
 ```python
-from mixtape import AsyncPlayer as Player
+from mixtape import Player
 
-desc = "videotestsrc num-buffers=100 ! fakesink"
-p = Player.from_desc(desc)  # creates a player from a pipeline description
-p.run(autoplay=True)  # init of pipeline (i.e. bus) and sets the pipeline to playing state (default)
+Player.run("videotestsrc num-buffers=100 ! fakesink", timeout=30)
 ```
 
-You can run a loop and the player in a background thread:
+Errors reach the code that awaits: `await player.play()` raises `PlayerPipelineError` with the
+element's message when the pipeline fails, and `player.error` keeps the last one.
+`await player.play_until_eos()` returns on the next EOS, and works again after `stop()`.
+
+Every bus message is also an event. Subscribe with `events()` to build services on top
+of the player, and use `add_handler` to react to one kind of message:
 
 ```python
-from mixtape import AsyncPlayer as Player
-import threading
+import gi
 
-desc = "videotestsrc ! fakesink"
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
 
-p = player.from_description(desc)
-t = threading.Thread(target=lambda: p.run(autoplay=False))  # init the player in another thread
-t.daemon = True  # set the thread to background
-t.start()
-seq = ["play", "pause", "play", "stop"]
-for step in seq:
-    sleep(3)
-    s = getattr(p, "call_%s" % step)  # call_x schedules the coroutine
-    s()  # set the pipeline to `play`, `pause`, `play` and `stop`
-t.join()
+from mixtape import Player
+from mixtape.events import Eos, StateChanged
+
+async with Player.from_description("videotestsrc num-buffers=100 ! fakesink") as player:
+    events = player.events()
+    remove = player.add_handler(Gst.MessageType.TAG, lambda message: print(message))
+    await player.play()
+    async for event in events:
+        if isinstance(event, StateChanged):
+            print(event.old, "->", event.new)
+        elif isinstance(event, Eos):
+            break
+    remove()
+```
+
+Subclass `Player` to build an application. Override the state methods, take extra arguments,
+and call into the loop from GStreamer's threads with `call_soon_threadsafe` and
+`run_coroutine_threadsafe`:
+
+```python
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+
+from mixtape import Player
+
+
+class Camera(Player):
+    def __init__(self, pipeline: Gst.Pipeline, name: str) -> None:
+        super().__init__(pipeline)
+        self.name = name
+        self.add_handler(Gst.MessageType.APPLICATION, self.on_application)
+
+    async def play(self) -> Gst.StateChangeReturn:
+        print(f"{self.name} is starting")
+        return await super().play()
+
+    def on_application(self, message: Gst.Message) -> None:
+        print(message.get_structure().get_name())
 ```
 
 Constructing a dynamic pipeline and passing it to the player:
 
 ```python
-import Gst
+import gi
 
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+
+from mixtape import Player
+
+Gst.init(None)
 pipe = Gst.Pipeline.new("dynamic")
 src = Gst.ElementFactory.make("videotestsrc")
 sink = Gst.ElementFactory.make("fakesink")
-pipe.add(src, sink)
+pipe.add(src)
+pipe.add(sink)
 src.link(sink)
 
-p = Player(pipeline=pipe)
-```
-
-(WIP)
-This example uses a `feature` class that uses the *centricular* webrtc example:
-
-```python
-from mixtape import AsyncPlayer as Player
-from mixtape.features import WebRTC
-
-desc = "videotestsrc ! tee name=tee ! queue ! fakesink"
-p = Player.from_desc(desc, features=[WebRTC])
-p.run()
-p.webrtc.set_peer(1231)
-p.webrtc.attach(tee)
-```
-
-This example uses a `feature` class that uses the ridgerun `gst-shark` profiler:
-
-```python
-from mixtape import AsyncPlayer as Player
-from mixtape.features import GstShark
-
-desc = "videotestsrc num-buffers=100 ! tee name=tee ! queue ! fakesink"
-p = Player.from_desc(desc, features=[GstShark])
-p.gstshark.set_tracers("latency")
-p.run()
+player = Player(pipe)
 ```
 
 ## Player base interface (Draft)

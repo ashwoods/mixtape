@@ -1,29 +1,60 @@
 # type: ignore
 import asyncio
-import sys
+import gc
+import threading
+from collections.abc import Awaitable
 
 import pytest
 
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst
+from gi.repository import GLib, Gst
 
-from mixtape.players import Player
-from mixtape.exceptions import PlayerSetStateError, PlayerNotConfigured
-
-
-# beppu.Basket calls asyncio.get_event_loop(), which raises outside a running loop on 3.14+.
-@pytest.mark.xfail(
-    sys.version_info >= (3, 14),
-    reason="Player() needs a running event loop on Python 3.14+ (beppu)",
-    raises=RuntimeError,
-    strict=True,
+from mixtape import Player
+from mixtape.events import Eos, Error, Message, StateChanged, Warning
+from mixtape.exceptions import (
+    MixTapeError,
+    PlayerDescriptionError,
+    PlayerNotConfigured,
+    PlayerPipelineError,
 )
-def test_base_player_init_and_default_props(pipeline):
-    player = Player(pipeline=pipeline)
+
+LIVE = "videotestsrc is-live=true ! fakesink sync=true"
+NEVER_PREROLLS = "appsrc name=src ! fakesink"
+
+
+def bounded(awaitable: Awaitable):
+    """Fail a regression that hangs instead of hanging the suite"""
+    return asyncio.wait_for(awaitable, 5)
+
+
+async def wait_for_event(stream, kind):
+    async def find():
+        async for event in stream:
+            if isinstance(event, kind):
+                return event
+        raise AssertionError(f"stream ended without a {kind.__name__}")
+
+    return await bounded(find())
+
+
+def post_error(pipeline: Gst.Pipeline) -> None:
+    gerror = GLib.Error.new_literal(Gst.StreamError.quark(), "boom", Gst.StreamError.FAILED)
+    src = pipeline.get_by_name("src")
+    pipeline.post_message(Gst.Message.new_error(src, gerror, "debug"))
+
+
+# -- construction -- #
+
+
+def test_init_and_default_props(pipeline):
+    player = Player(pipeline)
     assert player.pipeline == pipeline
     assert player.state == Gst.State.NULL
+    assert player.pending == Gst.State.VOID_PENDING
+    assert player.loop is None
+    assert player.error is None
     assert len(player.sinks) == 1
     assert len(player.sources) == 1
     assert len(player.elements) == 3
@@ -33,49 +64,360 @@ def test_base_player_init_and_default_props(pipeline):
     assert len(player.get_elements_by_gtype(t_queue)) == 1
 
 
-@pytest.mark.asyncio
-async def test_error_state_change_before_setup(pipeline):
-    player = Player(pipeline=pipeline)
+def test_from_description_needs_no_loop():
+    player = Player.from_description("videotestsrc ! queue ! fakesink")
+    assert isinstance(player, Player)
+    assert len(player.elements) == 3
+
+
+def test_init_rejects_other_types():
+    with pytest.raises(TypeError):
+        Player("videotestsrc ! fakesink")
+
+
+def test_bad_description():
+    with pytest.raises(PlayerDescriptionError) as info:
+        Player.from_description("videotestsrc ! nosuchelement")
+    assert isinstance(info.value, MixTapeError)
+    assert isinstance(info.value.__cause__, GLib.Error)
+
+
+def test_single_element_description_is_wrapped():
+    player = Player.from_description("fakesink")
+    assert isinstance(player.pipeline, Gst.Pipeline)
+    assert len(player.elements) == 1
+
+
+# -- attaching -- #
+
+
+def test_setup_needs_a_running_loop(pipeline):
     with pytest.raises(PlayerNotConfigured):
-        await player.set_state(Gst.State.PLAYING)
+        Player(pipeline).setup()
 
 
 @pytest.mark.asyncio
-async def test_gst_error_on_start_exception(error_pipeline):
-    player = Player(error_pipeline)
+async def test_setup_is_idempotent_and_bound_to_one_loop(pipeline):
+    player = Player(pipeline)
     player.setup()
+    player.setup()
+    assert player.loop is asyncio.get_running_loop()
 
-    with pytest.raises(PlayerSetStateError):
-        await player.play()
+    async def elsewhere():
+        player.setup()
+
+    with pytest.raises(PlayerNotConfigured):
+        await bounded(asyncio.to_thread(asyncio.run, elsewhere()))
+    player.teardown()
+    assert player.loop is None
+
+
+@pytest.mark.asyncio
+async def test_threadsafe_calls_need_attaching(pipeline):
+    player = Player(pipeline)
+    with pytest.raises(PlayerNotConfigured):
+        player.call_soon_threadsafe(print)
+    coro = asyncio.sleep(0)
+    with pytest.raises(PlayerNotConfigured):
+        player.run_coroutine_threadsafe(coro)
+    coro.close()
+
+
+@pytest.mark.asyncio
+async def test_run_coroutine_threadsafe_from_a_thread(pipeline):
+    async with Player(pipeline) as player:
+
+        async def on_loop():
+            return threading.current_thread(), asyncio.get_running_loop()
+
+        def from_thread():
+            return player.run_coroutine_threadsafe(on_loop()).result(5)
+
+        thread, loop = await bounded(asyncio.to_thread(from_thread))
+        assert thread is threading.main_thread()
+        assert loop is player.loop
+
+        called = asyncio.Event()
+        await bounded(asyncio.to_thread(player.call_soon_threadsafe, called.set))
+        await bounded(called.wait())
+
+
+# -- state -- #
+
+
+@pytest.mark.asyncio
+async def test_state_sequence(pipeline, mocker):
+    async with Player(pipeline) as player:
+        spy = mocker.spy(player.pipeline, "set_state")
+
+        await bounded(player.ready())
+        spy.assert_called_with(Gst.State.READY)
+        assert player.state == Gst.State.READY
+
+        await bounded(player.play())
+        spy.assert_called_with(Gst.State.PLAYING)
+        assert player.state == Gst.State.PLAYING
+
+        await bounded(player.pause())
+        spy.assert_called_with(Gst.State.PAUSED)
+        assert player.state == Gst.State.PAUSED
+
+        await bounded(player.stop())
+        spy.assert_called_with(Gst.State.NULL)
+        assert player.state == Gst.State.NULL
+
+
+@pytest.mark.asyncio
+async def test_set_state_to_the_current_state_is_a_no_op(pipeline, mocker):
+    async with Player(pipeline) as player:
+        spy = mocker.spy(player.pipeline, "set_state")
+        ret = await bounded(player.set_state(Gst.State.NULL))
+        assert ret == Gst.StateChangeReturn.SUCCESS
+        spy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_play_stop_play_is_not_stale():
+    async with Player.from_description(LIVE) as player:
+        await bounded(player.play())
+        await bounded(player.stop())
+        assert player.state == Gst.State.NULL
+        await bounded(player.play())
+        assert player.state == Gst.State.PLAYING
+        assert player.pending == Gst.State.VOID_PENDING
+
+
+@pytest.mark.asyncio
+async def test_stop_on_a_null_player_is_a_no_op(pipeline, mocker):
+    async with Player(pipeline) as player:
+        spy = mocker.spy(player.pipeline, "set_state")
+        await bounded(player.stop())
+        await bounded(player.stop(eos=True))
+        spy.assert_not_called()
+        assert player.state == Gst.State.NULL
+
+
+@pytest.mark.asyncio
+async def test_failed_state_change_raises_the_elements_error(error_pipeline):
+    async with Player(error_pipeline) as player:
+        with pytest.raises(PlayerPipelineError) as info:
+            await bounded(player.play())
+        assert player.error is info.value
+        assert player.state == Gst.State.NULL
+
+
+# -- errors -- #
+
+
+@pytest.mark.asyncio
+async def test_error_during_a_pending_play_reaches_the_caller():
+    unhandled = []
+    asyncio.get_running_loop().set_exception_handler(lambda loop, ctx: unhandled.append(ctx))
+    async with Player.from_description(NEVER_PREROLLS) as player:
+        stream = player.events()
+        task = asyncio.create_task(player.play())
+        await wait_for_event(stream, StateChanged)  # the change is under way
+        await bounded(asyncio.to_thread(post_error, player.pipeline))
+
+        with pytest.raises(PlayerPipelineError, match="boom") as info:
+            await bounded(task)
+        error = info.value
+        assert (error.source, error.message, error.debug) == ("src", "boom", "debug")
+        assert isinstance(error.gerror, GLib.Error)
+        assert str(error) == "src: boom (debug)"
+        assert player.error is error
+        assert (await wait_for_event(stream, Error)).error is error
+        assert player.state == Gst.State.NULL
+
+        # the player stays attached and usable
+        assert player.loop is asyncio.get_running_loop()
+    gc.collect()
+    assert unhandled == []
+
+
+@pytest.mark.asyncio
+async def test_play_until_eos_raises_on_an_error_pipeline(error_pipeline):
+    async with Player(error_pipeline) as player:
+        with pytest.raises(PlayerPipelineError):
+            await bounded(player.play_until_eos())
+
+
+@pytest.mark.asyncio
+async def test_error_ends_a_play_until_eos():
+    async with Player.from_description(NEVER_PREROLLS) as player:
+        stream = player.events()
+        task = asyncio.create_task(player.play_until_eos())
+        await wait_for_event(stream, StateChanged)
+        await bounded(asyncio.to_thread(post_error, player.pipeline))
+        with pytest.raises(PlayerPipelineError, match="boom"):
+            await bounded(task)
+
+
+# -- eos -- #
+
+
+@pytest.mark.asyncio
+async def test_play_until_eos_again_after_stop():
+    async with Player.from_description("videotestsrc num-buffers=10 ! fakesink") as player:
+        stream = player.events()
+        await bounded(player.play_until_eos())
+        await bounded(player.stop())
+        await bounded(player.play_until_eos())
+        await bounded(player.stop())
+    seen = [event async for event in stream]
+    assert len([e for e in seen if isinstance(e, Eos)]) == 2
+
+
+@pytest.mark.asyncio
+async def test_send_eos():
+    async with Player.from_description(LIVE) as player:
+        await bounded(player.play())
+        await bounded(player.send_eos())
+        await bounded(player.stop())
+
+
+# -- teardown -- #
+
+
+def test_there_is_no_destructor():
+    assert not hasattr(Player, "__del__")
+
+
+@pytest.mark.asyncio
+async def test_teardown_twice(pipeline):
+    player = Player(pipeline)
+    await bounded(player.play())
+    player.teardown()
+    player.teardown()
+    assert player.state == Gst.State.NULL
+    assert player.loop is None
+
+
+def test_teardown_after_the_loop_closed(pipeline):
+    player = Player(pipeline)
+    asyncio.run(bounded(player.play()))
+    assert player.state == Gst.State.PLAYING
+    player.teardown()
+    player.teardown()
+    assert player.state == Gst.State.NULL
+
+
+def test_reuse_after_the_loop_closed(pipeline):
+    player = Player(pipeline)
+    asyncio.run(bounded(player.play()))  # no teardown: the player is left on a dead loop
+    asyncio.run(bounded(player.stop()))
+    asyncio.run(bounded(player.play()))
+    assert player.state == Gst.State.PLAYING
     player.teardown()
 
 
 @pytest.mark.asyncio
-async def test_async_player_sequence(pipeline, mocker):
-    player = Player(pipeline)
-    player.setup()
-    spy = mocker.spy(player.pipeline, "set_state")
+async def test_teardown_cancels_waiters_and_ends_events():
+    player = Player.from_description(NEVER_PREROLLS)
+    stream = player.events()
+    task = asyncio.create_task(player.play())
+    await wait_for_event(stream, StateChanged)
+    player.teardown()
+    await asyncio.wait({task}, timeout=5)
+    assert task.cancelled()
+    assert [e async for e in stream]  # ends, after what was already published
 
-    await player.ready()
-    spy.assert_called_with(Gst.State.READY)
+    # a later await attaches again
+    await bounded(player.ready())
+    assert player.loop is asyncio.get_running_loop()
+    player.teardown()
 
-    await player.play()
-    await asyncio.sleep(1)
-    spy.assert_called_with(Gst.State.PLAYING)
 
-    await player.pause()
-    spy.assert_called_with(Gst.State.PAUSED)
-
-    await player.stop()
-    spy.assert_called_with(Gst.State.NULL)
+# -- events and handlers -- #
 
 
 @pytest.mark.asyncio
-async def test_player_send_eos(pipeline, mocker):
-    player = Player(pipeline=pipeline)
-    player.setup()
-    spy = mocker.spy(player.pipeline, "send_event")
-    await player.play()
-    await player.send_eos()
-    spy.assert_called()
-    await player.stop()
+async def test_events(pipeline):
+    async with Player(pipeline) as player:
+        stream = player.events()
+        await bounded(player.play())
+        player.pipeline.post_message(
+            Gst.Message.new_warning(
+                None,
+                GLib.Error.new_literal(Gst.StreamError.quark(), "careful", Gst.StreamError.FAILED),
+                "dbg",
+            )
+        )
+        seen = []
+
+        async def until_warning():
+            async for event in stream:
+                seen.append(event)
+                if isinstance(event, Warning):
+                    return
+
+        await bounded(until_warning())
+        await bounded(player.stop())
+    changes = [(e.old, e.new) for e in seen if isinstance(e, StateChanged)]
+    assert (Gst.State.PAUSED, Gst.State.PLAYING) in changes
+    assert any(isinstance(e, Message) for e in seen)
+    (warning,) = [e for e in seen if isinstance(e, Warning)]
+    assert (warning.message, warning.debug) == ("careful", "dbg")
+
+
+class Bly(Player):
+    """The pattern of an application subclassing the player"""
+
+    def __init__(self, pipeline, extra):
+        super().__init__(pipeline)
+        self.extra = extra
+        self.calls = []
+        self.applications = asyncio.Queue()
+        self.add_handler(Gst.MessageType.APPLICATION, self.applications.put_nowait)
+
+    async def play(self):
+        self.calls.append("play")
+        return await super().play()
+
+
+@pytest.mark.asyncio
+async def test_subclass_with_extra_args_override_and_handler(pipeline):
+    player = Bly(pipeline, "extra")
+    async with player:
+        await bounded(player.play())
+        assert player.calls == ["play"]
+        assert player.extra == "extra"
+
+        structure = Gst.Structure.new_empty("hello")
+        player.pipeline.post_message(Gst.Message.new_application(player.pipeline, structure))
+        message = await bounded(player.applications.get())
+        assert message.get_structure().get_name() == "hello"
+
+
+@pytest.mark.asyncio
+async def test_handlers_survive_each_other_and_can_be_removed(pipeline, caplog):
+    seen = []
+
+    def broken(message):
+        raise RuntimeError("handler bug")
+
+    async with Player(pipeline) as player:
+        removers = [
+            player.add_handler(Gst.MessageType.APPLICATION, broken),
+            player.add_handler(Gst.MessageType.APPLICATION, lambda m: seen.append("one")),
+            player.add_handler(Gst.MessageType.APPLICATION | Gst.MessageType.EOS, seen.append),
+        ]
+        stream = player.events()
+
+        def post():
+            player.pipeline.post_message(
+                Gst.Message.new_application(None, Gst.Structure.new_empty("x"))
+            )
+
+        post()
+        await wait_for_event(stream, Message)
+        assert seen[0] == "one"
+        assert len(seen) == 2
+        assert "handler bug" in caplog.text
+
+        for remove in removers:
+            remove()
+            remove()  # idempotent
+        post()
+        await wait_for_event(stream, Message)
+        assert len(seen) == 2

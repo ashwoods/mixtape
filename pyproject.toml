@@ -1,6 +1,6 @@
 [project]
 name = "mixtape"
-version = "0.6.0.dev0"
+version = "0.7.0.dev0"
 description = "Gstreamer python application mini-framework"
 readme = "README.md"
 license = "MIT"
@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Ashley Camba Garrido", email = "ashwoods@gmail.com" }]
 # PyGObject (`gi`) and GStreamer come from the system (Homebrew or apt), see README.
 requires-python = ">=3.12"
-dependencies = ["attrs", "beppu"]
+dependencies = []
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
@@ -81,5 +81,5 @@ check_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["gi.*", "beppu.*"]
+module = ["gi.*"]
 ignore_missing_imports = true

@@ -46,10 +46,3 @@ def error_pipeline(Gst):
     pipeline = Gst.parse_launch(description)
     assert isinstance(pipeline, Gst.Pipeline)
     return pipeline
-
-
-@pytest.fixture
-def player(Gst):
-    from mixtape.players import AsyncPlayer
-
-    return AsyncPlayer

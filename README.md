@@ -82,6 +82,49 @@ GStreamer blocks while stopping. `-v` logs at info
 level and shows the error's debug string, `-vv` logs at debug level. On macOS, `mixtape run`
 runs the main run loop so video windows appear.
 
+### Inspecting and setting properties
+A `Player` describes what it exposes: its properties, with types, ranges and current values,
+and its commands. Declare your own with `prop()`, an alias of an element property, and
+`@command`; the class `description` is the pipeline `mixtape` builds for it:
+
+```python
+# demo.py
+from mixtape import Player, command, prop
+
+
+class Demo(Player):
+    description = "videotestsrc name=src num-buffers=100 ! x264enc name=enc ! fakesink"
+
+    bitrate = prop("enc.bitrate", description="Target bitrate in kbit/s")
+
+    @command
+    def shout(self, word: str, times: int = 2) -> str:
+        """Repeat a word."""
+        return word * times
+```
+
+```python
+player = Demo.from_description(Demo.description)
+spec = player.describe()  # a pydantic model: spec.model_dump_json() is JSON with JSON Schema types
+player.get("bitrate")  # 2048, the same as player.get("enc.bitrate")
+await player.set("bitrate", "4000")  # "4000" is validated and converted to 4000
+await player.invoke("shout", word="hi")  # "hihi"
+```
+
+`mixtape inspect` prints the same model without playing, from a description or a
+`module:Class` (found in the current directory too), as text or with `--json` as JSON.
+`mixtape run --set PATH=VALUE` sets properties before playing, and can be repeated:
+
+    mixtape inspect demo:Demo
+    mixtape inspect --json "videotestsrc name=src ! fakesink"
+    mixtape run demo:Demo --set bitrate=4000 --set src.pattern=ball
+
+Only the named elements (`name=src`) are exposed, `--expose-all` (or `expose_all=True`) exposes
+every element. A value is validated against the property's type and range, and one that is out of
+range or unknown is rejected: `run` prints `error: ...` and exits 2. The "mutable: playing"
+hint in `inspect` only reports what the element declares; it is not enforced, and setting a
+property while playing is up to the element.
+
 ## Usage
 `Player` wraps a `Gst.Pipeline` and drives it from an asyncio loop. Create one from a
 `gst-launch` style description with `Player.from_description`; it needs no running loop.

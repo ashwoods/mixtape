@@ -1,4 +1,6 @@
+import json
 import queue
+import re
 import signal
 import subprocess
 import sys
@@ -22,6 +24,78 @@ def test_run_pipeline_error(capsys: pytest.CaptureFixture[str]) -> None:
 def test_run_bad_description(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["run", "videotestsrc ! nosuchelement"]) == 2
     assert "error:" in capsys.readouterr().err
+
+
+PIPELINE = "videotestsrc name=src pattern=snow num-buffers=5 ! fakesink"
+
+
+def test_inspect_text(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["inspect", PIPELINE]) == 0
+    out = capsys.readouterr().out
+    assert "src (videotestsrc) — Video test source" in out
+    assert any("pattern" in line and "rw" in line and "= snow" in line for line in out.splitlines())
+
+
+def test_inspect_json(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["inspect", "--json", "videotestsrc", "name=src", "!", "fakesink"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["elements"]["src"]["properties"]["pattern"]["schema"]["enum"][0] == "smpte"
+
+
+def test_inspect_expose_all(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["inspect", PIPELINE]) == 0
+    assert "(fakesink)" not in capsys.readouterr().out
+    assert main(["inspect", PIPELINE, "--expose-all"]) == 0
+    assert re.search(r"^fakesink\d+ \(fakesink\)", capsys.readouterr().out, re.MULTILINE)
+
+
+def test_inspect_player_class(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["inspect", "tests.players:Demo"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Demo\n")
+    assert "→ src.pattern" in out
+    assert "shout(word: string, times: integer = 2)" in out
+
+
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_run_set(position: str) -> None:
+    description = ["videotestsrc", "name=src", "num-buffers=5", "!", "fakesink"]
+    argv = ["run", "--set", "src.pattern=snow", *description]
+    if position == "after":
+        argv = ["run", *description, "--set", "src.pattern=snow", "--set", "src.is-live=false"]
+    assert main(argv) == 0
+
+
+@pytest.mark.parametrize(
+    "assignment", ["src.kx=x", "src.num-buffers=-9", "src.nope=1", "sink.sync=false"]
+)
+def test_run_set_rejected(assignment: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", "--set", assignment, "videotestsrc name=src ! fakesink"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and len(err.splitlines()) == 1
+
+
+def test_run_set_needs_a_value(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", "--set", "src.pattern", "videotestsrc ! fakesink"]) == 2
+    assert "PATH=VALUE" in capsys.readouterr().err
+
+
+def test_run_player_class() -> None:
+    assert main(["run", "tests.players:Demo"]) == 0
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "nosuchmodule:Demo",
+        "tests.players:Nope",
+        "tests.players:NOT_A_PLAYER",
+        "tests.players:NoDescription",
+    ],
+)
+def test_bad_target(target: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["inspect", target]) == 2
+    assert capsys.readouterr().err.startswith("error: ")
 
 
 def test_no_arguments(capsys: pytest.CaptureFixture[str]) -> None:

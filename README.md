@@ -155,9 +155,9 @@ stops and exits 0. In code: `async with mixtape.interfaces.http.serve(player, ho
 
 There is no authentication: it binds to 127.0.0.1 by default, and `--http 0.0.0.0:8080` warns
 that anyone who can reach the port can control the player. A request whose `Origin` is not the
-`Host` it was sent to is refused (403), and so is one whose `Host` is not `localhost`,
-`127.0.0.1` or `[::1]` while bound to a loopback address (DNS rebinding). Requests without an
-`Origin`, like curl's, pass.
+`Host` it was sent to is refused (403), and so is one whose `Host` is a DNS name other than
+`localhost` or this machine's own name (DNS rebinding); bound to a loopback address, the `Host`
+must be a loopback one. Requests without an `Origin`, like curl's, pass.
 
 ## Usage
 `Player` wraps a `Gst.Pipeline` and drives it from an asyncio loop. Create one from a

@@ -333,7 +333,12 @@ class Player:
 
     @command
     async def eos(self, timeout: float | None = None) -> None:
-        """Send an EOS event and wait for the EOS message it causes."""
+        """Send an EOS event and wait for the EOS message it causes, while playing."""
+        self.setup()
+        # paused, the EOS blocks on the prerolled sinks (and so would a stop after it);
+        # in NULL it waits for the next play; at EOS no second one comes
+        if self.state != Gst.State.PLAYING or self._eos:
+            raise CommandError("EOS needs a playing pipeline that is not at its EOS")
         await self.send_eos(timeout)
 
     @command
@@ -461,8 +466,14 @@ class Player:
     def _element_keys(self) -> dict[str, Gst.Element]:
         """Every element of the pipeline tree by its key: its name when no other element has
         it, else the dotted names from below the pipeline (`a.q`). Over all elements, so the
-        keys do not depend on what is exposed. The pipeline's key is always its name."""
-        elements = (self.pipeline, *self.pipeline.iterate_recurse())
+        keys do not depend on what is exposed. The pipeline's key is always its name, and a
+        top-level child of the same name has it prefixed (`pipeline0.pipeline0`)."""
+        while True:
+            try:  # a streaming thread adding elements (decodebin) makes the walk RESYNC
+                elements = (self.pipeline, *self.pipeline.iterate_recurse())
+                break
+            except Gst.IteratorError:
+                continue
         counts = Counter(e.get_name() for e in elements)
         keys: dict[str, Gst.Element] = {}
         for element in elements:
@@ -472,6 +483,8 @@ class Player:
                 while parent is not None and parent != self.pipeline:
                     names.insert(0, parent.get_name())
                     parent = parent.get_parent()
+                if names == [self.pipeline.get_name()]:
+                    names.insert(0, names[0])
             keys[".".join(names)] = element
         return keys
 

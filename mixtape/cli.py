@@ -342,7 +342,7 @@ async def _play(
             if http is None:
                 await player.play_until_eos()
             else:
-                async with _serving(player, *http, verbose):
+                async with _serving(player, *http, verbose, interrupted):
                     await interrupted.wait()
                     assert stopping is not None
                     await stopping
@@ -378,9 +378,12 @@ async def _play(
 
 
 @contextlib.asynccontextmanager
-async def _serving(player: Player, host: str, port: int, verbose: int) -> AsyncIterator[None]:
+async def _serving(
+    player: Player, host: str, port: int, verbose: int, stopping: asyncio.Event
+) -> AsyncIterator[None]:
     """Serve the player over HTTP and play it, until the block ends. Errors of the pipeline
-    are printed and leave the server up, so a page can play again."""
+    are printed and leave the server up, so a page can play again. `stopping` is set once
+    the user interrupts."""
     from .interfaces.http import serve  # needs the http extra, which `_run` has checked
     from .interfaces.http.security import is_loopback
 
@@ -401,7 +404,8 @@ async def _serving(player: Player, host: str, port: int, verbose: int) -> AsyncI
             except PlayerPipelineError:
                 pass  # the reporter prints it
             except PlayerSetStateError as exc:
-                print(f"error: {exc}", file=sys.stderr)
+                if not stopping.is_set():  # a Ctrl-C during the preroll interrupts it
+                    print(f"error: {exc}", file=sys.stderr)
             yield
         finally:
             stream.close()

@@ -73,6 +73,11 @@ def encode_event(event: events.Event) -> dict[str, Any] | None:
     return None  # Message
 
 
+def _encode(message: dict[str, Any]) -> str:
+    """The JSON text of a message, strict as REST is: NaN and infinities raise ValueError."""
+    return json.dumps(jsonable_encoder(message), allow_nan=False)
+
+
 async def _dispatch(player: Player, message: Any) -> Any:
     """Run a client message and return its result."""
     if not isinstance(message, dict):
@@ -100,17 +105,24 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
     stream = player.events(position=True)  # before the values: nothing falls between them
     lock = asyncio.Lock()  # a reply and an event must not interleave on the socket
 
-    async def send(message: dict[str, Any]) -> None:
+    async def send(message: dict[str, Any] | str) -> None:
+        text = message if isinstance(message, str) else _encode(message)
         async with lock:
             try:
-                await websocket.send_text(json.dumps(jsonable_encoder(message)))
+                await websocket.send_text(text)
             except (WebSocketDisconnect, RuntimeError):
                 pass  # the client left: the receiving loop ends the connection
 
     async def forward() -> None:
         async for event in stream:
-            if (message := encode_event(event)) is not None:
-                await send(message)
+            if (message := encode_event(event)) is None:
+                continue
+            try:
+                text = _encode(message)
+            except ValueError:
+                logger.exception("Could not send %r", event)
+                continue
+            await send(text)
 
     commands: set[asyncio.Task[None]] = set()
 
@@ -124,12 +136,15 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
             if isinstance(message, dict):
                 reply["id"] = message.get("id")
             reply["result"] = await _dispatch(player, message)
+            await send(_encode(reply))  # a result JSON cannot carry fails here
+            return
         except MixTapeError as exc:
             status, body = describe_error(exc)
             reply["error"] = {"status": status, **body}
         except Exception:
             logger.exception("A WebSocket message failed")
             reply["error"] = {"status": 500, "detail": "Internal error"}
+        reply.pop("result", None)
         await send(reply)
 
     async def receive() -> None:

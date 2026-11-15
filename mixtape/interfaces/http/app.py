@@ -81,6 +81,18 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
             response_model=None,
             summary=command.name,
             description=command.description,
+            responses={
+                200: {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {"result": command.result or {"type": "null"}},
+                            }
+                        }
+                    }
+                }
+            },
             openapi_extra={
                 "requestBody": {
                     "required": False,

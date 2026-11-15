@@ -20,6 +20,7 @@ from websockets.typing import Origin
 
 from mixtape import Player, command
 from mixtape.interfaces.http import Listening, serve
+from mixtape.interfaces.http.security import check_headers
 
 PIPELINE = "videotestsrc name=src ! queue name=q ! fakesink name=sink"
 COLLIDING = "bin.( name=a queue name=q ! fakesink ) bin.( name=b queue name=q ! fakesink )"
@@ -72,6 +73,8 @@ async def test_commands(served: Served) -> None:
     assert (await client.get("/api/properties")).json()["state"] == "playing"
     assert (await client.post("/api/commands/pause", content=b"")).status_code == 200
     assert served.player.get("state") == "paused"
+    # paused, an EOS would block the prerolled sinks and freeze the loop on the next stop
+    assert (await client.post("/api/commands/eos")).status_code == 409
 
     bad = await client.post("/api/commands/seek", json={"position": -1})
     assert bad.status_code == 422
@@ -234,6 +237,25 @@ async def test_an_origin_that_is_not_the_host_is_refused(served: Served) -> None
     assert refused.value.response.status_code == 403
     async with websockets.connect(served.ws_url, origin=Origin(f"http://{host}")) as ws:
         assert (await message(ws))["type"] == "values"
+
+
+@pytest.mark.parametrize(
+    ("host", "loopback", "allowed"),
+    [
+        ("127.0.0.1:8080", True, True),
+        ("127.0.0.2:8080", True, True),
+        ("[::1]:8080", True, True),
+        ("localhost:8080", True, True),
+        ("192.168.1.5:8080", True, False),
+        ("evil.example:8080", True, False),
+        ("192.168.1.5:8080", False, True),
+        ("localhost:8080", False, True),
+        ("evil.example:8080", False, False),  # rebound to the LAN address
+    ],
+)
+def test_the_host_must_name_this_machine(host: str, loopback: bool, allowed: bool) -> None:
+    headers = {"host": host, "origin": f"http://{host}"}
+    assert (check_headers(headers, loopback=loopback) is None) == allowed
 
 
 def run_python(code: str) -> subprocess.CompletedProcess[str]:

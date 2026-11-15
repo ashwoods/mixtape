@@ -133,9 +133,13 @@ class Player:
     async def play_until_eos(self) -> None:
         """Play until eos or an error"""
         await self.play()
-        await asyncio.wait(
-            {self.events.eos.wait(), self.events.error.wait()}, return_when=asyncio.FIRST_COMPLETED
-        )
+        waiters = {
+            asyncio.create_task(self.events.eos.wait()),
+            asyncio.create_task(self.events.error.wait()),
+        }
+        _, pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
 
     # -- bus message handling -- #
 
@@ -149,9 +153,7 @@ class Player:
             handler = self.handlers.get(msg.type, self._on_unhandled_msg)
             handler(self.bus, msg)
 
-    def _on_state_changed(
-        self, bus: Gst.Bus, message: Gst.Message
-    ) -> None:  # pylint: disable=unused-argument
+    def _on_state_changed(self, bus: Gst.Bus, message: Gst.Message) -> None:
         """
         Handler for `state_changed` messages
         By default will only log to `debug`
@@ -217,7 +219,8 @@ class Player:
         """
         live, running_time, stream_time, timestamp, duration = message.parse_qos()
         logger.warning(
-            "Qos message: live:%s - running:%s - stream:%s - timestamp:%s - duration:%s received from %s on %s",
+            "Qos message: live:%s - running:%s - stream:%s - timestamp:%s - duration:%s "
+            "received from %s on %s",
             live,
             running_time,
             stream_time,

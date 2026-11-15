@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # gi and GStreamer come from apt, as in the Dockerfile.
+      - name: Install GStreamer
+        run: |
+          sudo apt-get update -yq
+          sudo apt-get install -yq --no-install-recommends \
+            python3-gi \
+            python3-gst-1.0 \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.7"
+
+      - name: ruff, mypy, pytest
+        run: scripts/check
+        env:
+          MIXTAPE_PYTHON: /usr/bin/python3

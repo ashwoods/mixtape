@@ -81,10 +81,10 @@ class BasePlayer:
         """Set pipeline to state to Gst.State.PAUSED"""
         return self.set_state(Gst.State.PAUSED)
 
-    # fmt: off
-    def stop(self, send_eos: bool = False, teardown: bool = False) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
+    def stop(
+        self, send_eos: bool = False, teardown: bool = False
+    ) -> Tuple[Gst.StateChangeReturn, Gst.State, Gst.State]:
         """Set pipeline to state to Gst.State.NULL, with the option of sending eos and teardown"""
-    # fmt: on
         if send_eos:
             self.send_eos()
 

@@ -1,12 +1,8 @@
-version: "3.7"
 services:
-  test: &FULL
+  test:
     build:
       context: .
       dockerfile: Dockerfile
-    command: python3 -m pytest /src/tests
+    command: scripts/check
     volumes:
       - .:/src
-    environment:
-      - GST_PLUGIN_PATH=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0
-      - CODECOV_TOKEN

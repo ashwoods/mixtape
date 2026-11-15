@@ -1,5 +1,7 @@
 # type: ignore
 import asyncio
+import sys
+
 import pytest
 
 import gi
@@ -11,6 +13,13 @@ from mixtape.players import Player
 from mixtape.exceptions import PlayerSetStateError, PlayerNotConfigured
 
 
+# beppu.Basket calls asyncio.get_event_loop(), which raises outside a running loop on 3.14+.
+@pytest.mark.xfail(
+    sys.version_info >= (3, 14),
+    reason="Player() needs a running event loop on Python 3.14+ (beppu)",
+    raises=RuntimeError,
+    strict=True,
+)
 def test_base_player_init_and_default_props(pipeline):
     player = Player(pipeline=pipeline)
     assert player.pipeline == pipeline

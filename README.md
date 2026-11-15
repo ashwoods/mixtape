@@ -1,6 +1,6 @@
 # mixtape: awesome mix vol. 1 🎵📼 
 
-![Pypi page] ![Pypi license] ![Pypi version] ![Build Status] ![Quality Gate Status] ![Codecov]
+![Pypi page] ![Pypi license] ![Pypi version] ![Build Status] ![Quality Gate Status]
 
 |[●▪▪●]| A python based `gstreamer` **player**-mini-framework.
 
@@ -39,6 +39,34 @@ You can use `pip` to install `mixtape`:
 
     pip install mixtape
 
+`mixtape` needs GStreamer and PyGObject (`gi`), which come from your system, not from PyPI:
+`brew install gstreamer` on macOS, or
+`apt install python3-gi python3-gst-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good`
+on Debian/Ubuntu. Install `mixtape` into that Python, or into a venv created with
+`--system-site-packages` from it.
+
+## Development
+
+You need [uv] and GStreamer with its Python bindings:
+
+    brew install uv gstreamer   # macOS (Homebrew)
+    sudo apt install python3-gi python3-gst-1.0 \
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good   # Debian/Ubuntu
+
+Then run every check (ruff lint, ruff format, mypy, pytest) with:
+
+    scripts/check
+
+The first run creates `.venv` from the Python that has `gi` (Homebrew's `python3`, or
+`/usr/bin/python3`; set `MIXTAPE_PYTHON` to choose another) with `--system-site-packages`,
+so the venv sees PyGObject and GStreamer's Python overrides, then `uv sync`s the dev
+dependencies. Arguments go to pytest: `scripts/check -k eos`. After that, `uv run pytest`,
+`uv run ruff format` and `uv run mypy` work on their own.
+
+Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI does):
+
+    docker compose run --rm test
+
 ## Usage
 
 You can use `mixtape` similar to how you use `gst-launch-1.0` by passing 
@@ -52,6 +80,7 @@ from mixtape import AsyncPlayer as Player
 
 desc = "videotestsrc num-buffers=100 ! fakesink"
 
+
 async def main(self):
     p = Player.from_desc(desc)
     await p.play()
@@ -60,7 +89,6 @@ async def main(self):
 
 
 asyncio.run(main())
-
 ```
 
 The run classmethod is a shortcut for setting up the asyncio boilerplate and 
@@ -83,13 +111,13 @@ import threading
 desc = "videotestsrc ! fakesink"
 
 p = player.from_description(desc)
-t = threading.Thread(target=lambda: p.run(autoplay=False)) # init the player in another thread
+t = threading.Thread(target=lambda: p.run(autoplay=False))  # init the player in another thread
 t.daemon = True  # set the thread to background
 t.start()
-seq = ['play', 'pause', 'play', 'stop']
+seq = ["play", "pause", "play", "stop"]
 for step in seq:
     sleep(3)
-    s = getattr(p, "call_%s" % step) # call_x schedules the coroutine
+    s = getattr(p, "call_%s" % step)  # call_x schedules the coroutine
     s()  # set the pipeline to `play`, `pause`, `play` and `stop`
 t.join()
 ```
@@ -99,9 +127,9 @@ Constructing a dynamic pipeline and passing it to the player:
 ```python
 import Gst
 
-pipe = Gst.Pipeline.new('dynamic')
-src = Gst.ElementFactory.make('videotestsrc')
-sink = Gst.ElementFactory.make('fakesink')
+pipe = Gst.Pipeline.new("dynamic")
+src = Gst.ElementFactory.make("videotestsrc")
+sink = Gst.ElementFactory.make("fakesink")
 pipe.add(src, sink)
 src.link(sink)
 
@@ -130,7 +158,7 @@ from mixtape.features import GstShark
 
 desc = "videotestsrc num-buffers=100 ! tee name=tee ! queue ! fakesink"
 p = Player.from_desc(desc, features=[GstShark])
-p.gstshark.set_tracers('latency')
+p.gstshark.set_tracers("latency")
 p.run()
 ```
 
@@ -196,13 +224,13 @@ p.run()
 We are Groot.
 
 [GStreamer]: https://gstreamer.freedesktop.org/
+[uv]: https://docs.astral.sh/uv/
 [GObject]: https://developer.gnome.org/gobject/stable/
 [GStreamer tutorials]: https://gstreamer.freedesktop.org/documentation/tutorials/index.html
 [Pypi page]: https://img.shields.io/pypi/v/mixtape.svg
 [Pypi license]: https://img.shields.io/pypi/l/mixtape.svg
 [Pypi version]: https://img.shields.io/pypi/pyversions/mixtape.svg
-[Build Status]: https://travis-ci.org/ashwoods/mixtape.svg?branch=master
+[Build Status]: https://github.com/ashwoods/mixtape/actions/workflows/ci.yml/badge.svg?branch=master
 [Quality Gate Status]: https://sonarcloud.io/api/project_badges/measure?project=ashwoods_mixtape&metric=alert_status
 [Requirements Status]: https://requires.io/github/ashwoods/mixtape/requirements.svg?branch=master
-[Codecov]: https://codecov.io/gh/ashwoods/mixtape/branch/master/graph/badge.svg
 

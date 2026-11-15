@@ -1,21 +1,22 @@
-FROM ashwoods/gst-base:1.16.2
+# Fallback for running the checks without a native GStreamer: the same
+# Ubuntu packages as CI (.github/workflows/ci.yml), running scripts/check.
+FROM ubuntu:24.04
 
-WORKDIR /tmp
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
+
 RUN apt-get update -yq \
-    && apt-get install git meson build-essential -yq \
-    && git clone https://github.com/ashwoods/gst-c-crash.git \
-    && cd gst-c-crash \
-    && meson build/ && ninja install -C build \
-    && apt-get remove --purge git meson build-essential -yq \
-    && apt-get -yq clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && cd /tmp \
-    && rm -rf /tmp/gst-c-crash
+    && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+        python3 \
+        python3-gi \
+        python3-gst-1.0 \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY . /src
+# Keep the venv out of /src, which docker-compose mounts from the host.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy
+
 WORKDIR /src
-RUN set -ex \
-    && pip install -r req-install.txt \
-    && pip install -r req-test.txt \
-    && pip install -e ./
-
+COPY . /src
+CMD ["scripts/check"]

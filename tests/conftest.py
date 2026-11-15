@@ -19,15 +19,6 @@ logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 
-# flake8 plugin is way too verbose
-def pytest_configure(config):
-    logging.getLogger("flake8").setLevel(logging.WARN)
-    logging.getLogger("bandit").setLevel(logging.WARN)
-    logging.getLogger("blib2to3").setLevel(logging.WARN)
-    logging.getLogger("stevedore").setLevel(logging.WARN)
-    logging.getLogger("filelock").setLevel(logging.WARN)
-
-
 @pytest.fixture
 def Gst():  # noqa
     import gi
@@ -42,8 +33,8 @@ def Gst():  # noqa
 @pytest.fixture
 def pipeline(Gst):
     """Make sure test pipeline is correct and test env setup"""
-    SIMPLE_PIPELINE_DESCRIPTION = """videotestsrc ! queue ! fakesink"""
-    pipeline = Gst.parse_launch(SIMPLE_PIPELINE_DESCRIPTION)
+    description = "videotestsrc ! queue ! fakesink"
+    pipeline = Gst.parse_launch(description)
     assert isinstance(pipeline, Gst.Pipeline)
     return pipeline
 
@@ -51,8 +42,8 @@ def pipeline(Gst):
 @pytest.fixture
 def error_pipeline(Gst):
     """Error pipeline"""
-    ERROR_PIPELINE_DESCRIPTION = "filesrc ! queue ! fakesink"
-    pipeline = Gst.parse_launch(ERROR_PIPELINE_DESCRIPTION)
+    description = "filesrc ! queue ! fakesink"
+    pipeline = Gst.parse_launch(description)
     assert isinstance(pipeline, Gst.Pipeline)
     return pipeline
 

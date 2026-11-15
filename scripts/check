@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Run every check: ruff lint, ruff format, mypy and pytest.
+#
+# PyGObject (`gi`) and GStreamer's Python overrides come from the system
+# (Homebrew on macOS, apt on Debian/Ubuntu), not from PyPI, so the venv is
+# built on the Python that has them, with its site-packages visible.
+# Set MIXTAPE_PYTHON to pick that interpreter yourself; the venv goes to
+# UV_PROJECT_ENVIRONMENT when set (Docker), .venv otherwise.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+venv="${UV_PROJECT_ENVIRONMENT:-.venv}"
+
+has_gst() {
+  "$1" -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst' 2>/dev/null
+}
+
+if [[ ! -x "$venv/bin/python" ]] || ! has_gst "$venv/bin/python"; then
+  python=""
+  brew_python="$(brew --prefix 2>/dev/null || true)/bin/python3"
+  for candidate in "${MIXTAPE_PYTHON:-}" "$brew_python" /usr/bin/python3; do
+    if [[ -n "$candidate" && -x "$candidate" ]] && has_gst "$candidate"; then
+      python="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$python" ]]; then
+    echo "No Python with gi and GStreamer found. Install them first:" >&2
+    echo "  macOS:  brew install gstreamer" >&2
+    echo "  Ubuntu: apt install python3-gi python3-gst-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good" >&2
+    exit 1
+  fi
+  uv venv --clear --system-site-packages --python "$python" "$venv"
+fi
+
+uv sync --locked
+uv run --no-sync ruff check
+uv run --no-sync ruff format --check
+uv run --no-sync mypy
+uv run --no-sync pytest "$@"

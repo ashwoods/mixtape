@@ -1,18 +1,81 @@
-[tool.black]
+[project]
+name = "mixtape"
+version = "0.6.0.dev0"
+description = "Gstreamer python application mini-framework"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ashley Camba Garrido", email = "ashwoods@gmail.com" }]
+# PyGObject (`gi`) and GStreamer come from the system (Homebrew or apt), see README.
+requires-python = ">=3.12"
+dependencies = ["attrs", "beppu"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/ashwoods/mixtape"
+
+[dependency-groups]
+dev = [
+    "colorlog",
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+    "pytest-timeout",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mixtape"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --tb=short"
+testpaths = ["tests"]
+timeout = 20
+timeout_method = "thread"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
 line-length = 100
-target-version = ['py36', 'py37', 'py38']
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "N"]
+ignore = [
+    "E402", # gi.require_version() must run before `from gi.repository import ...`
+    "N818", # renaming the public exceptions is an API change
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N803"] # the `Gst` fixture mirrors the module name
+
+[tool.mypy]
+files = ["mixtape", "tests"]
+strict_optional = true
+strict_equality = true
+warn_no_return = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["gi.*", "beppu.*"]
+ignore_missing_imports = true

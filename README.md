@@ -120,7 +120,9 @@ await player.invoke("shout", word="hi")  # "hihi"
     mixtape run demo:Demo --set bitrate=4000 --set src.pattern=ball
 
 Only the named elements (`name=src`) are exposed, `--expose-all` (or `expose_all=True`) exposes
-every element. A value is validated against the property's type and range, and one that is out of
+every element. Elements inside playbin or decodebin are never user-named. When two elements
+share a name, each is keyed by its dotted path (`a.q`, `b.q`) and a bare `q` is ambiguous.
+A value is validated against the property's type and range, and one that is out of
 range or unknown is rejected: `run` prints `error: ...` and exits 2. The "mutable: playing"
 hint in `inspect` only reports what the element declares; it is not enforced, and setting a
 property while playing is up to the element.

@@ -6,6 +6,7 @@ import contextlib
 import inspect
 import logging
 import warnings
+from collections import Counter
 from collections.abc import Callable, Coroutine
 from typing import Any, ClassVar, Self
 
@@ -39,7 +40,7 @@ from .model import (
     describe_element,
     element_prop_spec,
     exposed_props,
-    is_named,
+    is_user_named,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,8 @@ class Player:
 
     description: ClassVar[str | None] = None
     """The pipeline description of a subclass that carries its own, for `mixtape run`"""
+    position_interval: ClassVar[float] = 0.25
+    """Seconds between the reads that publish `Position` to `events(position=True)` streams"""
 
     _declared: ClassVar[Declarations]
 
@@ -106,6 +109,8 @@ class Player:
         self._eos_waiters: list[asyncio.Future[None]] = []
         self._handlers: dict[object, tuple[Gst.MessageType, MessageCallback]] = {}
         self._events = events.Broadcast()
+        self._position_task: asyncio.Task[None] | None = None  # while a position stream is open
+        self._last_position: tuple[float | None, float | None] | None = None  # the last published
         self._expose_all = expose_all
         self._notify_ids: list[tuple[Gst.Element, int]] = []
         self._bin_ids: list[int] = []  # the pipeline's deep-element-added/removed handlers
@@ -203,6 +208,7 @@ class Player:
         if self._loop is not None and self._loop.is_closed():
             self._loop = self._fd = None  # the loop died without a teardown
             self._events = events.Broadcast()  # and its subscribers with it
+            self._position_task = self._last_position = None
         if self._loop is loop:
             return
         if self._loop is not None:
@@ -220,6 +226,9 @@ class Player:
         self._live = self._buffering = self._eos = False
         loop, fd = self._loop, self._fd
         self._loop = self._fd = None
+        if self._position_task is not None and loop is not None and not loop.is_closed():
+            self._position_task.cancel()
+        self._position_task = self._last_position = None
         waiters = [future for _, future in self._state_waiters] + self._eos_waiters
         self._state_waiters.clear()
         self._eos_waiters.clear()
@@ -387,12 +396,13 @@ class Player:
         properties = dict(BUILTIN_PROPS)
         for name, alias in self._declarations().props.items():
             element, ps, codec = self._locate(alias.target, exposed=False)
-            properties[name] = alias.spec(element_prop_spec(element, ps, codec))
+            key = alias.target.rpartition(".")[0]  # what `_locate` found it by
+            properties[name] = alias.spec(element_prop_spec(element, key, ps, codec))
         return PlayerSpec(
             name=type(self).__name__,
             commands={name: c.spec for name, c in self._declarations().commands.items()},
             properties=properties,
-            elements={name: describe_element(e) for name, e in self._exposed_elements().items()},
+            elements={key: describe_element(e, key) for key, e in self._exposed_elements().items()},
         )
 
     def get(self, path: str) -> Any:
@@ -445,17 +455,30 @@ class Player:
             result = await result
         return None if declared.spec.builtin else result
 
+    def _element_keys(self) -> dict[str, Gst.Element]:
+        """Every element of the pipeline tree by its key: its name when no other element has
+        it, else the dotted names from below the pipeline (`a.q`). Over all elements, so the
+        keys do not depend on what is exposed. The pipeline's key is always its name."""
+        elements = (self.pipeline, *self.pipeline.iterate_recurse())
+        counts = Counter(e.get_name() for e in elements)
+        keys: dict[str, Gst.Element] = {}
+        for element in elements:
+            names = [element.get_name()]
+            if element is not self.pipeline and counts[names[0]] > 1:
+                parent = element.get_parent()
+                while parent is not None and parent != self.pipeline:
+                    names.insert(0, parent.get_name())
+                    parent = parent.get_parent()
+            keys[".".join(names)] = element
+        return keys
+
     def _exposed_elements(self) -> dict[str, Gst.Element]:
-        """The elements the model exposes: the named ones, or all with `expose_all`.
+        """The elements the model exposes by key: the named ones, or all with `expose_all`.
         The pipeline itself counts too: `playbin name=pb` is the pipeline."""
-        return {
-            e.get_name(): e
-            for e in (self.pipeline, *self.pipeline.iterate_recurse())
-            if self._is_exposed(e)
-        }
+        return {key: e for key, e in self._element_keys().items() if self._is_exposed(e)}
 
     def _is_exposed(self, element: Gst.Element) -> bool:
-        return self._expose_all or is_named(element)
+        return self._expose_all or is_user_named(element)
 
     def _resolve(self, path: str) -> tuple[Gst.Element, Any, Codec]:
         """Like `_locate`, following an alias to its target, which is always exposed."""
@@ -465,15 +488,17 @@ class Player:
     def _locate(self, path: str, *, exposed: bool = True) -> tuple[Gst.Element, Any, Codec]:
         """The element, ParamSpec and codec of an `element.property` path."""
         name, _, prop_name = path.rpartition(".")
-        if name and name == self.pipeline.get_name():
-            element = self.pipeline  # get_by_name only searches the children
-        else:
-            element = self.pipeline.get_by_name(name) if name else None
+        keys = self._element_keys()
+        element = keys.get(name)
+        if element is None and name:
+            same = sorted(key for key, e in keys.items() if e.get_name() == name)
+            if len(same) > 1:
+                raise UnknownNameError(f"{name!r} is ambiguous: use {' or '.join(same)}")
         ps = element.find_property(prop_name) if element else None
         codec = codec_for(ps) if ps else None
         if element is None or ps is None or codec is None:
             raise UnknownNameError(f"Unknown property {path!r}")
-        if exposed and name not in self._exposed_elements():
+        if exposed and not self._is_exposed(element):
             raise UnknownNameError(f"{name!r} is not exposed: name it or use expose_all")
         return element, ps, codec
 
@@ -484,6 +509,24 @@ class Player:
         ok, value = query(Gst.Format.TIME)
         return value / Gst.SECOND if ok and value >= 0 else None
 
+    def _publish_position(self) -> bool:
+        """Publish `Position` unless it is the last one published; whether it did."""
+        current = (self._read_builtin("position"), self._read_builtin("duration"))
+        if current == self._last_position:
+            return False
+        self._last_position = current
+        self._publish(events.Position(*current))
+        return True
+
+    async def _poll_position(self) -> None:
+        """Publish the position every `position_interval` seconds while a stream wants it."""
+        while True:
+            await asyncio.sleep(self.position_interval)
+            if not self._events.wants_positions:
+                self._position_task = None
+                return
+            self._publish_position()
+
     def _connect_notify(self) -> None:
         """Publish `PropertyChanged` for the readable properties of the exposed elements,
         also of those added later (decodebin's children), from `setup` to `teardown`."""
@@ -493,8 +536,8 @@ class Player:
             ("deep-element-removed", self._unwatch),
         ):
             self._bin_ids.append(self.pipeline.connect(signal, self._on_element_signal, callback))
-        for element in self._exposed_elements().values():
-            self._watch(element)
+        for key, element in self._exposed_elements().items():
+            self._watch(element, key)
 
     def _disconnect_notify(self) -> None:
         for handler in self._bin_ids:
@@ -514,14 +557,18 @@ class Player:
         """On whatever thread added or removed the element: (un)watch it on the loop."""
         self._call_soon(callback, element)
 
-    def _watch(self, element: Gst.Element) -> None:
+    def _watch(self, element: Gst.Element, key: str | None = None) -> None:
         if self._loop is None or not self._is_exposed(element):  # torn down meanwhile
             return
         if any(watched == element for watched, _ in self._notify_ids):
             return  # added between connecting deep-element-added and the first walk
+        if key is None:  # an element added later: its key is as of now
+            key = next((k for k, e in self._element_keys().items() if e == element), None)
+            if key is None:
+                return  # removed meanwhile
         for ps, _ in exposed_props(element):
             if ps.flags & GObject.ParamFlags.READABLE:
-                handler = element.connect(f"notify::{ps.name}", self._on_notify)
+                handler = element.connect(f"notify::{ps.name}", self._on_notify, key)
                 self._notify_ids.append((element, handler))
 
     def _unwatch(self, element: Gst.Element) -> None:
@@ -529,15 +576,14 @@ class Player:
             element.disconnect(entry[1])
             self._notify_ids.remove(entry)
 
-    def _on_notify(self, element: Gst.Element, ps: Any) -> None:
+    def _on_notify(self, element: Gst.Element, ps: Any, key: str) -> None:
         """On whatever thread changed the property: read it there, publish on the loop."""
         codec = codec_for(ps)
         if codec is None:
             return
-        name = element.get_name()
         value = codec.read(element.get_property(ps.name))
         self._call_soon(
-            self._publish, events.PropertyChanged(f"{name}.{ps.name}", name, ps.name, value)
+            self._publish, events.PropertyChanged(f"{key}.{ps.name}", key, ps.name, value)
         )
 
     def _call_soon(self, callback: Callable[..., object], *args: object) -> None:
@@ -555,10 +601,21 @@ class Player:
 
     # -- events and message handlers -- #
 
-    def events(self) -> events.EventStream:
-        """Subscribe to the events published from now on."""
+    def events(self, position: bool = False) -> events.EventStream:
+        """Subscribe to the events published from now on.
+
+        With `position`, the stream also gets `Position` events: the current one at once,
+        then one whenever the position or duration changes, read every `position_interval`.
+        """
         self.setup()
-        return self._events.subscribe()
+        stream = self._events.subscribe(position)
+        if position:
+            if self._position_task is None:
+                assert self._loop is not None
+                self._position_task = self._loop.create_task(self._poll_position())
+            if not self._publish_position() and self._last_position is not None:
+                stream.put(events.Position(*self._last_position))  # only the newcomer lacks it
+        return stream
 
     def add_handler(
         self, message_type: Gst.MessageType, callback: MessageCallback

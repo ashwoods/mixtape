@@ -42,7 +42,8 @@ class PropSpec(_Spec):
     """A readable and/or writable value: an element property, an alias or a built-in."""
 
     path: str
-    """`enc.bitrate` for element properties, a bare name for aliases and built-ins"""
+    """`enc.bitrate` for element properties (`a.enc.bitrate` when the name is not unique),
+    a bare name for aliases and built-ins"""
     element: str | None = None
     property: str | None = None
     """The element and its GObject property name, for element properties and aliases"""
@@ -246,7 +247,18 @@ def is_named(element: Gst.Element) -> bool:
     return re.fullmatch(re.escape(factory_name(element)) + r"\d+", element.get_name()) is None
 
 
-def element_prop_spec(element: Gst.Element, ps: Any, codec: Codec) -> PropSpec:
+def is_user_named(element: Gst.Element) -> bool:
+    """Named with `name=` by the user rather than by an element for its own children:
+    `is_named`, and inside the pipeline or a plain bin, not in playbin or decodebin
+    (whose `playsink` has no number). The pipeline itself has no parent and counts."""
+    parent = element.get_parent()
+    return is_named(element) and (
+        parent is None or parent.__gtype__ in (Gst.Bin.__gtype__, Gst.Pipeline.__gtype__)
+    )
+
+
+def element_prop_spec(element: Gst.Element, key: str, ps: Any, codec: Codec) -> PropSpec:
+    """The spec of a property of `element`, known as `key` (see `Player._element_keys`)."""
     schema = codec.adapter.json_schema()
     if codec.default is not None:
         schema["default"] = codec.default
@@ -254,8 +266,8 @@ def element_prop_spec(element: Gst.Element, ps: Any, codec: Codec) -> PropSpec:
         schema["description"] = ps.blurb
     flags = int(ps.flags)
     return PropSpec(
-        path=f"{element.get_name()}.{ps.name}",
-        element=element.get_name(),
+        path=f"{key}.{ps.name}",
+        element=key,
         property=ps.name,
         schema=schema,
         readable=bool(flags & GObject.ParamFlags.READABLE),
@@ -267,14 +279,15 @@ def element_prop_spec(element: Gst.Element, ps: Any, codec: Codec) -> PropSpec:
     )
 
 
-def describe_element(element: Gst.Element) -> ElementSpec:
+def describe_element(element: Gst.Element, key: str) -> ElementSpec:
     factory = element.get_factory()
     return ElementSpec(
-        name=element.get_name(),
+        name=key,
         factory=factory_name(element),
         description=factory.get_metadata("long-name") if factory else None,
         properties={
-            ps.name: element_prop_spec(element, ps, codec) for ps, codec in exposed_props(element)
+            ps.name: element_prop_spec(element, key, ps, codec)
+            for ps, codec in exposed_props(element)
         },
     )
 
@@ -354,6 +367,31 @@ class Command:
     """Validates the arguments"""
 
 
+def _inline_defs(schema: dict[str, Any], what: str) -> dict[str, Any]:
+    """The schema with every `#/$defs/X` reference replaced by the definition, so it can be
+    embedded elsewhere (OpenAPI) where those references would dangle. Keys next to a
+    `$ref` (default, description) are merged over the definition. A recursive model
+    cannot be inlined: it raises TypeError."""
+    defs: dict[str, Any] = schema.get("$defs", {})
+
+    def resolve(node: Any, active: tuple[str, ...]) -> Any:
+        if isinstance(node, list):
+            return [resolve(item, active) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            key = ref.removeprefix("#/$defs/")
+            if key in active:
+                raise TypeError(f"{what}: the recursive model {key!r} has no finite JSON Schema")
+            inlined = resolve(defs[key], (*active, key))
+            return inlined | {k: resolve(v, active) for k, v in node.items() if k != "$ref"}
+        return {k: resolve(v, active) for k, v in node.items() if k != "$defs"}
+
+    resolved: dict[str, Any] = resolve(schema, ())
+    return resolved
+
+
 def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Command:
     hints = typing.get_type_hints(method, include_extras=True)
     fields: dict[str, Any] = {}
@@ -366,12 +404,16 @@ def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Comm
         fields[param.name] = (hints[param.name], default)
     args = create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
     returns = hints.get("return", type(None))
+    what = method.__qualname__
+    result = None
+    # built-ins return Gst values (StateChangeReturn) that are no interface's business
+    if not builtin and returns is not type(None):
+        result = _inline_defs(TypeAdapter(returns).json_schema(), f"{what} result")
     spec = CommandSpec(
         name=name,
         description=(inspect.getdoc(method) or "").partition("\n")[0] or None,
-        parameters=args.model_json_schema(),
-        # built-ins return Gst values (StateChangeReturn) that are no interface's business
-        result=None if builtin or returns is type(None) else TypeAdapter(returns).json_schema(),
+        parameters=_inline_defs(args.model_json_schema(), f"{what} parameters"),
+        result=result,
         builtin=builtin,
     )
     return Command(spec, args)

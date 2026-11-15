@@ -12,7 +12,7 @@ gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
 from mixtape import Player
-from mixtape.events import Eos, Error, Message, StateChanged, Warning
+from mixtape.events import Eos, Error, Message, Position, StateChanged, Warning
 from mixtape.exceptions import (
     MixTapeError,
     PlayerDescriptionError,
@@ -402,6 +402,55 @@ async def test_events(pipeline):
     assert any(isinstance(e, Message) for e in seen)
     (warning,) = [e for e in seen if isinstance(e, Warning)]
     assert (warning.message, warning.debug) == ("careful", "dbg")
+
+
+class FastPositions(Player):
+    position_interval = 0.02
+
+
+@pytest.mark.asyncio
+async def test_position_events_only_for_position_streams_polled_lazily():
+    player = FastPositions.from_description(LIVE)
+    async with player:
+        plain = player.events()
+        assert player._position_task is None  # nobody asked for positions
+        stream = player.events(position=True)
+        task = player._position_task
+        assert task is not None
+        first = await bounded(anext(stream))
+        assert first == Position(None, None)  # immediately, though nothing runs
+        await bounded(player.play())
+        positions = [first]
+        while len({p.position for p in positions}) < 3:
+            positions.append(await wait_for_event(stream, Position))
+        assert all(p.position is None or p.position >= 0 for p in positions)
+
+        # a second subscriber is told where it is at once; the poll keeps its one task
+        late = player.events(position=True)
+        assert isinstance((await bounded(anext(late))), Position)
+        assert player._position_task is task
+
+        stream.close()
+        late.close()
+        await asyncio.sleep(0.1)  # the next tick finds nobody and ends the task
+        assert player._position_task is None and task.done()
+        await bounded(player.stop())
+    assert not [e async for e in plain if isinstance(e, Position)]
+
+
+@pytest.mark.asyncio
+async def test_a_paused_pipeline_publishes_its_position_once_and_teardown_ends_the_poll():
+    player = FastPositions.from_description(LIVE)
+    async with player:
+        await bounded(player.pause())
+        stream = player.events(position=True)
+        task = player._position_task
+        await bounded(anext(stream))
+        await asyncio.sleep(0.2)
+        # unchanged pairs are not published again
+        assert sum(isinstance(e, Position) for e in stream._queue._queue) <= 1
+    await asyncio.sleep(0)
+    assert player._position_task is None and task.cancelled()
 
 
 class Bly(Player):

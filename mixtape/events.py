@@ -51,7 +51,9 @@ class Warning(Event):
 class PropertyChanged(Event):
     """An exposed element property changed, on whatever thread changed it.
 
-    `path` is the element path (`enc.bitrate`); aliases map to it via `PropSpec.target`.
+    `path` is the element path (`enc.bitrate`, or `a.enc.bitrate` when the element name
+    is not unique); aliases map to it via `PropSpec.target`. The element's key is fixed
+    when the player starts watching it.
     """
 
     path: str
@@ -59,6 +61,17 @@ class PropertyChanged(Event):
     property: str
     value: Any
     """The JSON-friendly value, as `Player.get` returns it"""
+
+
+@dataclass(frozen=True, slots=True)
+class Position(Event):
+    """The playback position or duration changed, in seconds as `Player.get` returns them.
+
+    Only streams made with `Player.events(position=True)` receive it.
+    """
+
+    position: float | None
+    duration: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +88,10 @@ class EventStream:
     the events already queued have been read.
     """
 
-    def __init__(self, streams: set["EventStream"]) -> None:
+    def __init__(self, streams: set["EventStream"], positions: bool = False) -> None:
         self._streams = streams
+        self.positions: bool = positions
+        """Whether it also receives `Position` events"""
         self._queue: asyncio.Queue[Event | None] = asyncio.Queue()
         streams.add(self)
 
@@ -106,12 +121,18 @@ class Broadcast:
     def __init__(self) -> None:
         self._streams: set[EventStream] = set()
 
-    def subscribe(self) -> EventStream:
-        return EventStream(self._streams)
+    def subscribe(self, positions: bool = False) -> EventStream:
+        return EventStream(self._streams, positions)
+
+    @property
+    def wants_positions(self) -> bool:
+        """Whether an open stream receives `Position` events"""
+        return any(stream.positions for stream in self._streams)
 
     def publish(self, event: Event) -> None:
         for stream in tuple(self._streams):
-            stream.put(event)
+            if stream.positions or not isinstance(event, Position):
+                stream.put(event)
 
     def close(self) -> None:
         """End every subscriber's iteration."""

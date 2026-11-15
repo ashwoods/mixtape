@@ -5,6 +5,7 @@ import threading
 from collections.abc import Awaitable
 
 import pytest
+from pydantic import BaseModel
 
 from mixtape import Player, command, prop
 from mixtape.events import PropertyChanged
@@ -123,6 +124,57 @@ async def test_a_pipeline_element_at_the_top_is_exposed_too(Gst):
     assert (await next_change(stream, "pb.mute")).value is True
     player.teardown()
     assert "pipeline0" not in Player.from_description("fakesink").describe().elements
+
+
+def test_playbins_internal_playsink_is_not_user_named(Gst):
+    description = "playbin name=pb uri=file:///x"
+    assert set(Player.from_description(description).describe().elements) == {"pb"}
+    everything = Player.from_description(description, expose_all=True).describe()
+    assert {"pb", "playsink"} <= set(everything.elements)
+
+
+COLLIDING = (
+    "bin.( name=a queue name=q ! fakesink ) bin.( name=b queue name=q ! fakesink ) "
+    "bin.( name=c queue name=only ! fakesink )"
+)
+
+
+@pytest.mark.asyncio
+async def test_same_named_elements_are_keyed_by_their_path(Gst):
+    player = Player.from_description(COLLIDING)
+    spec = player.describe()
+    assert {"a.q", "b.q", "only"} <= set(spec.elements)  # a unique name stays plain
+    assert "q" not in spec.elements
+    assert spec.elements["a.q"].name == "a.q"
+    prop_spec = spec.elements["b.q"].properties["max-size-buffers"]
+    assert (prop_spec.path, prop_spec.element) == ("b.q.max-size-buffers", "b.q")
+
+    await player.set("a.q.max-size-buffers", 7)
+    assert player.get("a.q.max-size-buffers") == 7
+    assert player.get("b.q.max-size-buffers") == 200
+    with pytest.raises(UnknownNameError, match=r"a\.q.*b\.q"):
+        player.get("q.max-size-buffers")
+
+    # the keys do not change with expose_all
+    everything = Player.from_description(COLLIDING, expose_all=True).describe()
+    assert {"a.q", "b.q", "only"} <= set(everything.elements) and "q" not in everything.elements
+
+    class Aliased(Player):
+        depth = prop("b.q.max-size-buffers")
+
+    aliased = Aliased.from_description(COLLIDING)
+    await aliased.set("depth", 3)
+    assert aliased.get("b.q.max-size-buffers") == 3
+    assert aliased.describe().properties["depth"].element == "b.q"
+
+
+@pytest.mark.asyncio
+async def test_property_changed_of_a_colliding_element_carries_its_key(Gst):
+    async with Player.from_description(COLLIDING) as player:
+        stream = player.events()
+        await player.set("a.q.max-size-buffers", 9)
+        event = await next_change(stream, "a.q.max-size-buffers")
+        assert (event.element, event.property, event.value) == ("a.q", "max-size-buffers", 9)
 
 
 @pytest.mark.asyncio
@@ -267,6 +319,66 @@ def test_bad_declarations_fail_when_the_class_is_defined():
 
         class Clash(Player):
             state = prop("src.pattern")
+
+
+class Point(BaseModel):
+    x: int
+    y: int = 0
+
+
+class Segment(BaseModel):
+    start: Point
+    end: Point | None = None
+
+
+@pytest.mark.asyncio
+async def test_command_schemas_have_their_models_inlined(Gst):
+    class Draw(Player):
+        @command
+        def go(self, where: Point, path: list[Segment], hint: Point = Point(x=1)) -> Segment:  # noqa: B008
+            """Go."""
+            return Segment(start=where)
+
+    spec = Draw.from_description("fakesink").describe().commands["go"]
+    for schema in (spec.parameters, spec.result):
+        assert "$defs" not in json.dumps(schema) and "$ref" not in json.dumps(schema)
+    assert spec.parameters["properties"]["where"]["properties"]["x"] == {
+        "title": "X",
+        "type": "integer",
+    }
+    hint = spec.parameters["properties"]["hint"]
+    assert hint["default"] == {"x": 1, "y": 0} and hint["properties"]["y"]["default"] == 0
+    assert spec.result["properties"]["start"]["properties"]["y"]["default"] == 0
+
+    player = Draw.from_description("fakesink")
+    result = await player.invoke("go", where={"x": "2"}, path=[])
+    assert result.start == Point(x=2)
+    with pytest.raises(InvalidValueError):
+        await player.invoke("go", where={"x": "a"}, path=[])
+
+
+def test_a_recursive_model_fails_when_the_class_is_defined():
+    class Tree(BaseModel):
+        children: list["Tree"] = []
+
+    class Ping(BaseModel):
+        pong: "Pong | None" = None
+
+    class Pong(BaseModel):
+        ping: Ping | None = None
+
+    Ping.model_rebuild()
+    with pytest.raises(TypeError, match="grow.*Tree"):
+
+        class Growing(Player):
+            @command
+            def grow(self, tree: Tree) -> None: ...
+
+    with pytest.raises(TypeError, match="show.*Ping"):
+
+        class Showing(Player):
+            @command
+            def show(self) -> Ping: ...
 
 
 # -- built-ins -- #

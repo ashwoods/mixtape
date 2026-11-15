@@ -53,6 +53,15 @@ def ensure_init() -> None:
         Gst.init(None)
 
 
+def _invalid(what: str, exc: ValidationError) -> InvalidValueError:
+    """An InvalidValueError with pydantic's errors on one line, for a CLI or an HTTP detail."""
+    errors = exc.errors(include_url=False, include_context=False)
+    reasons = "; ".join(
+        f"{'.'.join(map(str, e['loc']))}: {e['msg']}" if e["loc"] else str(e["msg"]) for e in errors
+    )
+    return InvalidValueError(f"Invalid {what}: {reasons}", errors)
+
+
 class Player:
     """Drive a `Gst.Pipeline` from an asyncio loop.
 
@@ -405,8 +414,7 @@ class Player:
         try:
             validated = codec.adapter.validate_python(value)
         except ValidationError as exc:
-            errors = exc.errors(include_url=False, include_context=False)
-            raise InvalidValueError(f"Invalid value for {path!r}: {exc}", errors) from exc
+            raise _invalid(f"value for {path!r}", exc) from exc
         # GLib reports an out of range value as a warning and leaves the old one
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", GObject.Warning)
@@ -427,8 +435,7 @@ class Player:
         try:
             validated = declared.args.model_validate(args)
         except ValidationError as exc:
-            errors = exc.errors(include_url=False, include_context=False)
-            raise InvalidValueError(f"Invalid arguments for {name!r}: {exc}", errors) from exc
+            raise _invalid(f"arguments for {name!r}", exc) from exc
         result = getattr(self, name)(
             **{k: getattr(validated, k) for k in type(validated).model_fields}
         )

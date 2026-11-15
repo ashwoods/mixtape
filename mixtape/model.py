@@ -188,12 +188,13 @@ def _make_codec(ps: Any) -> Codec | None:
         adapter = _adapter(items, BeforeValidator(split))
         return Codec(adapter, nicks_of, combine, nicks_of(ps.default_value))
     # caps and structures travel as strings; validation returns the parsed object
-    for gtype, parse in (
-        (Gst.Caps.__gtype__, _parse_caps),
-        (Gst.Structure.__gtype__, _parse_structure),
+    for gtype, parse, kind in (
+        (Gst.Caps.__gtype__, _parse_caps, "gst-caps"),
+        (Gst.Structure.__gtype__, _parse_structure, "gst-structure"),
     ):
         if vt == gtype:
-            return Codec(_adapter(str, AfterValidator(parse)), _to_string, same)
+            schema = Field(json_schema_extra={"format": kind})
+            return Codec(_adapter(str, schema, AfterValidator(parse)), _to_string, same)
     return None
 
 

@@ -13,13 +13,7 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Any
 
-import gi
-
-gi.require_version("Gst", "1.0")
-from gi.repository import Gst
-
 from .exceptions import (
-    InvalidValueError,
     ModelError,
     PlayerDescriptionError,
     PlayerPipelineError,
@@ -237,16 +231,7 @@ def _prop_row(player: Player, prop: PropSpec, name: str) -> list[str]:
         notes.append(f"→ {prop.target}")
     if prop.mutable:
         notes.append(f"mutable: {prop.mutable}")
-    return [name, access, _prop_type(player, prop), value, "  ".join(notes), prop.description or ""]
-
-
-def _prop_type(player: Player, prop: PropSpec) -> str:
-    if prop.element and prop.property:
-        element = player.pipeline.get_by_name(prop.element)
-        pspec = element.find_property(prop.property) if element else None
-        if pspec is not None and pspec.value_type == Gst.Caps.__gtype__:
-            return "caps"  # the schema only says string
-    return _type(prop.value_schema)
+    return [name, access, _type(prop.value_schema), value, "  ".join(notes), prop.description or ""]
 
 
 def _type(schema: dict[str, Any], *, keep_null: bool = False) -> str:
@@ -258,6 +243,8 @@ def _type(schema: dict[str, Any], *, keep_null: bool = False) -> str:
         return "|".join(map(str, schema["enum"]))
     if "const" in schema:
         return str(schema["const"])
+    if str(schema.get("format", "")).startswith("gst-"):
+        return str(schema["format"]).removeprefix("gst-")  # caps, structure
     kind = str(schema.get("type", "any"))
     if kind == "array" and "items" in schema:
         return f"flags {_type(schema['items'])}"
@@ -312,14 +299,7 @@ async def _play(player: Player, verbose: int, assignments: Sequence[tuple[str, s
             pump = macos.start_pump()  # before the pipeline leaves NULL
         async with player:
             for path, value in assignments:
-                try:
-                    await player.set(path, value)
-                except InvalidValueError as exc:
-                    if not exc.errors:
-                        raise
-                    # pydantic's own text spans several lines
-                    reasons = "; ".join(str(error["msg"]) for error in exc.errors)
-                    raise InvalidValueError(f"Invalid value for {path!r}: {reasons}") from exc
+                await player.set(path, value)
             await player.play_until_eos()
     except asyncio.CancelledError:
         if interrupts < 2:

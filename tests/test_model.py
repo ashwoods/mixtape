@@ -94,6 +94,7 @@ def test_schemas_of_the_supported_value_types(Gst):
     assert (depth.value_schema["minimum"], depth.value_schema["maximum"]) == (0, 2**32 - 1)
     assert depth.writable and depth.readable and depth.path == "nested.max-size-buffers"
     assert cf["caps"].value_schema["type"] == "string"
+    assert cf["caps"].value_schema["format"] == "gst-caps"
     assert not nested["current-level-buffers"].writable
     assert "name" not in src
     assert "name" not in sink and "parent" not in sink  # owned by GstObject
@@ -147,6 +148,7 @@ async def test_out_of_range_raises_and_keeps_the_old_value(Gst):
         with pytest.raises(InvalidValueError) as info:
             await player.set("nested.max-size-buffers", bad)
         assert info.value.errors
+        assert "\n" not in str(info.value)  # one line, for a CLI or an HTTP detail
         assert player.get("nested.max-size-buffers") == 7
     with pytest.raises(InvalidValueError):
         await player.set("cf.caps", "not caps!!")

@@ -117,8 +117,11 @@ async def test_a_pipeline_element_at_the_top_is_exposed_too(Gst):
     assert "pb" in player.describe().elements
     await player.set("pb.volume", 0.5)
     assert player.get("pb.volume") == 0.5
+    stream = player.events()
     await player.set("muted", True)
     assert player.get("pb.mute") is True
+    assert (await next_change(stream, "pb.mute")).value is True
+    player.teardown()
     assert "pipeline0" not in Player.from_description("fakesink").describe().elements
 
 

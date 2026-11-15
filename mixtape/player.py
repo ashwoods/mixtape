@@ -108,6 +108,7 @@ class Player:
         self._events = events.Broadcast()
         self._expose_all = expose_all
         self._notify_ids: list[tuple[Gst.Element, int]] = []
+        self._bin_ids: list[int] = []  # the pipeline's deep-element-added/removed handlers
         for alias in self._declarations().props.values():
             self._locate(alias.target, exposed=False)  # a typo fails here
 
@@ -491,12 +492,14 @@ class Player:
             ("deep-element-added", self._watch),
             ("deep-element-removed", self._unwatch),
         ):
-            handler = self.pipeline.connect(signal, self._on_element_signal, callback)
-            self._notify_ids.append((self.pipeline, handler))
+            self._bin_ids.append(self.pipeline.connect(signal, self._on_element_signal, callback))
         for element in self._exposed_elements().values():
             self._watch(element)
 
     def _disconnect_notify(self) -> None:
+        for handler in self._bin_ids:
+            self.pipeline.disconnect(handler)
+        self._bin_ids.clear()
         for element, handler in self._notify_ids:
             element.disconnect(handler)
         self._notify_ids.clear()

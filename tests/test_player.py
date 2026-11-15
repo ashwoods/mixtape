@@ -199,6 +199,18 @@ async def test_stop_on_a_null_player_is_a_no_op(pipeline, mocker):
 
 
 @pytest.mark.asyncio
+async def test_stop_with_eos_on_a_paused_pipeline_stops_at_once(pipeline, mocker):
+    # an EOS cannot reach the prerolled sinks: waiting for it blocked set_state(NULL)
+    async with Player(pipeline) as player:
+        await bounded(player.play())
+        await bounded(player.pause())
+        spy = mocker.spy(player, "send_eos")
+        await bounded(player.stop(eos=True))
+        spy.assert_not_called()
+        assert player.state == Gst.State.NULL
+
+
+@pytest.mark.asyncio
 async def test_failed_state_change_raises_the_elements_error(error_pipeline):
     async with Player(error_pipeline) as player:
         with pytest.raises(PlayerPipelineError) as info:

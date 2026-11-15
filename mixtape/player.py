@@ -314,9 +314,12 @@ class Player:
 
     @command
     async def stop(self, eos: bool = False, timeout: float | None = 5.0) -> None:
-        """Set the pipeline to NULL, after an EOS when `eos` and it is running."""
+        """Set the pipeline to NULL, after an EOS when `eos` and it is playing.
+
+        A paused pipeline cannot carry the EOS to its sinks (waiting for it blocks), and
+        one at its EOS already sends no second one: both stop at once."""
         self.setup()
-        if eos and self.state in (Gst.State.PAUSED, Gst.State.PLAYING):
+        if eos and self.state == Gst.State.PLAYING and not self._eos:
             try:
                 await self.send_eos(timeout)
             except TimeoutError:

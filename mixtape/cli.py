@@ -14,7 +14,7 @@ import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
 
-from .events import Eos, Error, EventStream, StateChanged
+from .events import Error, EventStream
 from .exceptions import (
     ModelError,
     PlayerDescriptionError,
@@ -312,17 +312,13 @@ async def _play(
     interrupts = 0
     stopping: asyncio.Task[None] | None = None
     interrupted = asyncio.Event()
-    at_eos = asyncio.Event()
 
     def interrupt() -> None:
         nonlocal interrupts, stopping
         interrupts += 1
         if interrupts == 1:
             print("Interrupt: stopping (EOS)…", file=sys.stderr)
-            # served over HTTP, the pipeline may be paused (an EOS cannot flow, and waiting for
-            # it can block the loop) or at its EOS already (no second one comes)
-            eos = http is None or (player.get("state") == "playing" and not at_eos.is_set())
-            stopping = loop.create_task(player.stop(eos=eos))
+            stopping = loop.create_task(player.stop(eos=True))
             interrupted.set()
         else:
             # GStreamer can block in the teardown that follows (as it does in gst-launch):
@@ -346,7 +342,7 @@ async def _play(
             if http is None:
                 await player.play_until_eos()
             else:
-                async with _serving(player, *http, verbose, at_eos):
+                async with _serving(player, *http, verbose):
                     await interrupted.wait()
                     assert stopping is not None
                     await stopping
@@ -382,12 +378,9 @@ async def _play(
 
 
 @contextlib.asynccontextmanager
-async def _serving(
-    player: Player, host: str, port: int, verbose: int, at_eos: asyncio.Event
-) -> AsyncIterator[None]:
+async def _serving(player: Player, host: str, port: int, verbose: int) -> AsyncIterator[None]:
     """Serve the player over HTTP and play it, until the block ends. Errors of the pipeline
-    are printed and leave the server up, so a page can play again. `at_eos` tells when
-    the pipeline is at its EOS."""
+    are printed and leave the server up, so a page can play again."""
     from .interfaces.http import serve  # needs the http extra, which `_run` has checked
     from .interfaces.http.security import is_loopback
 
@@ -401,7 +394,7 @@ async def _serving(
     async with serve(player, host, port, log_level=log_level) as listening:
         print(f"Serving on {listening.url}", file=sys.stderr)
         stream = player.events()
-        reporter = asyncio.create_task(_watch(stream, verbose, at_eos))
+        reporter = asyncio.create_task(_report_errors(stream, verbose))
         try:
             try:
                 await player.play()
@@ -415,14 +408,10 @@ async def _serving(
             reporter.cancel()
 
 
-async def _watch(stream: EventStream, verbose: int, at_eos: asyncio.Event) -> None:
-    """Print the pipeline errors, and keep `at_eos` up to date."""
+async def _report_errors(stream: EventStream, verbose: int) -> None:
+    """Print the pipeline errors."""
     async for event in stream:
         if isinstance(event, Error):
             print(f"error: {event.error.source}: {event.error.message}", file=sys.stderr)
             if verbose and event.error.debug:
                 print(event.error.debug, file=sys.stderr)
-        elif isinstance(event, Eos):
-            at_eos.set()
-        elif isinstance(event, StateChanged) and event.new.value_nick != "playing":
-            at_eos.clear()

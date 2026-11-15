@@ -2,6 +2,7 @@ import json
 import queue
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -136,3 +137,26 @@ def test_sigint_stops_with_eos() -> None:
     while not lines.empty():
         seen.append(lines.get_nowait())
     assert any("Interrupt: stopping (EOS)" in line for line in seen), seen
+
+
+@pytest.mark.parametrize("address", ["", "http", "1:99999", "host:", "-1"])
+def test_http_address_is_validated(address: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", "--http", address, "fakesink"]) == 2
+    assert "[HOST:]PORT" in capsys.readouterr().err
+
+
+def test_http_needs_the_extra(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setitem(sys.modules, "mixtape.interfaces.http", None)  # as if not installed
+    assert main(["run", "--http", "8080", "fakesink"]) == 2
+    assert capsys.readouterr().err == (
+        "error: --http needs the http extra: pip install 'mixtape[http]'\n"
+    )
+
+
+def test_http_port_in_use(capsys: pytest.CaptureFixture[str]) -> None:
+    with socket.create_server(("127.0.0.1", 0)) as taken:
+        port = taken.getsockname()[1]
+        assert main(["run", "--http", f"127.0.0.1:{port}", "fakesink"]) == 1
+    assert capsys.readouterr().err.startswith("error: ")

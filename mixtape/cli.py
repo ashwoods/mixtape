@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import importlib
 import importlib.metadata
 import json
@@ -10,9 +11,10 @@ import os
 import re
 import signal
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
 
+from .events import Eos, Error, EventStream, StateChanged
 from .exceptions import (
     ModelError,
     PlayerDescriptionError,
@@ -23,12 +25,14 @@ from .model import CommandSpec, PropSpec
 from .player import Player
 
 logger = logging.getLogger("mixtape")
+_uvicorn_logger = logging.getLogger("uvicorn")
 
 _log_handler: logging.Handler | None = None
 
 EXIT_ERROR = 1
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
+HTTP_HOST = "127.0.0.1"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,7 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
     run = commands.add_parser(
         "run",
         help="run a pipeline until EOS or an error, like gst-launch-1.0 -e",
-        description="Run a gst-launch style pipeline description until EOS or an error.",
+        description="Run a gst-launch style pipeline description until EOS or an error, "
+        "or with --http until interrupted.",
     )
     run.add_argument(  # also after the command; SUPPRESS keeps a count given before it
         "-v", "--verbose", action="count", default=argparse.SUPPRESS, help="log more"
@@ -62,6 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=_assignment,
         metavar="PATH=VALUE",
         help="set a property before playing, e.g. enc.bitrate=2000; repeatable",
+    )
+    run.add_argument(
+        "--http",
+        type=_http_address,
+        metavar="[HOST:]PORT",
+        help="control the player from a browser (needs the http extra) and keep running "
+        "after EOS or an error until interrupted; HOST defaults to 127.0.0.1",
     )
     run.set_defaults(handler=_run)
 
@@ -101,6 +113,13 @@ def _assignment(text: str) -> tuple[str, str]:
     return path, value
 
 
+def _http_address(text: str) -> tuple[str, int]:
+    host, _, port = text.rpartition(":")
+    if not port.isascii() or not port.isdecimal() or int(port) > 65535:
+        raise argparse.ArgumentTypeError(f"{text!r} is not [HOST:]PORT")
+    return host.strip("[]") or HTTP_HOST, int(port)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line and return its exit code."""
     parser = build_parser()
@@ -116,8 +135,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _setup_logging(verbose: int) -> None:
     level = (logging.WARNING, logging.INFO, logging.DEBUG)[min(verbose, 2)]
     global _log_handler
-    if _log_handler is not None:
-        logger.removeHandler(_log_handler)  # main() may run more than once in a process
+    if _log_handler is not None:  # main() may run more than once in a process
+        for named in (logger, _uvicorn_logger):
+            named.removeHandler(_log_handler)
     _log_handler = logging.StreamHandler(sys.stderr)
     _log_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     if not verbose:  # _play prints the pipeline error itself, without the debug string
@@ -126,6 +146,7 @@ def _setup_logging(verbose: int) -> None:
         )
     logger.addHandler(_log_handler)
     logger.setLevel(level)
+    _uvicorn_logger.addHandler(_log_handler)  # the http extra's server, which `-v` also raises
 
 
 _IMPORT_PATH = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_][\w.]*")
@@ -167,10 +188,18 @@ def _import_player_class(target: str) -> type[Player]:
 
 
 def _run(args: argparse.Namespace) -> int:
+    if args.http is not None:
+        try:
+            importlib.import_module("mixtape.interfaces.http")  # needs the extra
+        except ImportError:
+            print(
+                "error: --http needs the http extra: pip install 'mixtape[http]'", file=sys.stderr
+            )
+            return EXIT_USAGE
     player = _load_player(args)
     if player is None:
         return EXIT_USAGE
-    return asyncio.run(_play(player, args.verbose, args.assignments))
+    return asyncio.run(_play(player, args.verbose, args.assignments, args.http))
 
 
 # -- inspect -- #
@@ -267,20 +296,34 @@ def _value(value: Any) -> str:
     return json.dumps(value)
 
 
-async def _play(player: Player, verbose: int, assignments: Sequence[tuple[str, str]] = ()) -> int:
+async def _play(
+    player: Player,
+    verbose: int,
+    assignments: Sequence[tuple[str, str]] = (),
+    http: tuple[str, int] | None = None,
+) -> int:
     """Play until EOS, stopping with an EOS on the first SIGINT or SIGTERM and at once
-    on the second. Returns the exit code."""
+    on the second. Returns the exit code.
+
+    With `http` (host, port) it serves the player instead, and neither an EOS nor an
+    error ends it: only the first interrupt does, once the player has stopped."""
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()
     interrupts = 0
     stopping: asyncio.Task[None] | None = None
+    interrupted = asyncio.Event()
+    at_eos = asyncio.Event()
 
     def interrupt() -> None:
         nonlocal interrupts, stopping
         interrupts += 1
         if interrupts == 1:
             print("Interrupt: stopping (EOS)…", file=sys.stderr)
-            stopping = loop.create_task(player.stop(eos=True))
+            # served over HTTP, the pipeline may be paused (an EOS cannot flow, and waiting for
+            # it can block the loop) or at its EOS already (no second one comes)
+            eos = http is None or (player.get("state") == "playing" and not at_eos.is_set())
+            stopping = loop.create_task(player.stop(eos=eos))
+            interrupted.set()
         else:
             # GStreamer can block in the teardown that follows (as it does in gst-launch):
             # a third Ctrl-C then kills the process, as the default handler does.
@@ -300,7 +343,13 @@ async def _play(player: Player, verbose: int, assignments: Sequence[tuple[str, s
         async with player:
             for path, value in assignments:
                 await player.set(path, value)
-            await player.play_until_eos()
+            if http is None:
+                await player.play_until_eos()
+            else:
+                async with _serving(player, *http, verbose, at_eos):
+                    await interrupted.wait()
+                    assert stopping is not None
+                    await stopping
     except asyncio.CancelledError:
         if interrupts < 2:
             raise
@@ -312,6 +361,11 @@ async def _play(player: Player, verbose: int, assignments: Sequence[tuple[str, s
         print(f"error: {exc.source}: {exc.message}", file=sys.stderr)
         if verbose and exc.debug:
             print(exc.debug, file=sys.stderr)
+        return EXIT_ERROR
+    except OSError as exc:  # the address of --http is taken
+        if http is None:
+            raise
+        print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except PlayerSetStateError as exc:
         if interrupts:  # the stop could not finish an EOS, but it was asked for
@@ -325,3 +379,50 @@ async def _play(player: Player, verbose: int, assignments: Sequence[tuple[str, s
             if task is not None:
                 task.cancel()
     return 0
+
+
+@contextlib.asynccontextmanager
+async def _serving(
+    player: Player, host: str, port: int, verbose: int, at_eos: asyncio.Event
+) -> AsyncIterator[None]:
+    """Serve the player over HTTP and play it, until the block ends. Errors of the pipeline
+    are printed and leave the server up, so a page can play again. `at_eos` tells when
+    the pipeline is at its EOS."""
+    from .interfaces.http import serve  # needs the http extra, which `_run` has checked
+    from .interfaces.http.security import is_loopback
+
+    if not is_loopback(host):
+        print(
+            f"warning: serving on {host} without authentication: anyone who can reach it "
+            "can control the player",
+            file=sys.stderr,
+        )
+    log_level = ("warning", "info", "debug")[min(verbose, 2)]
+    async with serve(player, host, port, log_level=log_level) as listening:
+        print(f"Serving on {listening.url}", file=sys.stderr)
+        stream = player.events()
+        reporter = asyncio.create_task(_watch(stream, verbose, at_eos))
+        try:
+            try:
+                await player.play()
+            except PlayerPipelineError:
+                pass  # the reporter prints it
+            except PlayerSetStateError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+            yield
+        finally:
+            stream.close()
+            reporter.cancel()
+
+
+async def _watch(stream: EventStream, verbose: int, at_eos: asyncio.Event) -> None:
+    """Print the pipeline errors, and keep `at_eos` up to date."""
+    async for event in stream:
+        if isinstance(event, Error):
+            print(f"error: {event.error.source}: {event.error.message}", file=sys.stderr)
+            if verbose and event.error.debug:
+                print(event.error.debug, file=sys.stderr)
+        elif isinstance(event, Eos):
+            at_eos.set()
+        elif isinstance(event, StateChanged) and event.new.value_nick != "playing":
+            at_eos.clear()

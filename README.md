@@ -127,6 +127,38 @@ range or unknown is rejected: `run` prints `error: ...` and exits 2. The "mutabl
 hint in `inspect` only reports what the element declares; it is not enforced, and setting a
 property while playing is up to the element.
 
+## HTTP interface
+The optional `http` extra (FastAPI and uvicorn, no threads: the server runs in the player's
+own asyncio loop) controls a player from a browser:
+
+    pip install 'mixtape[http]'
+    mixtape run --http 8080 "videotestsrc ! autovideosink"    # http://127.0.0.1:8080
+
+`--http [HOST:]PORT` plays the pipeline and serves it until Ctrl-C: an EOS or a pipeline error
+does not end it (errors are printed), so the page can play again. The first Ctrl-C sends EOS,
+stops and exits 0. In code: `async with mixtape.interfaces.http.serve(player, host, port)`.
+
+* `GET /` the control page, `GET /api/model` the player's `describe()`, `/docs` the OpenAPI.
+* `POST /api/commands/<name>` with a JSON object of arguments (optional) runs a command and
+  returns `{"result": ...}`.
+* `GET`/`PATCH /api/elements/<element>` and `GET`/`PATCH /api/properties` read and set
+  properties as `{name: value}`. A PATCH applies the values in order and stops at the first
+  error.
+* Errors are `{"detail": ..., "errors": [...]}`: 404 for an unknown name, 422 for a rejected
+  value or a read-only property, 409 when a command cannot do what was asked, 500 for a pipeline
+  error.
+* `WS /api/events` sends every readable property first (`{"type": "values", ...}`), then the
+  events as JSON (`state`, `property`, `eos`, `error`, `warning`, `position`). It accepts
+  `{"id": 1, "command": "play", "args": {}}` and `{"id": 2, "set": {"src.pattern": "ball"}}`
+  and answers each with `{"type": "reply", "id": ..., "result": ...}` or `"error": {"status",
+  "detail"}`.
+
+There is no authentication: it binds to 127.0.0.1 by default, and `--http 0.0.0.0:8080` warns
+that anyone who can reach the port can control the player. A request whose `Origin` is not the
+`Host` it was sent to is refused (403), and so is one whose `Host` is not `localhost`,
+`127.0.0.1` or `[::1]` while bound to a loopback address (DNS rebinding). Requests without an
+`Origin`, like curl's, pass.
+
 ## Usage
 `Player` wraps a `Gst.Pipeline` and drives it from an asyncio loop. Create one from a
 `gst-launch` style description with `Player.from_description`; it needs no running loop.

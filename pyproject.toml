@@ -19,6 +19,15 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.optional-dependencies]
+# No `uvicorn[standard]`: its uvloop and httptools are C extensions, and the server runs on
+# asyncio next to the player anyway.
+http = [
+    "fastapi>=0.115",
+    "uvicorn>=0.29",  # Server.capture_signals
+    "websockets>=13",
+]
+
 [project.scripts]
 mixtape = "mixtape.cli:main"
 
@@ -28,6 +37,8 @@ Homepage = "https://github.com/ashwoods/mixtape"
 [dependency-groups]
 dev = [
     "colorlog",
+    "httpx",
+    "mixtape[http]",
     "mypy",
     "pytest",
     "pytest-asyncio",

@@ -142,7 +142,8 @@ stops and exits 0. In code: `async with mixtape.interfaces.http.serve(player, ho
   `graph()` (elements and the links between them, with their caps), `/docs` the OpenAPI.
   The page is generated from the model: transport and position, a form per command, a control
   per property, updated live. Press `/` to filter properties; "Modified" shows those that
-  differ from their default.
+  differ from their default. On top, the pipeline graph: click an element to jump to its
+  properties, hover a link for its caps; bins without exposed elements start folded.
 * `POST /api/commands/<name>` with a JSON object of arguments (optional) runs a command and
   returns `{"result": ...}`.
 * `GET`/`PATCH /api/elements/<element>` and `GET`/`PATCH /api/properties` read and set

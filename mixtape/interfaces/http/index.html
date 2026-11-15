@@ -225,6 +225,83 @@ input[type=checkbox] { accent-color: var(--accent); margin: 0; }
 .ec .m { color: var(--accent); margin-right: 10px; }
 .rows { padding: 4px 2px; }
 .rows .empty { padding: 6px 10px; }
+.el { scroll-margin-top: calc(var(--bar-h) + var(--tools-h, 50px) + 8px); }
+.el.flash > summary { animation: flash 1.6s ease-out; }
+@keyframes flash { 0%, 35% { background: var(--accent-weak); } }
+
+/* -- pipeline graph: bins are frames, exposed elements are the solid, clickable nodes -- */
+.graph-sec { position: relative; }
+.graph-h { display: flex; align-items: center; gap: 12px; margin: 22px 0 8px; }
+.graph-h .sec-h { margin: 0; }
+.ghint { flex: 1; text-align: right; color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.graph-h .toggle { height: 26px; }
+.graph { overflow-x: auto; overflow-y: hidden; padding: 2px 2px 8px; scrollbar-width: thin; }
+.graph.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
+.graph.more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); }
+.graph.more-left.more-right {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent);
+}
+.gcanvas { position: relative; }
+.gedges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.gedge { cursor: pointer; }
+.gedge .hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; }
+.gedge .ln { fill: none; stroke: var(--faint); stroke-width: 1.25; }
+.gedge .ah { fill: var(--faint); }
+.gedge.pending .ln { stroke-dasharray: 3 3; }
+.gedge:hover .ln, .gedge.on .ln { stroke: var(--accent); stroke-width: 2; }
+.gedge:hover .ah, .gedge.on .ah { fill: var(--accent); }
+.gbin {
+  position: absolute; border: 1px solid var(--line); border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 2.5%, transparent);
+}
+.gbh { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; white-space: nowrap; overflow: hidden; }
+.gbh .gname { font: 600 11.5px var(--mono); color: var(--muted); background: none; border: 0; padding: 0; }
+.gbh button.gname { color: var(--fg); cursor: pointer; text-decoration: underline; text-decoration-color: var(--line2); text-underline-offset: 2px; }
+.gbh button.gname:hover { color: var(--accent); text-decoration-color: currentColor; }
+.gbh .gf { font: 11px var(--mono); color: var(--faint); }
+.gn {
+  position: absolute; display: flex; align-items: center; border-radius: 6px;
+  border: 1px dashed var(--line2); color: var(--muted); white-space: nowrap;
+}
+.glabel { display: flex; flex-direction: column; justify-content: center; line-height: 1.25; min-width: 0; padding: 0 10px; flex: 1; text-align: left; }
+.gk { font: 12px var(--mono); }
+.gf { font: 11px var(--mono); color: var(--faint); }
+.gn.exposed { border: 1px solid var(--faint); background: var(--bg); color: var(--fg); }
+.gn.exposed .gk { font-weight: 600; }
+.gn.exposed .gf { color: var(--muted); }
+.gn.exposed:hover, .gn.exposed:focus-within { border-color: var(--accent); background: var(--accent-weak); }
+.gn.mod .gk::after, .gbin.mod > .gbh .gname::after { content: " •"; color: var(--accent); }
+
+.ggo { display: flex; align-items: center; align-self: stretch; flex: 1; min-width: 0; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 5px; }
+.gn.folded:not(.exposed):hover { border-style: solid; border-color: var(--faint); color: var(--fg); }
+.gmore { font: 11px var(--mono); color: var(--faint); padding-right: 8px; }
+.gfold {
+  flex: none; width: 18px; height: 18px; margin: 0 -4px 0 4px; padding: 0; border: 0; border-radius: 4px;
+  background: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.gbh .gfold { margin: 0 -2px 0 -4px; }
+.gfold::before {
+  content: ""; width: 5px; height: 5px; border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+  transform: translateX(-1px) rotate(-45deg);
+}
+.gfold[aria-expanded="true"]::before { transform: translateY(-1px) rotate(45deg); }
+button.gfold:hover { background: var(--hover); }
+button.gfold:hover::before { border-color: var(--fg); }
+.gtip {
+  position: absolute; z-index: 6; max-width: min(440px, 100%); padding: 8px 10px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line2); box-shadow: 0 6px 24px rgb(0 0 0 / .14);
+  font: 11.5px/1.45 var(--mono); pointer-events: none;
+}
+.gt + .gt { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.gth { color: var(--fg); overflow-wrap: anywhere; }
+.gp { color: var(--faint); }
+.gcaps { margin-top: 4px; }
+.gmt { color: var(--accent); overflow-wrap: anywhere; }
+.gcaps dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 12px; margin: 2px 0 0; }
+.gcaps dt { color: var(--muted); }
+.gcaps dd { margin: 0; overflow-wrap: anywhere; }
+.gnone { color: var(--muted); font-family: var(--sans); margin-top: 4px; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .35; } }
@@ -256,6 +333,7 @@ input[type=checkbox] { accent-color: var(--accent); margin: 0; }
   .filter { max-width: none; flex-basis: 100%; }
   .filter kbd { display: none; }
   .ed { display: none; }
+  .ghint { visibility: hidden; }
 }
 </style>
 </head>
@@ -626,12 +704,14 @@ function onMessage(m) {
       for (const row of allRows) row.update();
       updateTransport(); updateTime(); scheduleSummary();
       setConn("live");
+      scheduleGraph();
       break;
     case "state":
       values.set("state", m.new);
       pendingState = m.pending && m.pending !== "void-pending" ? m.pending : null;
       if (m.new !== m.old) atEos = false;
       updateTransport();
+      scheduleGraph();  // elements add pads and link up on the way to paused
       break;
     case "property": setValue(m.path, m.value); break;
     case "position":
@@ -642,7 +722,6 @@ function onMessage(m) {
     case "eos": atEos = true; updateTransport(); break;
     case "error": case "warning":
       notice(m.type, m.source ? `${m.source}: ${m.message}` : m.message, m.debug);
-      if (m.type === "error") setTimeout(refreshState, 300); // a failed change posts no state event
       break;
     case "reply": {
       const r = replies.get(m.id);
@@ -728,21 +807,6 @@ async function transport(button, name, args = {}) {
   } finally {
     button && button.classList.remove("busy");
   }
-  await refreshState();
-}
-
-/** Read the state back: the change to NULL (`stop`) posts no state event. */
-async function refreshState() {
-  try {
-    const r = await fetch("/api/properties", { cache: "no-store" });
-    if (!r.ok) return;
-    const now = parseJSON(await r.text());
-    if (now.state && now.state !== values.get("state")) {
-      values.set("state", now.state);
-      pendingState = null;
-      updateTransport();
-    }
-  } catch { /* offline: the reconnect reads everything */ }
 }
 
 function updateTransport() {
@@ -928,6 +992,374 @@ function commandRow(c) {
     h("div", { class: "d" }, out));
 }
 
+// ---- pipeline graph ----------------------------------------------------------------------
+//
+// Left to right, laid out per bin: a bin's children are blocks in columns by the longest path
+// of the links between them, a bin being one block; blocks in a column are stacked and aligned
+// on the line their flow runs through. Bins without an exposed element inside start folded.
+
+const graph = { data: null, text: null, all: false, open: new Map(), seq: 0, timer: 0, pinned: null };
+const GL = { h: 34, gapX: 36, gapY: 10, pad: 10, head: 26 };
+
+function scheduleGraph() {
+  clearTimeout(graph.timer);
+  graph.timer = setTimeout(loadGraph, 120);
+}
+
+async function loadGraph() {
+  const seq = ++graph.seq;
+  let text;
+  try {
+    const r = await fetch("/api/graph", { cache: "no-store" });
+    if (!r.ok) return;
+    text = await r.text();
+  } catch { return; }
+  if (seq !== graph.seq || text === graph.text) return;
+  graph.text = text;
+  graph.data = JSON.parse(text);
+  renderGraph();
+}
+
+let measureCtx = null;
+function textWidth(text, font) {
+  measureCtx = measureCtx || document.createElement("canvas").getContext("2d");
+  measureCtx.font = `${font} ${getComputedStyle(document.documentElement).getPropertyValue("--mono")}`;
+  return Math.ceil(measureCtx.measureText(text).width);
+}
+
+/** The factory, unless the name already says it (videotestsrc0) or it is a plain bin. */
+const factoryLabel = (n) =>
+  (n.factory === "bin" || n.name.replace(/\d+$/, "") === n.factory.replace(/-/g, "") ? "" : n.factory);
+
+/** Caps as their media type and fields, without the field types: one entry per structure. */
+function parseCaps(caps) {
+  const split = (s, sep) => {
+    const out = [];
+    let depth = 0, quote = false, start = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '"' && s[i - 1] !== "\\") quote = !quote;
+      else if (!quote && "{[<(".includes(c)) depth++;
+      else if (!quote && "}]>)".includes(c)) depth--;
+      else if (!quote && !depth && c === sep) { out.push(s.slice(start, i).trim()); start = i + 1; }
+    }
+    out.push(s.slice(start).trim());
+    return out.filter(Boolean);
+  };
+  return split(caps, ";").map((structure) => {
+    const [type, ...fields] = split(structure, ",");
+    return { type, fields: fields.map((f) => {
+      const eq = f.indexOf("=");
+      return [f.slice(0, eq).trim(), f.slice(eq + 1).trim().replace(/^\([\w ]+\)/, "")];
+    }) };
+  });
+}
+
+function renderGraph() {
+  const box = document.getElementById("graph");
+  if (!box) return;
+  const sec = box.closest(".graph-sec");
+  const g = graph.data;
+  sec.hidden = !g || !Object.keys(g.nodes).length;
+  hideTip();
+  if (sec.hidden) return;
+
+  const nodes = g.nodes;
+  const parent = (k) => (nodes[k].parent != null && nodes[k].parent in nodes ? nodes[k].parent : null);
+  const kids = new Map();
+  for (const k of Object.keys(nodes)) {
+    if (!kids.has(parent(k))) kids.set(parent(k), []);
+    kids.get(parent(k)).push(k);
+  }
+  // per bin: how many elements it holds, whether one of them is exposed
+  const inside = new Map();
+  const count = (k) => {
+    let n = 0, exposed = false;
+    for (const c of kids.get(k) || []) {
+      const [cn, ce] = count(c);
+      n += 1 + cn; exposed = exposed || ce || nodes[c].exposed;
+    }
+    inside.set(k, [n, exposed]);
+    return [n, exposed];
+  };
+  count(null);
+  const foldable = Object.keys(nodes).filter((k) => inside.get(k)[0] > 0);
+  const isOpen = (k) => (graph.open.has(k) ? graph.open.get(k) : graph.all || inside.get(k)[1]);
+  /** The block that shows element k: itself, or the outermost folded bin around it. */
+  const shown = (k) => {
+    let v = k;
+    for (let p = parent(k); p != null; p = parent(p)) if (!isOpen(p)) v = p;
+    return v;
+  };
+  /** The child of bin c (null: the pipeline) that holds block k, if any. */
+  const childIn = (c, k) => {
+    let x = k;
+    while (x != null && parent(x) !== c) x = parent(x);
+    return x;
+  };
+
+  const edges = new Map();
+  for (const l of g.links) {
+    const s = shown(l.source), t = shown(l.sink);
+    if (s === t) continue;
+    const id = `${s}\n${t}`;
+    if (!edges.has(id)) edges.set(id, { s, t, links: [] });
+    edges.get(id).links.push(l);
+  }
+
+  const block = (k) => {
+    const ch = kids.get(k) || [];
+    const b = { key: k, n: nodes[k], open: ch.length > 0 && isOpen(k), count: inside.get(k)[0] };
+    if (b.open) b.children = ch.map(block);
+    return b;
+  };
+  // the pipeline itself is no node: when the model exposes it (playbin name=pb), it frames the rest
+  const pipe = model && Object.keys(model.elements).find((k) => !(k in nodes));
+  const root = { key: null, open: true, root: true, children: (kids.get(null) || []).map(block),
+    n: pipe ? { name: pipe, factory: model.elements[pipe].factory, exposed: true } : null };
+
+  const measure = (b) => {
+    const n = b.n, fl = n ? factoryLabel(n) : "";
+    if (!b.open) {
+      b.w = 22 + Math.max(textWidth(n.name, "600 12px"), textWidth(fl, "11px"));
+      if (b.count) b.w += 18 + textWidth(`+${b.count}`, "11px") + 8;
+      b.h = GL.h; b.anchor = GL.h / 2;
+      return;
+    }
+    const ch = b.children;
+    ch.forEach(measure);
+    const index = new Map(ch.map((c, i) => [c.key, i]));
+    const succ = ch.map(() => []), pred = ch.map(() => []), linked = ch.map(() => false);
+    for (const e of edges.values()) {
+      const a = index.get(childIn(b.key, e.s)), z = index.get(childIn(b.key, e.t));
+      if (a !== undefined) linked[a] = true;
+      if (z !== undefined) linked[z] = true;
+      if (a === undefined || z === undefined || a === z) continue;
+      succ[a].push(z); pred[z].push(a);
+    }
+    // columns by the longest path from a source, a cycle broken at its first block
+    const layer = ch.map(() => 0), done = ch.map(() => false), indeg = pred.map((p) => p.length);
+    const ready = ch.map((_, i) => i).filter((i) => !indeg[i]);
+    for (let left = ch.length; left > 0;) {
+      const i = ready.length ? ready.shift() : done.indexOf(false);
+      if (done[i]) continue;
+      done[i] = true; left--;
+      layer[i] = Math.max(0, ...pred[i].filter((p) => done[p] && p !== i).map((p) => layer[p] + 1));
+      for (const z of succ[i]) if (--indeg[z] === 0 && !done[z]) ready.push(z);
+    }
+    const cols = [];
+    ch.forEach((_, i) => (cols[layer[i]] = cols[layer[i]] || []).push(i));
+    const row = new Map();
+    // under the blocks of the same predecessors; blocks without links (playsink's spare identity) last
+    const bary = (i) => {
+      if (!linked[i]) return Number.MAX_VALUE;
+      const ps = pred[i].filter((p) => row.has(p));
+      return ps.length ? ps.reduce((s, p) => s + row.get(p), 0) / ps.length : ch.length;
+    };
+    // each block level with what feeds it, pushed down past the one above, the column then
+    // centred on where its blocks want to be: a chain runs straight, a tee's branches fan out
+    const mid = (i) => ch[i].y + ch[i].anchor;
+    let x = 0;
+    for (const col of cols.filter(Boolean)) {
+      col.sort((p, q) => bary(p) - bary(q) || p - q);
+      col.forEach((i, r) => row.set(i, r));
+      const want = col.map((i) => {
+        const ps = pred[i].filter((p) => ch[p].y !== undefined);
+        return ps.length ? ps.reduce((s, p) => s + mid(p), 0) / ps.length - ch[i].anchor : null;
+      });
+      let next = null;
+      const tops = col.map((i, r) => {
+        const t = Math.max(want[r] ?? next ?? 0, next ?? -Infinity);
+        next = t + ch[i].h + GL.gapY;
+        return t;
+      });
+      const wanted = want.flatMap((w, r) => (w === null ? [] : [w - tops[r]]));
+      const shift = wanted.length ? Math.min(0, wanted.reduce((s, d) => s + d, 0) / wanted.length) : 0;
+      const w = Math.max(...col.map((i) => ch[i].w));
+      col.forEach((i, r) => { ch[i].x = x + (w - ch[i].w) / 2; ch[i].y = tops[r] + shift; });
+      x += w + GL.gapX;
+    }
+    const minY = Math.min(...ch.map((c) => c.y)), maxY = Math.max(...ch.map((c) => c.y + c.h));
+    for (const c of ch) c.y -= minY;
+    // a bin is entered at its first linked block
+    const entry = cols[0].find((i) => linked[i]) ?? cols[0][0];
+    const framed = !b.root || b.n;
+    const top = framed ? GL.head : 0, pad = framed ? GL.pad : 0;
+    const head = n ? 30 + textWidth(n.name, "600 11.5px") + (fl ? 8 + textWidth(fl, "11px") : 0) : 0;
+    b.inner = { x: pad, y: top };
+    b.w = Math.max(x - GL.gapX + 2 * pad, head);
+    b.h = top + maxY - minY + pad;
+    b.anchor = top + mid(entry);
+  };
+  measure(root);
+
+  const canvas = h("div", { class: "gcanvas", style: `width:${root.w}px;height:${root.h}px` });
+  const lines = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  lines.setAttribute("class", "gedges");
+  lines.setAttribute("width", root.w); lines.setAttribute("height", root.h);
+  const frames = [], blocks = [], rects = new Map();
+  const place = (b, x, y, depth) => {
+    if (b.open) {
+      if (!b.root || b.n) frames.push(binFrame(b, x, y, depth));
+      for (const c of b.children) place(c, x + b.inner.x + c.x, y + b.inner.y + c.y, depth + 1);
+    } else {
+      rects.set(b.key, { x, y, w: b.w, h: b.h });
+      blocks.push(graphNode(b, x, y));
+    }
+  };
+  place(root, 0, 0, 0);
+  for (const e of edges.values()) lines.append(graphEdge(e, rects.get(e.s), rects.get(e.t)));
+  canvas.append(...frames, lines, ...blocks);
+  box.replaceChildren(canvas);
+  graphEdges();
+
+  const total = Object.keys(nodes).length;
+  const visible = rects.size + frames.length - (root.n ? 1 : 0);
+  sec.querySelector(".gcount").textContent = visible < total ? `${visible} of ${total} elements` : `${total} element${total === 1 ? "" : "s"}`;
+  const allBtn = sec.querySelector(".gall");
+  allBtn.hidden = !foldable.some((k) => !inside.get(k)[1]);
+  allBtn.setAttribute("aria-pressed", String(foldable.every(isOpen)));
+  const clickable = !!pipe || Object.values(nodes).some((n) => n.exposed);
+  const capsHint = g.links.length ? "hover a link for its caps" : "";
+  sec.querySelector(".ghint").textContent = clickable
+    ? `Click an element for its properties${capsHint && ` · ${capsHint}`}`
+    : capsHint.replace("h", "H");
+  markGraph();
+
+  function binFrame(b, x, y, depth) {
+    const n = b.n, fl = factoryLabel(n);
+    const fold = b.root ? null : h("button", { class: "gfold", "aria-expanded": "true", title: `Fold ${n.name}`,
+      "aria-label": `Fold ${n.name}`, onclick: () => { graph.open.set(b.key, false); renderGraph(); } });
+    return h("div", { class: "gbin" + (depth % 2 ? " odd" : ""), "data-key": b.key || n.name,
+      style: `left:${x}px;top:${y}px;width:${b.w}px;height:${b.h}px` },
+      h("div", { class: "gbh" }, fold,
+        n.exposed ? h("button", { class: "gname", text: n.name, title: `Go to ${b.key || n.name}`,
+          onclick: () => revealSection(b.key || n.name) }) : h("span", { class: "gname", text: n.name }),
+        fl ? h("span", { class: "gf", text: fl }) : null));
+  }
+
+  function graphNode(b, x, y) {
+    const n = b.n, fl = factoryLabel(n);
+    const label = h("span", { class: "glabel" }, h("span", { class: "gk", text: n.name }), fl ? h("span", { class: "gf", text: fl }) : null);
+    const style = `left:${x}px;top:${y}px;width:${b.w}px;height:${b.h}px`;
+    const unfold = () => { graph.open.set(b.key, true); renderGraph(); };
+    const more = b.count ? h("span", { class: "gmore", text: `+${b.count}` }) : null;
+    const title = `${b.key} · ${n.factory}${b.count ? ` · ${b.count} elements inside` : ""}`;
+    if (n.exposed) {
+      const go = h("button", { class: "ggo", title: `${title}\nGo to its properties`, onclick: () => revealSection(b.key) }, label, more);
+      return h("div", { class: "gn exposed" + (b.count ? " folded" : ""), "data-key": b.key, style },
+        b.count ? h("button", { class: "gfold", "aria-expanded": "false", "aria-label": `Unfold ${n.name}`, title: `Unfold ${n.name}`, onclick: unfold }) : null, go);
+    }
+    if (b.count) {
+      return h("div", { class: "gn folded", "data-key": b.key, style },
+        h("button", { class: "ggo", "aria-expanded": "false", title: `${title}\nUnfold`, onclick: unfold },
+          h("span", { class: "gfold", "aria-hidden": "true" }), label, more));
+    }
+    return h("div", { class: "gn", "data-key": b.key, title, style }, label);
+  }
+}
+
+function graphEdge(e, a, z) {
+  const ns = "http://www.w3.org/2000/svg";
+  const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = z.x, y2 = z.y + z.h / 2;
+  const bend = Math.max(18, Math.abs(x2 - x1) / 2);
+  const d = `M${x1} ${y1} C${x1 + bend} ${y1} ${x2 - 5 - bend} ${y2} ${x2 - 5} ${y2}`;
+  const group = document.createElementNS(ns, "g");
+  const negotiated = e.links.every((l) => l.caps);
+  group.setAttribute("class", "gedge" + (negotiated ? "" : " pending"));
+  for (const [cls, attrs] of [["hit", { d }], ["ln", { d }], ["ah", { d: `M${x2 - 6} ${y2 - 3.5}L${x2} ${y2}L${x2 - 6} ${y2 + 3.5}z` }]]) {
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("class", cls);
+    for (const [k, v] of Object.entries(attrs)) p.setAttribute(k, v);
+    group.append(p);
+  }
+  group.addEventListener("pointerenter", (ev) => { if (!graph.pinned) showTip(e, ev); });
+  group.addEventListener("pointermove", (ev) => { if (!graph.pinned) moveTip(ev); });
+  group.addEventListener("pointerleave", () => { if (!graph.pinned) hideTip(); });
+  group.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const again = graph.pinned === group;
+    hideTip();
+    if (again) return;
+    graph.pinned = group;
+    group.classList.add("on");
+    showTip(e, ev);
+  });
+  return group;
+}
+
+function showTip(e, ev) {
+  const tip = document.getElementById("gtip");
+  const pad = (key, name) => h("span", {}, h("b", { text: key }), h("span", { class: "gp", text: `.${name}` }));
+  tip.replaceChildren(...e.links.map((l) => h("div", { class: "gt" },
+    h("div", { class: "gth" }, pad(l.source, l.source_pad), h("span", { class: "gp", text: " → " }), pad(l.sink, l.sink_pad)),
+    l.caps ? parseCaps(l.caps).map((s) => h("div", { class: "gcaps" }, h("div", { class: "gmt", text: s.type }),
+      s.fields.length ? h("dl", {}, s.fields.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })])) : null))
+      : h("div", { class: "gnone", text: "Not negotiated yet: caps appear once the pipeline prerolls." }))));
+  tip.hidden = false;
+  moveTip(ev);
+}
+
+function moveTip(ev) {
+  const tip = document.getElementById("gtip");
+  const host = tip.parentElement.getBoundingClientRect();
+  const left = Math.min(ev.clientX - host.left + 14, host.width - tip.offsetWidth);
+  tip.style.left = `${Math.max(0, left)}px`;
+  tip.style.top = `${ev.clientY - host.top + 16}px`;
+}
+
+function hideTip() {
+  const tip = document.getElementById("gtip");
+  if (tip) tip.hidden = true;
+  if (graph.pinned) graph.pinned.classList.remove("on");
+  graph.pinned = null;
+}
+
+/** Fade the edges the graph scrolls past, so a wide one shows there is more. */
+function graphEdges() {
+  const box = document.getElementById("graph");
+  if (!box) return;
+  box.classList.toggle("more-left", box.scrollLeft > 1);
+  box.classList.toggle("more-right", box.scrollLeft + box.clientWidth < box.scrollWidth - 1);
+}
+new ResizeObserver(() => graphEdges()).observe(document.documentElement);
+
+/** Mark the exposed elements whose properties differ from their defaults. */
+function markGraph() {
+  const mods = new Map(sections.map((s) => [s.key, s.rows.some((r) => r.mod)]));
+  for (const el of document.querySelectorAll("#graph [data-key]")) el.classList.toggle("mod", !!mods.get(el.dataset.key));
+}
+
+function graphSection() {
+  const all = h("button", { class: "toggle gall", "aria-pressed": "false", title: "Unfold every bin",
+    onclick: () => { graph.all = all.getAttribute("aria-pressed") !== "true"; graph.open.clear(); renderGraph(); } }, "All elements");
+  return h("section", { class: "graph-sec", "aria-label": "Pipeline", hidden: true },
+    h("div", { class: "graph-h" },
+      h("h2", { class: "sec-h" }, "Pipeline", h("span", { class: "n gcount" })),
+      h("span", { class: "ghint" }), all),
+    h("div", { class: "graph", id: "graph", onscroll: () => { hideTip(); graphEdges(); } }),
+    h("div", { class: "gtip", id: "gtip", role: "tooltip", hidden: true }));
+}
+
+/** Show an element's section: open it, clear a filter that hides it, scroll to it. */
+function revealSection(key) {
+  const sec = sections.find((s) => s.key === key);
+  if (!sec) return;
+  if (sec.el.hidden) {
+    ui.filter = ""; ui.modified = false;
+    document.querySelector("#tools .filter input").value = "";
+    document.querySelector("#tools .mod").setAttribute("aria-pressed", "false");
+  }
+  ui.open.set(key, true);
+  applyFilter();
+  const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  sec.el.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  sec.el.querySelector("summary").focus({ preventScroll: true });
+  sec.el.classList.remove("flash");
+  void sec.el.offsetWidth;
+  sec.el.classList.add("flash");
+}
+
 // ---- elements: filter, sections ----------------------------------------------------------
 
 let summaryQueued = false;
@@ -969,6 +1401,7 @@ function applyFilter() {
   none.hidden = !filtering || visibleSections > 0;
   none.textContent = ui.modified && q === "" ? "No property differs from its default."
     : `No property matches “${ui.filter.trim()}”${ui.modified ? " among the modified ones" : ""}.`;
+  markGraph();
   const all = tools.querySelector(".all");
   all.hidden = filtering || sections.length < 2;
   all.textContent = sections.some((s) => !s.el.open) ? "Expand all" : "Collapse all";
@@ -986,7 +1419,7 @@ function buildElements(main) {
   const filter = h("input", { class: "in", type: "search", placeholder: "Filter properties", "aria-label": "Filter properties",
     value: ui.filter, oninput: (e) => { ui.filter = e.target.value; applyFilter(); },
     onkeydown: (e) => { if (e.key === "Escape") { e.target.value = ui.filter = ""; applyFilter(); e.target.blur(); } } });
-  const modBtn = h("button", { class: "toggle", "aria-pressed": String(ui.modified), title: "Only properties that differ from their default",
+  const modBtn = h("button", { class: "toggle mod", "aria-pressed": String(ui.modified), title: "Only properties that differ from their default",
     onclick: () => { ui.modified = !ui.modified; modBtn.setAttribute("aria-pressed", String(ui.modified)); applyFilter(); } },
     "Modified", h("span", { class: "n mod-n", text: "0" }));
   const allBtn = h("button", { class: "toggle all", onclick: () => {
@@ -1026,7 +1459,7 @@ function build(m) {
   buildTransport();
 
   const main = document.getElementById("main");
-  main.replaceChildren();
+  main.replaceChildren(graphSection());
   const commands = Object.values(m.commands).filter((c) => !(c.builtin && ["play", "pause", "stop", "eos", "seek"].includes(c.name)));
   if (commands.length) {
     main.append(h("h2", { class: "sec-h" }, "Commands"), ...commands.map(commandRow));
@@ -1039,6 +1472,7 @@ function build(m) {
   buildElements(main);
   for (const row of allRows) row.update();
   updateTransport(); updateTime(); applyFilter();
+  renderGraph();
 }
 
 // ---- start -------------------------------------------------------------------------------
@@ -1057,7 +1491,9 @@ document.addEventListener("keydown", (e) => {
     const f = document.querySelector(".filter input");
     if (f) { e.preventDefault(); f.focus(); f.select(); }
   }
+  if (e.key === "Escape" && graph.pinned) hideTip();
 });
+document.addEventListener("click", () => { if (graph.pinned) hideTip(); });
 
 wireSeek();
 connect();

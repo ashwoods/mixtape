@@ -188,12 +188,13 @@ input[type=checkbox] { accent-color: var(--accent); margin: 0; }
 .out .ms { color: var(--faint); margin-left: 8px; }
 .out.err { color: var(--err); }
 
-/* -- the player's own column: commands and properties beside the pipeline, in view while it scrolls -- */
+/* -- the player's own column: commands and properties beside the elements, under the full-width
+   graph, in view while the elements scroll -- */
 @media (min-width: 1100px) {
   body.has-side .bar-in, body.has-side .notices, main.has-side { max-width: 1600px; }
   main.has-side {
     display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto 1fr;
-    grid-template-areas: "graph side" "els side"; gap: 0 28px; align-items: start;
+    grid-template-areas: "graph graph" "els side"; gap: 0 28px; align-items: start;
   }
   main.has-side > .graph-sec { grid-area: graph; min-width: 0; }
   main.has-side > .els { grid-area: els; min-width: 0; }

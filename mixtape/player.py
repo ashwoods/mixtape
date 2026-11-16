@@ -505,8 +505,8 @@ class Player:
     # -- the model: properties and commands -- #
 
     def _check_features(self) -> None:
-        """Fail for a feature whose GStreamer plugin features are missing, or whose name would
-        shadow the `element.property` paths of an element."""
+        """Fail for a feature whose GStreamer plugin features are missing, whose name would
+        shadow the `element.property` paths of an element, or that refuses the player."""
         registry = Gst.Registry.get()
         keys = self._element_keys()
         for feature in self._features.values():
@@ -520,6 +520,7 @@ class Player:
                     f"The feature {feature.name!r} has the name of an element: "
                     "its properties would shadow the element's"
                 )
+            feature.check(self)
 
     def _build_model(self) -> tuple[dict[str, _Bound], dict[str, tuple[Computed[Any], object]]]:
         """The commands and computed properties of this player: its class's, then each

@@ -31,6 +31,10 @@ http = [
 [project.scripts]
 mixtape = "mixtape.cli:main"
 
+[project.entry-points."mixtape.features"]
+leaks = "mixtape.features.leaks:Leaks"
+stats = "mixtape.features.stats:Stats"
+
 [project.urls]
 Homepage = "https://github.com/ashwoods/mixtape"
 

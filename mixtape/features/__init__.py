@@ -77,6 +77,11 @@ class Feature:
         """Called before GStreamer is initialised, when the player builds the pipeline from a
         description: the place to set environment variables such as `GST_TRACERS`."""
 
+    def check(self, player: "Player") -> None:
+        """Called when the player is built, after GStreamer is initialised and `requires` is
+        met, before it is set up: raise `FeatureError` if the feature cannot work here, so the
+        player is not built rather than failing later in `attach`."""
+
     def attach(self, player: "Player") -> None:
         """Called by `Player.setup`, on the running loop."""
 

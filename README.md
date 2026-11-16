@@ -279,36 +279,100 @@ src.link(sink)
 player = Player(pipe)
 ```
 
-## Feature interface (Draft)
+## Features
+A feature is a plugin of a player: it adds commands and live properties to the model, next to
+the elements', as `feature.name`. They show up in `describe()`, `mixtape inspect`, the HTTP API
+and the control page like any other. Enable one three ways: as a class attribute of a player
+class, with the `features` argument (`"name,key=value"` strings, classes or instances), or
+with `--feature` on the command line, which can be repeated:
 
-(WIP)
+```python
+class Camera(Player):
+    features = ("stats,interval=2",)  # names and classes, never instances
 
-    from mixtape.features import AwesomeFeature, Attachable
+
+player = Player.from_description(description, features=["stats", "leaks,interval=5"])
+```
+
+    mixtape run "videotestsrc name=src ! queue name=q ! fakesink" --feature stats --http 8000
+    mixtape inspect --feature leaks,interval=0.5 "videotestsrc ! fakesink"
+
+The built-in ones:
+
+* `stats` publishes `stats.rates`: the buffers and kilobits per second leaving each exposed
+  element, over the last `interval` seconds (default 1). It counts with a pad probe on the source
+  pads an element has when the player is set up, so a sink has no rate.
+* `leaks` publishes `leaks.alive`: the GStreamer objects created and not yet freed since it
+  attached, by type, from GStreamer's `leaks` tracer; a count that keeps growing in a steady
+  pipeline is a leak. `leaks.checkpoint` returns what changed since its last call and
+  `leaks.reset` starts counting again. The tracer exists only if `GST_TRACERS` names it before
+  GStreamer initialises, and there is one per process: enable it with `from_description` or
+  `mixtape run`, which prepare the features first, and before anything else in the process
+  initialises GStreamer, or set `GST_TRACERS=leaks` yourself.
+
+### Writing a feature
+Subclass `Feature` with a `name`, the options as `__init__` keyword parameters (validated, so
+`--feature heartbeat,interval=2` gives a float), and `@command` methods and `@prop` getters like
+a `Player` has. `attach` runs on the player's loop when it is set up and `detach` when it is torn
+down; `notify("beats")` publishes the current value of a property to the event streams, on the
+loop thread only. `prepare` runs before GStreamer is initialised, when the player is built from
+a description; `check` runs when the player is built and may raise `FeatureError` if the feature
+cannot work with it. Getters and commands must also work when the player is not set up, as
+`mixtape inspect` reads every property.
+
+```python
+# heartbeat.py
+import asyncio
+import os
+
+from mixtape import Feature, Player, command, prop
 
 
-    class WebRTC(AwesomeFeature, Attachable):
+class Heartbeat(Feature):
+    name = "heartbeat"
+    requires = ("identity",)  # GStreamer elements or tracers it needs
 
-        name = 'webrtc'
-        plugins_dependencies = ['webrtcbin', 'nice']
-        bin_desc = ""
+    def __init__(self, interval: float = 1.0) -> None:
+        self.interval = interval
+        self._beats = 0
+        self._task: asyncio.Task[None] | None = None
 
-    def check(self, pipeline):
-        pass
+    def prepare(self) -> None:  # before GStreamer initialises: environment variables
+        os.environ.setdefault("GST_DEBUG_NO_COLOR", "1")
 
-    def attach(self, pipeline, element, pad):
-        pass
+    def attach(self, player: Player) -> None:
+        self._task = asyncio.get_running_loop().create_task(self._beat())
 
-    def detach(self, pipeline, element, pad):
-        pass
+    def detach(self, player: Player) -> None:
+        if self._task:
+            self._task.cancel()
 
-    def check(self, pipeline):
-        pass
+    async def _beat(self) -> None:
+        while True:
+            await asyncio.sleep(self.interval)
+            self._beats += 1
+            self.notify("beats")
 
-    def init(self, pipeline)
-        pass
+    @prop
+    def beats(self) -> int:
+        """Beats since the player was set up"""
+        return self._beats
 
-    def exit(self, pipeline)
-        pass
+    @command
+    def reset(self) -> None:
+        """Start counting again"""
+        self._beats = 0
+        self.notify("beats")
+```
+
+Pass it as `features=[Heartbeat()]`, or register it by name in your package's entry points to
+use it with `--feature heartbeat` and in `features=["heartbeat"]`; `mixtape inspect --help`
+lists the ones installed:
+
+```toml
+[project.entry-points."mixtape.features"]
+heartbeat = "heartbeat:Heartbeat"
+```
 
 ----
 

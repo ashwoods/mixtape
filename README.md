@@ -84,8 +84,8 @@ runs the main run loop so video windows appear.
 
 ### Inspecting and setting properties
 A `Player` describes what it exposes: its properties, with types, ranges and current values,
-and its commands. Declare your own with `prop()`, an alias of an element property, and
-`@command`; the class `description` is the pipeline `mixtape` builds for it:
+and its commands. Declare your own with `prop()`, an alias of an element property, `@prop` on a
+method, a read-only property computed by it, and `@command`; the class `description` is the pipeline `mixtape` builds for it:
 
 ```python
 # demo.py
@@ -312,11 +312,11 @@ The built-in ones:
 
 ### Writing a feature
 Subclass `Feature` with a `name`, the options as `__init__` keyword parameters (validated, so
-`--feature heartbeat,interval=2` gives a float), and `@command` methods and `@prop` getters like
-a `Player` has. `attach` runs on the player's loop when it is set up and `detach` when it is torn
+`--feature heartbeat,interval=2` gives a float), and `@command` methods and `@prop` getters as a
+`Player` can. `attach` runs on the player's loop when it is set up and `detach` when it is torn
 down; `notify("beats")` publishes the current value of a property to the event streams, on the
-loop thread only. `prepare` runs before GStreamer is initialised, when the player is built from
-a description; `check` runs when the player is built and may raise `FeatureError` if the feature
+loop thread only. `prepare` runs once, as the player is built: before GStreamer is initialised
+only when it is built from a description (environment variables it sets stay set); `check` runs when the player is built and may raise `FeatureError` if the feature
 cannot work with it. Getters and commands must also work when the player is not set up, as
 `mixtape inspect` reads every property.
 
@@ -341,6 +341,7 @@ class Heartbeat(Feature):
         os.environ.setdefault("GST_DEBUG_NO_COLOR", "1")
 
     def attach(self, player: Player) -> None:
+        self._beats = 0
         self._task = asyncio.get_running_loop().create_task(self._beat())
 
     def detach(self, player: Player) -> None:

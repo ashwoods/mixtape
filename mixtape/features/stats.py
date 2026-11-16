@@ -12,6 +12,7 @@ from gi.repository import Gst
 from pydantic import BaseModel, PositiveFloat
 
 from ..model import prop
+from ..player import _retrying
 from . import Feature
 
 if TYPE_CHECKING:
@@ -47,18 +48,20 @@ class Stats(Feature):
 
     def attach(self, player: "Player") -> None:
         for key, element in player.exposed_elements().items():
-            if isinstance(element, Gst.Bin) or not element.srcpads:
+            # an iterator, not `srcpads`: a streaming thread may add a pad meanwhile
+            pads = [] if isinstance(element, Gst.Bin) else _retrying(element.iterate_src_pads)
+            if not pads:
                 continue
             counts = self._counts[key] = [0, 0]
-            for pad in element.srcpads:
+            for pad in pads:
                 probe = Gst.PadProbeType.BUFFER | Gst.PadProbeType.BUFFER_LIST
                 self._probes.append((pad, pad.add_probe(probe, self._count, counts)))
         self._task = asyncio.get_running_loop().create_task(self._poll())
 
     def detach(self, player: "Player") -> None:
-        if self._task is not None:
-            self._task.cancel()
-            self._task = None
+        if self._task is not None and not self._task.get_loop().is_closed():
+            self._task.cancel()  # a closed loop cannot cancel: the task died with it
+        self._task = None
         for pad, probe in self._probes:
             pad.remove_probe(probe)
         self._probes.clear()

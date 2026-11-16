@@ -171,8 +171,8 @@ class Player:
         self._attached: list[Feature] = []  # in the order they attached
         for alias in self._declarations().props.values():
             self._locate(alias.target, exposed=False)  # a typo fails here
-        self._check_features()
         self._commands, self._computed = self._build_model()
+        self._check_features()  # after the model: a feature's `check` may read it
 
     @classmethod
     def from_description(
@@ -196,6 +196,8 @@ class Player:
             pipeline = Gst.Pipeline.new(None)
             pipeline.add(element)
             element = pipeline
+        if not resolved:  # a subclass whose `__init__` predates features still works
+            return cls(element, expose_all=expose_all)
         return cls(element, expose_all=expose_all, features=resolved)
 
     @classmethod

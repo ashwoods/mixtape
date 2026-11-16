@@ -83,7 +83,8 @@ class Feature:
         player is not built rather than failing later in `attach`."""
 
     def attach(self, player: "Player") -> None:
-        """Called by `Player.setup`, on the running loop."""
+        """Called by `Player.setup`, on the running loop. One that raises gets no `detach`:
+        it cleans up after itself, and the features attached before it are detached."""
 
     def detach(self, player: "Player") -> None:
         """Called by `Player.teardown`. An exception is logged and teardown goes on."""

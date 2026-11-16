@@ -83,9 +83,9 @@ class Leaks(Feature):
         self._task = asyncio.get_running_loop().create_task(self._poll())
 
     def detach(self, player: "Player") -> None:
-        if self._task is not None:
-            self._task.cancel()
-            self._task = None
+        if self._task is not None and not self._task.get_loop().is_closed():
+            self._task.cancel()  # a closed loop cannot cancel: the task died with it
+        self._task = None
         if self._tracer is not None:
             self._tracer.emit("activity-stop-tracking")
             self._tracer = None

@@ -19,6 +19,7 @@ from websockets.exceptions import InvalidStatus
 from websockets.typing import Origin
 
 from mixtape import Player, command
+from mixtape.exceptions import MixTapeError
 from mixtape.interfaces.http import Listening, serve
 from mixtape.interfaces.http.security import check_headers
 from tests.players import Feat
@@ -182,6 +183,32 @@ async def test_websocket(served: Served) -> None:
         # the socket survived all of that
         await ws.send(json.dumps({"id": 8, "command": "pause"}))
         assert (await until(ws, lambda m: m["type"] == "reply"))[-1]["result"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_new_connection_gets_the_error_that_stopped_the_pipeline(Gst: Any) -> None:
+    player = Player.from_description("filesrc name=src ! fakesink")
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        ws_url = f"ws://127.0.0.1:{listening.port}/api/events"
+        with pytest.raises(MixTapeError):
+            await player.play()  # no location: the pipeline stops with an error
+
+        async with websockets.connect(ws_url) as ws:
+            first, second = await message(ws), await message(ws)
+            assert first["type"] == "values" and first["values"]["state"] == "null"
+            assert second["type"] == "error" and second["source"] == "src"
+            assert player.error is not None and second["message"] == player.error.message
+
+        await player.set("src.location", __file__)
+        await player.play()  # started again: the error is over
+        async with websockets.connect(ws_url) as ws:
+            assert (await message(ws))["type"] == "values"
+            try:  # the file ends at once: an EOS, no error
+                while (m := json.loads(await asyncio.wait_for(ws.recv(), 0.3)))["type"] != "error":
+                    pass
+            except asyncio.TimeoutError:
+                return
+            pytest.fail(f"an error after a successful play: {m}")
 
 
 @pytest.mark.asyncio

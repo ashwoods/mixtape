@@ -6,7 +6,7 @@ Server to client, one JSON object per message:
     {"type": "state", "old", "new", "pending"}       the pipeline's state (`void-pending`)
     {"type": "property", "path", "element", "property", "value"}   (null for a computed one)
     {"type": "eos"}
-    {"type": "error" | "warning", "source", "message", "debug"}
+    {"type": "error" | "warning", "source", "message", "debug"}   (an error also once on connect)
     {"type": "position", "position", "duration"}
     {"type": "reply", "id", "result"}                 or "error": {"status", "detail"[, "errors"]}
 
@@ -167,6 +167,8 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
             if not (isinstance(value, float) and not math.isfinite(value))  # as forward() does
         }
         await send({"type": "values", "values": values})
+        if player.error is not None and (error := encode_event(events.Error(player.error))):
+            await send(error)  # the page may load after the error that stopped the pipeline
         await asyncio.wait({forwarding, receiving}, return_when=asyncio.FIRST_COMPLETED)
     finally:
         stream.close()

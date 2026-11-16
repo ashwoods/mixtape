@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Build GStreamer's Rust tracers (queue-levels, buffer-lateness,
+# pad-push-timings) from gst-plugins-rs and copy libgstrstracers.so into DIR.
+# Ubuntu does not package them. Needs cargo, git, a C toolchain, pkg-config and
+# libgstreamer1.0-dev already installed; this script installs nothing.
+#
+# Usage: scripts/build-rs-tracers DIR
+set -euo pipefail
+
+# Pinned to the version brew ships on the dev Mac, so the CSV formats the
+# tracers write are the same in CI and locally.
+GST_PLUGINS_RS_TAG=0.15.4
+
+dest=${1:?usage: scripts/build-rs-tracers DIR}
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+git clone --quiet --depth 1 --branch "$GST_PLUGINS_RS_TAG" \
+  https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs.git "$work/src"
+cd "$work/src"
+
+# Upstream bug: built alone, the crate lacks tokio's "time" feature (the full
+# workspace normally supplies it). Fail loudly if the patch no longer applies,
+# e.g. because upstream fixed it.
+manifest=utils/tracers/Cargo.toml
+old='features = ["macros", "rt-multi-thread"]'
+new='features = ["macros", "rt-multi-thread", "time"]'
+grep -qF "$old" "$manifest" || {
+  echo "build-rs-tracers: cannot patch $manifest: '$old' not found (fixed upstream?)" >&2
+  exit 1
+}
+sed -i.bak "s/features = \[\"macros\", \"rt-multi-thread\"\]/features = [\"macros\", \"rt-multi-thread\", \"time\"]/" "$manifest"
+grep -qF "$new" "$manifest"
+
+cargo build --release -p gst-plugin-tracers
+
+lib=target/release/libgstrstracers.so
+strip "$lib"
+mkdir -p "$dest"
+cp "$lib" "$dest/"
+echo "build-rs-tracers: installed $dest/libgstrstracers.so"

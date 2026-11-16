@@ -19,7 +19,30 @@ jobs:
             python3-gi \
             python3-gst-1.0 \
             gstreamer1.0-plugins-base \
-            gstreamer1.0-plugins-good
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-tools \
+            libgstreamer1.0-dev
+
+      # The perf tracers (queue-levels, buffer-lateness, pad-push-timings) are
+      # not packaged for Ubuntu: build them once and cache the plugin.
+      - name: Cache GStreamer Rust tracers
+        id: tracers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/gst-rs-tracers
+          key: gst-rs-tracers-${{ runner.os }}-0.15.4-${{ hashFiles('scripts/build-rs-tracers') }}
+
+      - name: Build GStreamer Rust tracers
+        if: steps.tracers.outputs.cache-hit != 'true'
+        run: |
+          rustup toolchain install stable --profile minimal
+          scripts/build-rs-tracers ~/.cache/gst-rs-tracers
+
+      - name: Put the tracers on GST_PLUGIN_PATH
+        run: echo "GST_PLUGIN_PATH=$HOME/.cache/gst-rs-tracers" >> "$GITHUB_ENV"
+
+      - name: Check the tracers load
+        run: gst-inspect-1.0 queue-levels
 
       - uses: astral-sh/setup-uv@v6
         with:

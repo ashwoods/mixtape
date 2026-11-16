@@ -100,6 +100,55 @@ def test_leaks_counts_live_objects_by_type() -> None:
     assert result["reset"] == {} == result["after"]
 
 
+LEAKS_WARNING_SCRIPT = textwrap.dedent("""
+    import asyncio, json, logging
+    from mixtape import Player
+    from gi.repository import Gst
+
+    records = []
+    class Collect(logging.Handler):
+        def emit(self, record):
+            records.append((record.name, record.levelname, record.getMessage()))
+    logging.getLogger("mixtape").addHandler(Collect())
+
+    async def main():
+        player = Player.from_description(
+            "videotestsrc num-buffers=10 ! fakesink", features=["leaks,interval=0.1"]
+        )
+        async with player:
+            await player.play_until_eos()
+            KEEP
+    asyncio.run(main())
+    print(json.dumps(records))
+""")
+
+
+def _leaks_warnings(keep: str) -> list[str]:
+    """The warnings of the leaks feature at the end of a run that executes `keep` in it."""
+    env = {key: value for key, value in os.environ.items() if key != "GST_TRACERS"}
+    script = LEAKS_WARNING_SCRIPT.replace("KEEP", keep)
+    done = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=15, env=env
+    )
+    assert done.returncode == 0, done.stderr
+    records = json.loads(done.stdout.splitlines()[-1])
+    return [msg for name, level, msg in records if name == "mixtape.features.leaks"]
+
+
+def test_leaks_a_clean_run_logs_no_warning() -> None:
+    assert _leaks_warnings("pass") == []
+
+
+def test_leaks_logs_what_is_alive_after_the_run() -> None:
+    # `held` outlives the teardown (a module global): the tracer sees a buffer nobody freed
+    warnings = _leaks_warnings("global held; held = Gst.Buffer.new_allocate(None, 16, None)")
+    assert len(warnings) == 1, warnings
+    assert warnings[0].startswith("Still alive after the run: ")
+    assert "1 GstBuffer" in warnings[0]
+    assert "GstSystemClock" not in warnings[0]
+    assert "GstTaskPool" not in warnings[0]
+
+
 def test_leaks_needs_the_tracer_from_before_gstreamer_initialised(
     Gst: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

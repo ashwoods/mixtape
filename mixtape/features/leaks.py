@@ -1,6 +1,7 @@
 """The `leaks` feature: which GStreamer objects are alive, by type, from GStreamer's own tracer."""
 
 import asyncio
+import logging
 import os
 from collections import Counter
 from typing import TYPE_CHECKING, Any
@@ -18,7 +19,10 @@ from . import Feature
 if TYPE_CHECKING:
     from ..player import Player
 
+logger = logging.getLogger(__name__)
+
 TRACER = "leaks"
+SINGLETONS = frozenset({"GstSystemClock", "GstTaskPool"})  # live for the whole process
 
 
 def _tracers(value: str) -> list[str]:
@@ -46,6 +50,10 @@ class Leaks(Feature):
     It reads checkpoints of GStreamer's `leaks` tracer every `interval` seconds and keeps the
     objects created since it attached and not yet freed, by type. A count that only grows while
     the pipeline runs in a steady state is a leak.
+
+    When the player is torn down, a warning names what is still alive once the pipeline is in
+    NULL, apart from the process singletons (`GstSystemClock`, `GstTaskPool`): a leak shows at
+    the end of a run, such as `mixtape run`, without reading `alive`.
 
     The tracer is one per process and exists only when `GST_TRACERS` names it before
     `Gst.init`: this feature sets that in `prepare`, so it works for a player built by
@@ -87,6 +95,13 @@ class Leaks(Feature):
             self._task.cancel()  # a closed loop cannot cancel: the task died with it
         self._task = None
         if self._tracer is not None:
+            self._fold()  # a final checkpoint, for what the teardown freed and what it kept
+            leaked = {k: n for k, n in self._alive.most_common() if k not in SINGLETONS}
+            if leaked and player.state == Gst.State.NULL:  # else it still holds its buffers
+                logger.warning(
+                    "Still alive after the run: %s",
+                    ", ".join(f"{count} {name}" for name, count in leaked.items()),
+                )
             self._tracer.emit("activity-stop-tracking")
             self._tracer = None
         self._alive.clear()

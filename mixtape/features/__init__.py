@@ -87,7 +87,8 @@ class Feature:
         it cleans up after itself, and the features attached before it are detached."""
 
     def detach(self, player: "Player") -> None:
-        """Called by `Player.teardown`. An exception is logged and teardown goes on."""
+        """Called by `Player.teardown`, once the pipeline is in NULL. An exception is logged
+        and teardown goes on."""
 
     def notify(self, prop: str) -> None:
         """Publish the current value of its computed property `prop` to the player's event

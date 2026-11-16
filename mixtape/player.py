@@ -242,7 +242,7 @@ class Player:
 
     @property
     def error(self) -> PlayerPipelineError | None:
-        """The last pipeline error"""
+        """The error that stopped the pipeline last, until it is started again"""
         return self._error
 
     @property
@@ -311,10 +311,12 @@ class Player:
             feature.player = None
 
     def teardown(self) -> None:
-        """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after."""
-        self._detach_features()
+        """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after.
+
+        The features detach once the pipeline is in NULL, so they see what it left behind."""
         self._disconnect_notify()
         self.pipeline.set_state(Gst.State.NULL)
+        self._detach_features()
         self._target = Gst.State.NULL
         self._live = self._buffering = self._eos = False
         loop, fd = self._loop, self._fd
@@ -367,6 +369,8 @@ class Player:
         self._buffering = False  # the caller's state wins over buffering's pause
         if self.state == state and self.pending == Gst.State.VOID_PENDING:
             return Gst.StateChangeReturn.SUCCESS
+        if state in (Gst.State.PAUSED, Gst.State.PLAYING):
+            self._error = None  # started again: the error is history
         error = self._error
         future = asyncio.get_running_loop().create_future()
         waiter = (state, future)

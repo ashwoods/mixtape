@@ -51,8 +51,10 @@ This release breaks the API.
 - **Behaviour change:** the `eos` command (`player.eos()`) waits 5 s by default (`timeout`,
   was none) and raises `CommandError` (409 over HTTP) when no EOS comes, or at once while a
   change is stuck.
-- Fix: `error` (and the error a failed start raises) is the first error since the start, the
-  cause, not a fallback posted after it (basesrc follows its subclass's error with its own).
+- Fix: `error` (and the error a failed start raises) is the first error since the pipeline left
+  NULL, the cause, not a fallback posted after it (basesrc follows its subclass's error with its
+  own); any change out of NULL clears it, `ready()` too. A failed start whose error queued a
+  NULL returns once that NULL is done, so `state` is `null` then.
 - Fix: a pipeline that teardown leaves outside NULL is kept for the life of the process on
   purpose, instead of GStreamer printing a CRITICAL as it disposes it.
 - New: the `leaks` feature warns about the objects still alive once the pipeline is in NULL;

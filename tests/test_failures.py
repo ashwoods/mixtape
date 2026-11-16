@@ -99,6 +99,17 @@ async def test_a_failed_start_is_raised_and_stops_the_pipeline():
 
 
 @pytest.mark.asyncio
+async def test_a_failed_start_leaves_the_change_asked_after_it_to_decide():
+    description = "videotestsrc ! pyfaulty name=f mode=start-once ! fakesink"
+    async with Player.from_description(description) as p:
+        first, second = asyncio.create_task(p.play()), asyncio.create_task(p.play())
+        with pytest.raises(PlayerSetStateError, match="Could not set the pipeline to playing"):
+            await bounded(first)
+        await bounded(second)  # the failure's NULL used to run after it and hang its wait
+        assert p.state == Gst.State.PLAYING
+
+
+@pytest.mark.asyncio
 async def test_a_start_that_posts_errors_raises_the_first():
     description = "videotestsrc ! pyfaulty name=f mode=start-error ! fakesink"
     async with Player.from_description(description) as p:

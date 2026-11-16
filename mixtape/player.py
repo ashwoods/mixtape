@@ -115,7 +115,8 @@ type _Changed = tuple[Gst.State, Gst.StateChangeReturn]  # the state left, what 
 _kept: set[Gst.Pipeline] = set()
 """The pipelines `teardown` left outside NULL, kept on purpose for the life of the process:
 GStreamer cannot free an element that has not stopped, and says so with a CRITICAL. Python
-frees module globals at exit, so the set holds one more reference, which nobody drops."""
+may free module globals at exit, before or after the pipeline's other holders, so the set holds
+one more reference, which nobody drops."""
 ctypes.pythonapi.Py_IncRef(ctypes.py_object(_kept))
 
 
@@ -283,8 +284,8 @@ class Player:
 
     @property
     def error(self) -> PlayerPipelineError | None:
-        """The first error since the pipeline last started, which stopped it, until it is
-        started again"""
+        """The first error since the pipeline last left NULL, which stopped it, until it is
+        set to another state than NULL again"""
         return self._error
 
     @property
@@ -450,7 +451,7 @@ class Player:
         queued = self._changing is not None and not self._changing.done()
         if not queued and self.state == state and self.pending == Gst.State.VOID_PENDING:
             return Gst.StateChangeReturn.SUCCESS
-        if state in (Gst.State.PAUSED, Gst.State.PLAYING):
+        if state != Gst.State.NULL:
             self._error = None  # started again: the error is history
         error = self._error
         future = asyncio.get_running_loop().create_future()
@@ -482,10 +483,11 @@ class Player:
                     failed = self._error  # and the error set the pipeline to NULL
                 elif downward:
                     self._target = self.state
-                else:  # GstBin leaves a failed start half way up: stop it, as an error does
+                elif self._changing is call:  # else the change asked after it decides
+                    # GstBin leaves a failed start half way up: stop it, as an error does
                     self._target = Gst.State.NULL
                     self._live = self._buffering = self._eos = False
-                    self._set_null()
+                    self._after(self._change(Gst.State.NULL), Gst.State.NULL)
                 if not downward:
                     await self._queued_null()
                 raise failed
@@ -689,11 +691,15 @@ class Player:
             self._published_null(old)
 
     async def _queued_null(self) -> None:
-        """Wait up to `state_timeout` for the NULL that `_set_null` queued behind the changes
-        on their way, if it did: a failed start returns once the pipeline is stopped."""
+        """Wait up to `state_timeout` for the NULL a failed start or its error queued, if it
+        is the last change: the start fails once the pipeline is stopped, or stuck."""
         changing = self._changing
         if changing is not None and self._changing_to == Gst.State.NULL and not changing.done():
-            await asyncio.wait([asyncio.wrap_future(changing)], timeout=self.state_timeout)
+            done, _ = await asyncio.wait(
+                [asyncio.wrap_future(changing)], timeout=self.state_timeout
+            )
+            if not done:
+                self._stuck = changing  # as `_mark_stuck`: its `_after` does the rest
 
     def _published_null(self, old: Gst.State) -> None:
         """Publish the `StateChanged` to NULL the bus cannot: it flushes its messages on

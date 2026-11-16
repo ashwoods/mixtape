@@ -63,6 +63,7 @@ def test_a_failed_stop():
     code, err = run(f"{SRC} ! faulty name=f method=stop ! fakesink")
     assert code == 1
     assert "error: Could not set the pipeline to null: f failed" in err
+    assert "CRITICAL" not in err  # the pipeline is kept, not disposed outside NULL
 
 
 def test_a_hang_in_the_preroll_ends_on_one_interrupt():

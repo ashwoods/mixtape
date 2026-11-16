@@ -3,6 +3,7 @@
 import asyncio
 import concurrent.futures
 import contextlib
+import ctypes
 import inspect
 import logging
 import threading
@@ -110,6 +111,12 @@ def _in_thread[T](
 
 
 type _Changed = tuple[Gst.State, Gst.StateChangeReturn]  # the state left, what set_state returned
+
+_kept: set[Gst.Pipeline] = set()
+"""The pipelines `teardown` left outside NULL, kept on purpose for the life of the process:
+GStreamer cannot free an element that has not stopped, and says so with a CRITICAL. Python
+frees module globals at exit, so the set holds one more reference, which nobody drops."""
+ctypes.pythonapi.Py_IncRef(ctypes.py_object(_kept))
 
 
 def _names(elements: Iterable[Gst.Element]) -> str:
@@ -276,7 +283,8 @@ class Player:
 
     @property
     def error(self) -> PlayerPipelineError | None:
-        """The error that stopped the pipeline last, until it is started again"""
+        """The first error since the pipeline last started, which stopped it, until it is
+        started again"""
         return self._error
 
     @property
@@ -348,7 +356,9 @@ class Player:
         """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after.
 
         A pipeline that fails to stop, or does not within `state_timeout`, is left as it is
-        with a warning. The features detach once it is in NULL, so they see what it left."""
+        with a warning, and kept on purpose for the life of the process: GStreamer cannot
+        free an element outside NULL. The features detach once it is in NULL, so they see
+        what it left."""
         self._teardown(null=True)
 
     def _teardown(self, *, null: bool) -> None:
@@ -368,6 +378,8 @@ class Player:
             else:
                 if ret == Gst.StateChangeReturn.FAILURE:
                     logger.warning("%s", self._failed(Gst.State.NULL))
+        if self.state != Gst.State.NULL:
+            _kept.add(self.pipeline)
         self._detach_features()
         self._target = Gst.State.NULL
         self._live = self._buffering = self._eos = False
@@ -464,11 +476,19 @@ class Player:
             if ret == Gst.StateChangeReturn.ASYNC:
                 await future
             elif ret == Gst.StateChangeReturn.FAILURE:
-                self._target = self.state
+                failed: MixTapeError = self._failed(state)  # before a NULL resets them
                 self._drain()  # the element's ERROR is more useful than a bare failure
                 if self._error is not error and self._error is not None:
-                    raise self._error
-                raise self._failed(state)
+                    failed = self._error  # and the error set the pipeline to NULL
+                elif downward:
+                    self._target = self.state
+                else:  # GstBin leaves a failed start half way up: stop it, as an error does
+                    self._target = Gst.State.NULL
+                    self._live = self._buffering = self._eos = False
+                    self._set_null()
+                if not downward:
+                    await self._queued_null()
+                raise failed
             return ret
         finally:
             with contextlib.suppress(ValueError):  # teardown may have cleared it
@@ -507,14 +527,19 @@ class Player:
             await self.set_state(Gst.State.NULL)
 
     @command
-    async def eos(self, timeout: float | None = None) -> None:
-        """Send an EOS event and wait for the EOS message it causes, while playing."""
+    async def eos(self, timeout: float | None = 5.0) -> None:
+        """Send an EOS event and wait for the EOS message it causes, while playing, for up to
+        `timeout` seconds: a streaming thread that hangs never carries it to the sinks."""
         self.setup()
+        self._raise_if_stuck()
         # paused, the EOS blocks on the prerolled sinks (and so would a stop after it);
         # in NULL it waits for the next play; at EOS no second one comes
         if self.state != Gst.State.PLAYING or self._eos:
             raise CommandError("EOS needs a playing pipeline that is not at its EOS")
-        await self.send_eos(timeout)
+        try:
+            await self.send_eos(timeout)
+        except TimeoutError as exc:
+            raise CommandError(f"No EOS within {timeout:g} s") from exc
 
     @command
     def seek(self, position: NonNegativeFloat) -> None:
@@ -636,7 +661,9 @@ class Player:
 
     def _failed(self, state: Gst.State) -> PlayerSetStateError:
         """The error of a failed change, naming the elements that failed it when they still
-        say so: undoing a failed change up, GstBin may reset what they return."""
+        say so. An element that fails a change up without posting an ERROR may not be named:
+        GstBin undoes the change on every child, which resets what the failed one returns,
+        and it posts no message (only a tracer hook, which Python cannot get, sees it)."""
         if state == Gst.State.NULL and self.state != Gst.State.NULL:
             self.bus.set_flushing(False)  # GstPipeline flushes it for NULL, even when it fails
         failure = Gst.StateChangeReturn.FAILURE
@@ -660,6 +687,13 @@ class Player:
             logger.warning("%s", self._failed(Gst.State.NULL))
         else:
             self._published_null(old)
+
+    async def _queued_null(self) -> None:
+        """Wait up to `state_timeout` for the NULL that `_set_null` queued behind the changes
+        on their way, if it did: a failed start returns once the pipeline is stopped."""
+        changing = self._changing
+        if changing is not None and self._changing_to == Gst.State.NULL and not changing.done():
+            await asyncio.wait([asyncio.wrap_future(changing)], timeout=self.state_timeout)
 
     def _published_null(self, old: Gst.State) -> None:
         """Publish the `StateChanged` to NULL the bus cannot: it flushes its messages on
@@ -1059,7 +1093,8 @@ class Player:
         gerror, debug = message.parse_error()
         source = message.src.get_name() if message.src else "unknown"
         error = PlayerPipelineError(source, gerror.message, debug, gerror)
-        self._error = error
+        if self._error is None:  # the first is the cause: basesrc follows one with its own
+            self._error = error
         logger.error("Error from element %s: %s (%s)", source, gerror.message, debug)
         self._target = Gst.State.NULL
         self._live = self._buffering = self._eos = False

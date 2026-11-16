@@ -45,6 +45,16 @@ This release breaks the API.
   changes name the elements that failed them, when those still say so. `mixtape run` exits 1 when the pipeline cannot
   stop. `async with player` stops the pipeline before the teardown and raises a stop that fails;
   the waits it ends get `PlayerSetStateError`, no longer `CancelledError`.
+- **Behaviour change:** a failed start sets the pipeline to NULL, as an error does: GstBin
+  left it half way up, reported as `paused`. An element that fails silently (posts no ERROR)
+  may still not be named, since GStreamer keeps no trace of it.
+- **Behaviour change:** the `eos` command (`player.eos()`) waits 5 s by default (`timeout`,
+  was none) and raises `CommandError` (409 over HTTP) when no EOS comes, or at once while a
+  change is stuck.
+- Fix: `error` (and the error a failed start raises) is the first error since the start, the
+  cause, not a fallback posted after it (basesrc follows its subclass's error with its own).
+- Fix: a pipeline that teardown leaves outside NULL is kept for the life of the process on
+  purpose, instead of GStreamer printing a CRITICAL as it disposes it.
 - New: the `leaks` feature warns about the objects still alive once the pipeline is in NULL;
   `teardown` detaches the features after setting NULL. A page connecting over `--http` gets
   the error that stopped the pipeline. `error` is cleared when the pipeline starts again.

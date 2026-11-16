@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -192,15 +191,15 @@ def test_tracers_options_keep_the_commas_of_their_parameters() -> None:
     ("spec", "env", "after", "warned"),
     [
         (
-            "names=latency;proctime",
+            "names=latency;queue-levels",
             {},
-            {"GST_TRACERS": "latency;proctime", "GST_DEBUG": "GST_TRACER:7"},
+            {"GST_TRACERS": "latency;queue-levels", "GST_DEBUG": "GST_TRACER:7"},
             [],
         ),
         (
-            "names=proctime,location=/tmp/t",
+            "names=queue-levels",
             {"GST_DEBUG": "2"},
-            {"GST_TRACERS": "proctime", "GST_SHARK_LOCATION": "/tmp/t", "GST_DEBUG": "2"},
+            {"GST_TRACERS": "queue-levels", "GST_DEBUG": "2"},
             [],
         ),
         (
@@ -210,18 +209,10 @@ def test_tracers_options_keep_the_commas_of_their_parameters() -> None:
             [],
         ),
         (
-            "names=latency(flags=element);stats,location=/tmp/t",
-            {"GST_TRACERS": "latency", "GST_SHARK_LOCATION": "/x", "GST_DEBUG": "GST_TRACER:5"},
-            {
-                "GST_TRACERS": "latency;stats",
-                "GST_SHARK_LOCATION": "/x",
-                "GST_DEBUG": "GST_TRACER:5",
-            },
-            [
-                "'latency': keeping it rather than 'latency(flags=element)'",
-                "'/x'",
-                "'GST_TRACER:5'",
-            ],
+            "names=latency(flags=element);stats",
+            {"GST_TRACERS": "latency", "GST_DEBUG": "GST_TRACER:5"},
+            {"GST_TRACERS": "latency;stats", "GST_DEBUG": "GST_TRACER:5"},
+            ["'latency': keeping it rather than 'latency(flags=element)'", "'GST_TRACER:5'"],
         ),
     ],
 )
@@ -233,12 +224,12 @@ def test_tracers_add_to_the_environment_and_keep_what_it_has(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    for key in ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG"):
+    keys = ("GST_TRACERS", "GST_DEBUG")
+    for key in keys:
         monkeypatch.delenv(key, raising=False)  # and restored afterwards
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     resolve(f"tracers,{spec}").prepare()
-    keys = ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG")
     assert {key: os.environ[key] for key in keys if key in os.environ} == after
     messages = [r.getMessage() for r in caplog.records if r.name == "mixtape.features.tracers"]
     assert len(messages) == len(warned)
@@ -252,11 +243,11 @@ TRACERS_SCRIPT = textwrap.dedent("""
     async def main():
         player = Player.from_description(
             "videotestsrc num-buffers=5 ! videoconvert ! fakesink",
-            features=["leaks", "tracers,names=latency(flags=element);rusage,location=/tmp/t"],
+            features=["leaks", "tracers,names=latency(flags=element);rusage"],
         )
         async with player:
             await player.play_until_eos()
-        print(json.dumps([player.get("tracers.active"), player.get("tracers.location")]))
+        print(json.dumps(player.get("tracers.active")))
 
     asyncio.run(main())
 """)
@@ -264,46 +255,15 @@ TRACERS_SCRIPT = textwrap.dedent("""
 
 def test_tracers_run_the_tracers_they_name() -> None:
     """In a process of its own: tracers exist only when GStreamer initialises with them."""
-    unset = ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG")
+    unset = ("GST_TRACERS", "GST_DEBUG")
     env = {key: value for key, value in os.environ.items() if key not in unset}
     done = subprocess.run(
         [sys.executable, "-c", TRACERS_SCRIPT], capture_output=True, text=True, timeout=15, env=env
     )
     assert done.returncode == 0, done.stderr
-    active, location = json.loads(done.stdout.splitlines()[-1])
+    active = json.loads(done.stdout.splitlines()[-1])
     assert {"latency", "leaks", "rusage"} <= set(active)
-    assert location == "/tmp/t"
     assert "element-latency, element-id=" in done.stderr  # the log the core tracers write to
-
-
-def test_tracers_run_gstshark_into_its_location(Gst: Any, tmp_path: Path) -> None:
-    """Skipped unless GstShark is found, as on CI: build github.com/RidgeRun/gst-shark and put
-    its `plugins/tracers` folder on `GST_PLUGIN_PATH` to run it."""
-    if not isinstance(Gst.Registry.get().lookup_feature("proctime"), Gst.TracerFactory):
-        pytest.skip("GstShark is not on GST_PLUGIN_PATH")
-    unset = ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG")
-    env = {key: value for key, value in os.environ.items() if key not in unset}
-    location = tmp_path / "traces"
-    feature = f"tracers,names=proctime;interlatency,location={location}"
-    done = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "mixtape",
-            "run",
-            "videotestsrc num-buffers=10 ! queue ! fakesink",
-            "--feature",
-            feature,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        env=env,
-        cwd=tmp_path,
-    )
-    assert done.returncode == 0, done.stderr
-    assert {path.name for path in location.iterdir()} == {"metadata", "datastream"}
-    assert "proctime, element=" not in done.stderr  # no core tracer: the log stays off
 
 
 @pytest.mark.parametrize(

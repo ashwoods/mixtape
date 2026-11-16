@@ -316,19 +316,15 @@ The built-in ones:
   initialises GStreamer, or set `GST_TRACERS=leaks` yourself.
 * `tracers` runs GStreamer tracers with the player: `names` takes the syntax of `GST_TRACERS`
   (`;` between tracers, parameters in parentheses, commas included). They can be GStreamer's
-  core tracers (`latency`, `rusage`, `stats`, …), gst-plugins-rs ones (`queue-levels`,
-  `buffer-lateness`, …) or GstShark's, with its plugin on `GST_PLUGIN_PATH`. `location` sets
-  `GST_SHARK_LOCATION`, where GstShark writes its traces, and `log` adds `GST_TRACER:7` to
-  `GST_DEBUG`, the only output of the core tracers, by default when `names` has one. What the
-  environment already sets is kept, with a warning. `tracers.active` lists the tracers that
-  run and `tracers.location` the trace folder. A tracer that is not installed, or that
+  core tracers (`latency`, `rusage`, `stats`, …) or gst-plugins-rs ones (`queue-levels`,
+  `buffer-lateness`, …). `log` adds `GST_TRACER:7` to `GST_DEBUG`, the only output of the
+  core tracers, by default when `names` has one. What the environment already sets is kept,
+  with a warning. `tracers.active` lists the tracers that run. A tracer that is not installed, or that
   GStreamer was initialised without, fails the player: like `leaks`, it needs to be first in
   the process. That rules out a pytest run whose earlier tests initialised GStreamer.
 
       mixtape run "videotestsrc ! queue ! fakesink" \
           --feature 'tracers,names=latency(flags=element+pipeline);rusage'
-      GST_PLUGIN_PATH=~/gst-shark/build/plugins/tracers mixtape run "…" \
-          --feature 'tracers,names=proctime;interlatency;queuelevel,location=/tmp/traces'
 
 ### Writing a feature
 Subclass `Feature` with a `name`, the options as `__init__` keyword parameters (validated, so

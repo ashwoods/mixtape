@@ -1,10 +1,9 @@
-"""The `tracers` feature: run GStreamer tracers (core, gst-plugins-rs or GstShark ones) with
-the player, by setting `GST_TRACERS` before GStreamer starts."""
+"""The `tracers` feature: run GStreamer tracers (core or gst-plugins-rs ones) with the player,
+by setting `GST_TRACERS` before GStreamer starts."""
 
 import logging
 import os
 from collections.abc import Iterable
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import gi
@@ -62,15 +61,14 @@ def _active() -> dict[str, Gst.TracerFactory]:
 
 class Tracers(Feature):
     """Run GStreamer tracers with the player, as `GST_TRACERS` names them: `latency`, `rusage`
-    and GStreamer's other core tracers, gst-plugins-rs ones such as `queue-levels`, or
-    GstShark's (`proctime`, `interlatency`…) when its plugin is on `GST_PLUGIN_PATH`.
+    and GStreamer's other core tracers, or gst-plugins-rs ones such as `queue-levels`.
 
     `names` takes the syntax of `GST_TRACERS`: `;` between tracers, parameters in parentheses,
     e.g. `latency(flags=element+pipeline);rusage`. They are added to `GST_TRACERS` before
     GStreamer is initialised; a tracer the environment already names keeps the parameters it
-    has there. `location` sets `GST_SHARK_LOCATION`, the folder GstShark writes its traces to.
-    `log` adds `GST_TRACER:7` to `GST_DEBUG`, the only output of the core tracers: by default
-    when `names` has one. A value set in the environment wins over an option, with a warning.
+    has there. `log` adds `GST_TRACER:7` to `GST_DEBUG`, the only output of the core tracers:
+    by default when `names` has one. A value set in the environment wins over an option, with a
+    warning.
 
     Tracers are created by `Gst.init` and never later, one of each per process: build the
     player with `Player.from_description` or `mixtape run`, first in the process.
@@ -81,23 +79,16 @@ class Tracers(Feature):
     def __init__(
         self,
         names: Annotated[str, StringConstraints(pattern=r"[^;]")],
-        location: Path | None = None,
         log: bool | None = None,
     ) -> None:
         self.names = _entries(names)
         """The `GST_TRACERS` entries, `name(params)`"""
-        self._location = location.expanduser() if location is not None else None
         self.log = any(_name(entry) in CORE for entry in self.names) if log is None else log
         """Whether the `GST_TRACER` debug log is turned on"""
 
     def prepare(self) -> None:
         for asked, kept in add_tracers(self.names).items():
             logger.warning("GST_TRACERS already has %r: keeping it rather than %r", kept, asked)
-        if self._location is not None:
-            location = str(self._location)
-            have = os.environ.setdefault("GST_SHARK_LOCATION", location)
-            if Path(have).expanduser() != self._location:
-                logger.warning("GST_SHARK_LOCATION is already %r: keeping it", have)
         if self.log:
             debug = os.environ.get("GST_DEBUG", "")
             ours = [item for item in debug.split(",") if item.partition(":")[0] == "GST_TRACER"]
@@ -113,8 +104,8 @@ class Tracers(Feature):
         if missing := [n for n in names if not isinstance(registry.lookup_feature(n), tracer)]:
             raise FeatureError(
                 f"The feature 'tracers' names {', '.join(map(repr, missing))}, which GStreamer "
-                "has no tracer of: `gst-inspect-1.0 | grep Tracer` lists them; a plugin such "
-                "as GstShark's has to be on GST_PLUGIN_PATH"
+                "has no tracer of: `gst-inspect-1.0 | grep Tracer` lists them; a plugin of "
+                "tracers that GStreamer does not install has to be on GST_PLUGIN_PATH"
             )
         active = _active()
         if inactive := [n for n in names if n not in active]:
@@ -131,9 +122,3 @@ class Tracers(Feature):
     def active(self) -> list[str]:
         """The tracers GStreamer runs in this process"""
         return sorted(_active())
-
-    @prop
-    def location(self) -> str | None:
-        """Where GstShark writes its traces: `GST_SHARK_LOCATION`, or None for its default,
-        a `gstshark_<date>` folder in the working directory"""
-        return os.environ.get("GST_SHARK_LOCATION")

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -273,6 +274,36 @@ def test_tracers_run_the_tracers_they_name() -> None:
     assert {"latency", "leaks", "rusage"} <= set(active)
     assert location == "/tmp/t"
     assert "element-latency, element-id=" in done.stderr  # the log the core tracers write to
+
+
+def test_tracers_run_gstshark_into_its_location(Gst: Any, tmp_path: Path) -> None:
+    """Skipped unless GstShark is found, as on CI: build github.com/RidgeRun/gst-shark and put
+    its `plugins/tracers` folder on `GST_PLUGIN_PATH` to run it."""
+    if not isinstance(Gst.Registry.get().lookup_feature("proctime"), Gst.TracerFactory):
+        pytest.skip("GstShark is not on GST_PLUGIN_PATH")
+    unset = ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG")
+    env = {key: value for key, value in os.environ.items() if key not in unset}
+    location = tmp_path / "traces"
+    feature = f"tracers,names=proctime;interlatency,location={location}"
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mixtape",
+            "run",
+            "videotestsrc num-buffers=10 ! queue ! fakesink",
+            "--feature",
+            feature,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=env,
+        cwd=tmp_path,
+    )
+    assert done.returncode == 0, done.stderr
+    assert {path.name for path in location.iterdir()} == {"metadata", "datastream"}
+    assert "proctime, element=" not in done.stderr  # no core tracer: the log stays off
 
 
 @pytest.mark.parametrize(

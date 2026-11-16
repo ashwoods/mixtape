@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CORE = frozenset({"factories", "latency", "leaks", "log", "rusage", "stats"})
+CORE = frozenset({"factories", "latency", "leaks", "rusage", "stats"})
 """GStreamer's own tracers that write what they measure only to the `GST_TRACER` debug log"""
 LOG = "GST_TRACER:7"
 
@@ -41,12 +41,13 @@ def add_tracers(entries: Iterable[str]) -> dict[str, str]:
     from the environment instead, where they differ from the one asked for: {asked: kept}."""
     current = _entries(os.environ.get("GST_TRACERS", ""))
     named = {_name(entry): entry for entry in current}
+    given = dict(named)
     kept: dict[str, str] = {}
     for entry in entries:
-        if (have := named.get(_name(entry))) is None:
+        if _name(entry) not in named:
             named[_name(entry)] = entry
             current.append(entry)
-        elif have != entry:
+        elif (have := given.get(_name(entry))) is not None and have != entry:
             kept[entry] = have
     os.environ["GST_TRACERS"] = ";".join(current)
     return kept
@@ -85,7 +86,7 @@ class Tracers(Feature):
     ) -> None:
         self.names = _entries(names)
         """The `GST_TRACERS` entries, `name(params)`"""
-        self._location = location
+        self._location = location.expanduser() if location is not None else None
         self.log = any(_name(entry) in CORE for entry in self.names) if log is None else log
         """Whether the `GST_TRACER` debug log is turned on"""
 
@@ -94,7 +95,8 @@ class Tracers(Feature):
             logger.warning("GST_TRACERS already has %r: keeping it rather than %r", kept, asked)
         if self._location is not None:
             location = str(self._location)
-            if (have := os.environ.setdefault("GST_SHARK_LOCATION", location)) != location:
+            have = os.environ.setdefault("GST_SHARK_LOCATION", location)
+            if Path(have).expanduser() != self._location:
                 logger.warning("GST_SHARK_LOCATION is already %r: keeping it", have)
         if self.log:
             debug = os.environ.get("GST_DEBUG", "")
@@ -118,7 +120,8 @@ class Tracers(Feature):
         if inactive := [n for n in names if n not in active]:
             raise FeatureError(
                 f"The feature 'tracers' needs the tracers {', '.join(map(repr, inactive))}, but "
-                "GStreamer was initialised before it could set GST_TRACERS: build the player "
+                "GStreamer could not create them (its warnings say why) or was initialised "
+                "before it could set GST_TRACERS: build the player "
                 "with Player.from_description(..., features=['tracers,names=...']) or run "
                 "`mixtape run --feature tracers,names=...` before anything else initialises "
                 "GStreamer, or set GST_TRACERS yourself"

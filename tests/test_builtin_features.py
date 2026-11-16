@@ -310,7 +310,7 @@ def test_tracers_run_gstshark_into_its_location(Gst: Any, tmp_path: Path) -> Non
     ("names", "message"),
     [
         ("nosuchtracer;videotestsrc", "'nosuchtracer', 'videotestsrc', which GStreamer has no"),
-        ("rusage", "'rusage', but GStreamer was initialised before it could set GST_TRACERS"),
+        ("rusage", "'rusage', but .* was initialised before it could set GST_TRACERS"),
     ],
 )
 def test_tracers_need_installed_tracers_from_before_gstreamer_initialised(

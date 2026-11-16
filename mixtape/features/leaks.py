@@ -96,7 +96,7 @@ class Leaks(Feature):
         self._task = None
         if self._tracer is not None:
             self._fold()  # a final checkpoint, for what the teardown freed and what it kept
-            leaked = {k: n for k, n in self._alive.most_common() if k not in SINGLETONS}
+            leaked = {k: n for k, n in self._alive.most_common() if n > 0 and k not in SINGLETONS}
             if leaked and player.state == Gst.State.NULL:  # else it still holds its buffers
                 logger.warning(
                     "Still alive after the run: %s",

@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import os
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +14,7 @@ from pydantic import PositiveFloat
 from ..exceptions import FeatureError
 from ..model import command, prop
 from . import Feature
+from .tracers import add_tracers
 
 if TYPE_CHECKING:
     from ..player import Player
@@ -23,11 +23,6 @@ logger = logging.getLogger(__name__)
 
 TRACER = "leaks"
 SINGLETONS = frozenset({"GstSystemClock", "GstTaskPool"})  # live for the whole process
-
-
-def _tracers(value: str) -> list[str]:
-    """The names in a `GST_TRACERS` value (`name(params);name`)."""
-    return [item.partition("(")[0] for item in value.split(";") if item]
 
 
 def _active_tracer() -> Any:
@@ -76,9 +71,7 @@ class Leaks(Feature):
         self._task: asyncio.Task[None] | None = None
 
     def prepare(self) -> None:
-        tracers = os.environ.get("GST_TRACERS", "")
-        if TRACER not in _tracers(tracers):
-            os.environ["GST_TRACERS"] = f"{tracers};{TRACER}" if tracers else TRACER
+        add_tracers([TRACER])  # one the environment names keeps its parameters
 
     def check(self, player: "Player") -> None:
         _active_tracer()

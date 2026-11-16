@@ -34,6 +34,7 @@ mixtape = "mixtape.cli:main"
 [project.entry-points."mixtape.features"]
 leaks = "mixtape.features.leaks:Leaks"
 stats = "mixtape.features.stats:Stats"
+tracers = "mixtape.features.tracers:Tracers"
 
 [project.urls]
 Homepage = "https://github.com/ashwoods/mixtape"

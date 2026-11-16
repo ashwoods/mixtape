@@ -116,7 +116,8 @@ def _add_target(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="NAME[,KEY=VALUE…]",
-        help="enable a feature with its options, e.g. stats,interval=1; repeatable. "
+        help="enable a feature with its options, e.g. stats,interval=1; repeatable; a value "
+        "has commas only inside parentheses. "
         f"Available: {installed}",
     )
 

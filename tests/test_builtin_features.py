@@ -11,8 +11,9 @@ import pytest
 from mixtape import Player
 from mixtape.events import EventStream, PropertyChanged
 from mixtape.exceptions import FeatureError
-from mixtape.features import available
+from mixtape.features import available, resolve
 from mixtape.features.leaks import Leaks
+from mixtape.features.tracers import Tracers
 
 STREAMING = (
     "fakesrc name=src sizetype=fixed sizemax=1000 ! identity name=id sleep-time=1000 "
@@ -21,7 +22,7 @@ STREAMING = (
 
 
 def test_the_builtin_features_are_registered() -> None:
-    assert {"leaks", "stats"} <= available().keys()
+    assert {"leaks", "stats", "tracers"} <= available().keys()
 
 
 # -- stats -- #
@@ -174,3 +175,119 @@ def test_leaks_adds_itself_to_the_tracers(
     monkeypatch.setenv("GST_TRACERS", before or "")
     Leaks().prepare()
     assert os.environ["GST_TRACERS"] == after
+
+
+# -- tracers -- #
+
+
+def test_tracers_options_keep_the_commas_of_their_parameters() -> None:
+    feature = resolve("tracers,names=latency(flags=element,filter=x);rusage,log=false")
+    assert isinstance(feature, Tracers)
+    assert feature.names == ["latency(flags=element,filter=x)", "rusage"]
+    assert feature.log is False
+
+
+@pytest.mark.parametrize(
+    ("spec", "env", "after", "warned"),
+    [
+        (
+            "names=latency;proctime",
+            {},
+            {"GST_TRACERS": "latency;proctime", "GST_DEBUG": "GST_TRACER:7"},
+            [],
+        ),
+        (
+            "names=proctime,location=/tmp/t",
+            {"GST_DEBUG": "2"},
+            {"GST_TRACERS": "proctime", "GST_SHARK_LOCATION": "/tmp/t", "GST_DEBUG": "2"},
+            [],
+        ),
+        (
+            "names=rusage",
+            {"GST_TRACERS": "leaks", "GST_DEBUG": "3"},
+            {"GST_TRACERS": "leaks;rusage", "GST_DEBUG": "3,GST_TRACER:7"},
+            [],
+        ),
+        (
+            "names=latency(flags=element);stats,location=/tmp/t",
+            {"GST_TRACERS": "latency", "GST_SHARK_LOCATION": "/x", "GST_DEBUG": "GST_TRACER:5"},
+            {
+                "GST_TRACERS": "latency;stats",
+                "GST_SHARK_LOCATION": "/x",
+                "GST_DEBUG": "GST_TRACER:5",
+            },
+            [
+                "'latency': keeping it rather than 'latency(flags=element)'",
+                "'/x'",
+                "'GST_TRACER:5'",
+            ],
+        ),
+    ],
+)
+def test_tracers_add_to_the_environment_and_keep_what_it_has(
+    spec: str,
+    env: dict[str, str],
+    after: dict[str, str],
+    warned: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    for key in ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG"):
+        monkeypatch.delenv(key, raising=False)  # and restored afterwards
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    resolve(f"tracers,{spec}").prepare()
+    keys = ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG")
+    assert {key: os.environ[key] for key in keys if key in os.environ} == after
+    messages = [r.getMessage() for r in caplog.records if r.name == "mixtape.features.tracers"]
+    assert len(messages) == len(warned)
+    assert all(text in message for text, message in zip(warned, messages, strict=True))
+
+
+TRACERS_SCRIPT = textwrap.dedent("""
+    import asyncio, json
+    from mixtape import Player
+
+    async def main():
+        player = Player.from_description(
+            "videotestsrc num-buffers=5 ! videoconvert ! fakesink",
+            features=["leaks", "tracers,names=latency(flags=element);rusage,location=/tmp/t"],
+        )
+        async with player:
+            await player.play_until_eos()
+        print(json.dumps([player.get("tracers.active"), player.get("tracers.location")]))
+
+    asyncio.run(main())
+""")
+
+
+def test_tracers_run_the_tracers_they_name() -> None:
+    """In a process of its own: tracers exist only when GStreamer initialises with them."""
+    unset = ("GST_TRACERS", "GST_SHARK_LOCATION", "GST_DEBUG")
+    env = {key: value for key, value in os.environ.items() if key not in unset}
+    done = subprocess.run(
+        [sys.executable, "-c", TRACERS_SCRIPT], capture_output=True, text=True, timeout=15, env=env
+    )
+    assert done.returncode == 0, done.stderr
+    active, location = json.loads(done.stdout.splitlines()[-1])
+    assert {"latency", "leaks", "rusage"} <= set(active)
+    assert location == "/tmp/t"
+    assert "element-latency, element-id=" in done.stderr  # the log the core tracers write to
+
+
+@pytest.mark.parametrize(
+    ("names", "message"),
+    [
+        ("nosuchtracer;videotestsrc", "'nosuchtracer', 'videotestsrc', which GStreamer has no"),
+        ("rusage", "'rusage', but GStreamer was initialised before it could set GST_TRACERS"),
+    ],
+)
+def test_tracers_need_installed_tracers_from_before_gstreamer_initialised(
+    names: str, message: str, Gst: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if any(t.__gtype__.name == "GstRUsageTracer" for t in Gst.tracing_get_active_tracers()):
+        pytest.skip("the tracer is active in this process")
+    for key in ("GST_TRACERS", "GST_DEBUG"):
+        monkeypatch.setenv(key, os.environ.get(key, ""))  # `prepare` sets them: restored
+    with pytest.raises(FeatureError, match=message):
+        Player.from_description("fakesrc ! fakesink", features=[f"tracers,names={names}"])

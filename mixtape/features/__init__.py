@@ -118,8 +118,25 @@ def _name_of(spec: FeatureSpec) -> str:
     return spec.name
 
 
+def _split_options(text: str) -> list[str]:
+    """The `key=value` items of a spec, split at the commas outside parentheses, so a value
+    such as `latency(flags=element,filter=x)` keeps its own."""
+    items: list[str] = []
+    depth = start = 0
+    for i, char in enumerate(text):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(depth - 1, 0)
+        elif char == "," and not depth:
+            items.append(text[start:i])
+            start = i + 1
+    return [*items, text[start:]]
+
+
 def resolve(spec: FeatureSpec) -> Feature:
-    """The feature a spec stands for. A string is `name[,key=value…]`, looked up in
+    """The feature a spec stands for. A string is `name[,key=value…]` (a value has commas
+    only inside parentheses), looked up in
     `available()`; a class is built with its default options; an instance is itself."""
     if isinstance(spec, Feature):
         return spec
@@ -127,7 +144,7 @@ def resolve(spec: FeatureSpec) -> Feature:
         return spec.from_options()
     name, _, rest = spec.partition(",")
     options: dict[str, str] = {}
-    for item in rest.split(",") if rest else []:
+    for item in _split_options(rest) if rest else []:
         key, sep, value = item.partition("=")
         if not sep or not key:
             raise FeatureError(f"Invalid option {item!r} of feature {name!r}: not KEY=VALUE")

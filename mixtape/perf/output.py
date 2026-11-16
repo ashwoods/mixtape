@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import IO, Any
 
+from . import report
 from .aggregate import Totals, Window
 from .metrics import METRICS, Sample
 
@@ -16,6 +17,7 @@ class Artifacts:
     - `<metric>.csv`: the samples of each metric, `t_ns,subject,value`
     - `windows.jsonl`: every window, as `perf.summary` publishes it
     - `summary.json`, by `finish`: the statistics of the whole run per metric and subject
+    - `report.html`, by `finish`: all of it on one page that works offline (see `report`)
     """
 
     def __init__(self, folder: Path) -> None:
@@ -56,7 +58,7 @@ class Artifacts:
 
     def finish(self, about: dict[str, Any]) -> None:
         """Write `summary.json`, `about` the run and the statistics of each metric used,
-        and close the files."""
+        close the files, and write `report.html` from them."""
         stats = self.totals.stats()
         summary = {
             **about,
@@ -74,3 +76,4 @@ class Artifacts:
         for file in (self._samples, self._windows, *(f for f, _ in self._csv.values())):
             file.close()
         self._csv.clear()
+        report.write(self.folder)

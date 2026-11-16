@@ -134,6 +134,7 @@ class Perf(Feature):
         self._start = self._first = 0  # ns: of the window collecting, of the run
         self._cpu = (0.0, 0.0)  # process time and monotonic time at the window's start
         self._summary: Window | None = None
+        self._graph: dict[str, Any] | None = None  # for the report: the latest snapshot
         self._task: asyncio.Task[None] | None = None
 
     def prepare(self) -> None:
@@ -186,6 +187,7 @@ class Perf(Feature):
         self._start = self._first = _now()
         self._cpu = (time.process_time(), time.monotonic())
         self._artifacts = Artifacts(self.out) if self.out is not None else None
+        self._snapshot(player)
         self._task = asyncio.get_running_loop().create_task(self._poll(player))
 
     def detach(self, player: "Player") -> None:
@@ -208,8 +210,10 @@ class Perf(Feature):
                         "interval": self.interval,
                         "start_ns": self._first,
                         "end_ns": self._start,
+                        "graph": self._graph,
                     }
                 )
+                self._graph = None
                 self._artifacts = None
 
     async def _poll(self, player: "Player") -> None:
@@ -219,8 +223,20 @@ class Perf(Feature):
             due += self.interval
             await asyncio.sleep(max(due - loop.time(), 0))
             cpu, keys = self._cpu_sample(), _keys(player)
+            self._snapshot(player)
             self._summary = await asyncio.to_thread(self._collect, cpu, keys)
             self.notify("summary")
+
+    def _snapshot(self, player: "Player") -> None:
+        """Keep the pipeline's graph for the report of `out`, as of now: each window takes one,
+        as elements come with the stream (a decodebin's) and caps with negotiation, and both
+        are gone by `detach`, in NULL."""
+        if self._artifacts is None:
+            return
+        try:
+            self._graph = player.graph().model_dump()
+        except Exception:
+            logger.exception("perf could not snapshot the pipeline's graph for its report")
 
     def _cpu_sample(self) -> Sample | None:
         """`process.cpu` since the last call, taken on the loop."""

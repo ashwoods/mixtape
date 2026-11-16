@@ -339,8 +339,11 @@ The built-in ones:
   gst-plugins-rs ones write their logs when asked, once per window. With `out`, a folder gets
   `samples.jsonl` (every sample), `<metric>.csv` (`t_ns,subject,value`), `windows.jsonl` and,
   when the player is torn down, `summary.json`: n, mean, p50, p95, p99 and max of the whole
-  run, the pipeline and the tracers. Times are nanoseconds since GStreamer initialised. Like
-  `tracers`, it needs to be first in the process.
+  run, the pipeline, its graph and the tracers; and `report.html`, all of it on one page that
+  works offline: the graph with each element's latency, the queues' fill and each link's flow,
+  a chart of each metric over the run, and the table of `summary.json`. On the `--http` page,
+  `perf` shows the same live: on the graph, and in charts of the last five minutes. Times are
+  nanoseconds since GStreamer initialised. Like `tracers`, it needs to be first in the process.
 
       mixtape run "videotestsrc num-buffers=300 ! queue ! fakesink" --feature perf,out=perf
 

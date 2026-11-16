@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -236,6 +237,17 @@ def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
         assert metrics["queue.fill"]["subjects"]["queue0"]["max"] > 0
     else:
         assert summary["tracers"] == ["latency(flags=element+pipeline)", "stats"]
+    assert {(link["source"], link["sink"]) for link in summary["graph"]["links"]} == {
+        ("videotestsrc0", "capsfilter0"),
+        ("capsfilter0", "queue0"),
+        ("queue0", "fakesink0"),
+    }
+    # the report: one page with all it needs, which fetches nothing
+    report = (out / "report.html").read_text()
+    assert "uPlot" in report and "function renderGraph(" in report
+    assert '"element.latency"' in report and "queue0" in report  # the run, inlined
+    assert "default-src 'none'" in report
+    assert not re.search(r"https?://|\b(src|href)\s*=|@import|url\(", report)
 
 
 SUMMARY_SCRIPT = textwrap.dedent("""

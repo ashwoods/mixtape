@@ -73,6 +73,25 @@ async def test_model_and_page(served: Served) -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_page_loads_its_shared_code(served: Served) -> None:
+    page = (await served.client.get("/")).text
+    for name, media_type, has in [
+        ("graph.js", "text/javascript", "function renderGraph("),
+        ("perf.js", "text/javascript", "function createPerf("),
+        ("uPlot.iife.min.js", "text/javascript", "uPlot"),
+        ("mixtape.css", "text/css", "--accent"),
+        ("uPlot.min.css", "text/css", ".uplot"),
+    ]:
+        assert f"/static/{name}" in page
+        response = await served.client.get(f"/static/{name}")
+        assert response.status_code == 200, name
+        assert response.headers["content-type"].startswith(media_type)
+        assert has in response.text
+    for missing in ("report.js", "app.py", "..%2Fapp.py", "index.html"):
+        assert (await served.client.get(f"/static/{missing}")).status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_commands(served: Served) -> None:
     client = served.client
     response = await client.post("/api/commands/play")

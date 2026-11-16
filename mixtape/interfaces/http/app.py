@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from ...exceptions import InvalidValueError, MixTapeError, UnknownNameError
 from ...model import ElementSpec
@@ -20,6 +20,16 @@ from .errors import describe_error
 from .security import check_headers, is_loopback
 from .values import read_values, set_values
 from .ws import serve_events
+
+STATIC = {
+    "mixtape.css": ("interfaces/http/mixtape.css", "text/css"),
+    "graph.js": ("interfaces/http/graph.js", "text/javascript"),
+    "perf.js": ("interfaces/http/perf.js", "text/javascript"),
+    "uPlot.iife.min.js": ("vendor/uplot/uPlot.iife.min.js", "text/javascript"),
+    "uPlot.min.css": ("vendor/uplot/uPlot.min.css", "text/css"),
+}
+"""The files the page loads besides itself, by name: where they are in the package, and their
+type. The perf report inlines the same files."""
 
 
 async def _json_object(request: Request) -> dict[str, Any]:
@@ -60,6 +70,14 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
     async def index() -> HTMLResponse:
         page = importlib.resources.files("mixtape.interfaces.http").joinpath("index.html")
         return HTMLResponse(page.read_text(encoding="utf-8"))  # read each time: easy to edit
+
+    @app.get("/static/{name}", include_in_schema=False)
+    async def static(name: str) -> Response:
+        if name not in STATIC:
+            return PlainTextResponse("Not Found", status_code=404)
+        path, media_type = STATIC[name]
+        file = importlib.resources.files("mixtape").joinpath(path)
+        return Response(file.read_text(encoding="utf-8"), media_type=media_type)
 
     @app.get("/api/model")
     async def model() -> JSONResponse:

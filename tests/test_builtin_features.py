@@ -22,7 +22,7 @@ STREAMING = (
 
 
 def test_the_builtin_features_are_registered() -> None:
-    assert {"leaks", "stats", "tracers"} <= available().keys()
+    assert {"leaks", "perf", "stats", "tracers"} <= available().keys()
 
 
 # -- stats -- #

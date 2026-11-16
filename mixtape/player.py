@@ -188,6 +188,7 @@ class Player:
         for feature in self._features.values():
             feature._prepare_once()  # no-op when `from_description` did
         ensure_init()
+        self._description: str | None = None  # the one `from_description` built it from
         if not isinstance(pipeline, Gst.Pipeline):
             raise TypeError(f"pipeline must be a Gst.Pipeline, not {type(pipeline).__name__}")
         self.pipeline = pipeline
@@ -239,8 +240,11 @@ class Player:
             pipeline.add(element)
             element = pipeline
         if not resolved:  # a subclass whose `__init__` predates features still works
-            return cls(element, expose_all=expose_all)
-        return cls(element, expose_all=expose_all, features=resolved)
+            player = cls(element, expose_all=expose_all)
+        else:
+            player = cls(element, expose_all=expose_all, features=resolved)
+        player._description = description
+        return player
 
     @classmethod
     def run(cls, description_or_pipeline: str | Gst.Pipeline, timeout: float | None = None) -> None:

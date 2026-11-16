@@ -4,7 +4,7 @@ by setting `GST_TRACERS` before GStreamer starts."""
 import logging
 import os
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import gi
 
@@ -52,11 +52,56 @@ def add_tracers(entries: Iterable[str]) -> dict[str, str]:
     return kept
 
 
-def _active() -> dict[str, Gst.TracerFactory]:
-    """The tracer factories of which GStreamer runs a tracer, by name."""
-    running = {tracer.__gtype__ for tracer in Gst.tracing_get_active_tracers()}
+def add_log() -> str | None:
+    """Add `GST_TRACER:7` to `GST_DEBUG`, the output of the core tracers, unless it names
+    `GST_TRACER` already. What it kept instead, where that differs."""
+    debug = os.environ.get("GST_DEBUG", "")
+    ours = [item for item in debug.split(",") if item.partition(":")[0] == "GST_TRACER"]
+    if not ours:
+        os.environ["GST_DEBUG"] = f"{debug},{LOG}" if debug else LOG
+    elif ours != [LOG]:
+        return ",".join(ours)
+    return None
+
+
+def active_tracers() -> dict[str, Any]:
+    """The tracers GStreamer runs, by the name of their factory."""
+    tracers = {tracer.__gtype__: tracer for tracer in Gst.tracing_get_active_tracers()}
     factories = Gst.Registry.get().get_feature_list(Gst.TracerFactory)
-    return {f.get_name(): f for f in factories if f.get_tracer_type() in running}
+    return {
+        f.get_name(): tracers[f.get_tracer_type()]
+        for f in factories
+        if f.get_tracer_type() in tracers
+    }
+
+
+def installed(names: Iterable[str]) -> list[str]:
+    """Those of `names` that GStreamer has a tracer of."""
+    registry = Gst.Registry.get()
+    return [n for n in names if isinstance(registry.lookup_feature(n), Gst.TracerFactory)]
+
+
+def require(feature: str, names: Iterable[str], spec: str) -> None:
+    """Raise `FeatureError` unless GStreamer has and runs a tracer of each of `names`, which
+    the feature named `feature` needs; `spec` enables it, as in `--feature spec`."""
+    names = list(dict.fromkeys(names))
+    found = installed(names)
+    if missing := [n for n in names if n not in found]:
+        raise FeatureError(
+            f"The feature {feature!r} names {', '.join(map(repr, missing))}, which GStreamer "
+            "has no tracer of: `gst-inspect-1.0 | grep Tracer` lists them; a plugin of "
+            "tracers that GStreamer does not install has to be on GST_PLUGIN_PATH"
+        )
+    active = active_tracers()
+    if inactive := [n for n in names if n not in active]:
+        raise FeatureError(
+            f"The feature {feature!r} needs the tracers {', '.join(map(repr, inactive))}, but "
+            "GStreamer could not create them (its warnings say why) or was initialised "
+            "before it could set GST_TRACERS: build the player "
+            f"with Player.from_description(..., features=['{spec}']) or run "
+            f"`mixtape run --feature {spec}` before anything else initialises "
+            "GStreamer, or set GST_TRACERS yourself"
+        )
 
 
 class Tracers(Feature):
@@ -89,36 +134,13 @@ class Tracers(Feature):
     def prepare(self) -> None:
         for asked, kept in add_tracers(self.names).items():
             logger.warning("GST_TRACERS already has %r: keeping it rather than %r", kept, asked)
-        if self.log:
-            debug = os.environ.get("GST_DEBUG", "")
-            ours = [item for item in debug.split(",") if item.partition(":")[0] == "GST_TRACER"]
-            if not ours:
-                os.environ["GST_DEBUG"] = f"{debug},{LOG}" if debug else LOG
-            elif ours != [LOG]:
-                logger.warning("GST_DEBUG already has %r: keeping it", ",".join(ours))
+        if self.log and (debug := add_log()) is not None:
+            logger.warning("GST_DEBUG already has %r: keeping it", debug)
 
     def check(self, player: "Player") -> None:
-        registry = Gst.Registry.get()
-        names = list(dict.fromkeys(map(_name, self.names)))
-        tracer = Gst.TracerFactory
-        if missing := [n for n in names if not isinstance(registry.lookup_feature(n), tracer)]:
-            raise FeatureError(
-                f"The feature 'tracers' names {', '.join(map(repr, missing))}, which GStreamer "
-                "has no tracer of: `gst-inspect-1.0 | grep Tracer` lists them; a plugin of "
-                "tracers that GStreamer does not install has to be on GST_PLUGIN_PATH"
-            )
-        active = _active()
-        if inactive := [n for n in names if n not in active]:
-            raise FeatureError(
-                f"The feature 'tracers' needs the tracers {', '.join(map(repr, inactive))}, but "
-                "GStreamer could not create them (its warnings say why) or was initialised "
-                "before it could set GST_TRACERS: build the player "
-                "with Player.from_description(..., features=['tracers,names=...']) or run "
-                "`mixtape run --feature tracers,names=...` before anything else initialises "
-                "GStreamer, or set GST_TRACERS yourself"
-            )
+        require(self.name, map(_name, self.names), "tracers,names=...")
 
     @prop
     def active(self) -> list[str]:
         """The tracers GStreamer runs in this process"""
-        return sorted(_active())
+        return sorted(active_tracers())

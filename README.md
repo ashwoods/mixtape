@@ -326,6 +326,24 @@ The built-in ones:
       mixtape run "videotestsrc ! queue ! fakesink" \
           --feature 'tracers,names=latency(flags=element+pipeline);rusage'
 
+* `perf` measures the pipeline with GStreamer's own tracers and publishes `perf.summary`: n,
+  mean, p50, p95, max and last of each metric by subject over the last `interval` seconds
+  (default 1). The metrics, in `mixtape.perf.METRICS` with their units: `element.latency` and
+  `pipeline.latency` (`src→sink`) from the core `latency` tracer; `pad.buffers`, `pad.bitrate`
+  and `pad.interval` of each `element:pad` from the core `stats`; `pad.lateness`, `pad.push`
+  and `queue.bytes`, `queue.buffers`, `queue.time` and `queue.fill` (0 to 1) from the
+  gst-plugins-rs `buffer-lateness`, `pad-push-timings` and `queue-levels`, left out with a
+  warning when they are not installed; and `process.cpu`. No Python runs on a streaming
+  thread: the core tracers write to `GST_DEBUG_FILE`, which a thread reads (it sets one of its
+  own unless the environment has one, and echoes its other lines to stderr), and the
+  gst-plugins-rs ones write their logs when asked, once per window. With `out`, a folder gets
+  `samples.jsonl` (every sample), `<metric>.csv` (`t_ns,subject,value`), `windows.jsonl` and,
+  when the player is torn down, `summary.json`: n, mean, p50, p95, p99 and max of the whole
+  run, the pipeline and the tracers. Times are nanoseconds since GStreamer initialised. Like
+  `tracers`, it needs to be first in the process.
+
+      mixtape run "videotestsrc num-buffers=300 ! queue ! fakesink" --feature perf,out=perf
+
 ### Writing a feature
 Subclass `Feature` with a `name`, the options as `__init__` keyword parameters (validated, so
 `--feature heartbeat,interval=2` gives a float), and `@command` methods and `@prop` getters as a

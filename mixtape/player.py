@@ -618,14 +618,13 @@ class Player:
         state: Gst.State,
         old: Gst.State,
     ) -> None:
-        """A change nobody awaits finished: when it went down and no change came after it,
-        do what `set_state` does then (a later one's bus messages tell its own story)."""
-        if self._loop is not loop or self._changing is not call:
+        """A change nobody awaits finished: when it went down, do what `set_state` does
+        then; the NULL it reached is news only when no change came after it (a later one's
+        bus messages tell its own story, and whether it is live)."""
+        if self._loop is not loop or state not in (Gst.State.NULL, Gst.State.READY):
             return
-        if state not in (Gst.State.NULL, Gst.State.READY):
-            return
-        self._eos = False
-        if state == Gst.State.NULL:
+        self._eos = False  # going down flushed the stream, whatever came after
+        if state == Gst.State.NULL and self._changing is call:
             self._live = False
             self._published_null(old)
 

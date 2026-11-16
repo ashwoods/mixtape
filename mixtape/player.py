@@ -356,8 +356,7 @@ class Player:
             except PlayerSetStateError as exc:
                 logger.warning("%s: leaving it", exc)
             except TimeoutError:
-                self._stuck = self._changing
-                logger.warning("%s: leaving it", self._stuck_error(Gst.State.NULL))
+                logger.warning("%s: leaving it", self._mark_stuck(Gst.State.NULL, old=None))
             else:
                 if ret == Gst.StateChangeReturn.FAILURE:
                     logger.warning("%s", self._failed(Gst.State.NULL))
@@ -388,6 +387,8 @@ class Player:
     async def __aexit__(self, exc_type: type[BaseException] | None, *rest: object) -> None:
         """Stop the pipeline and tear down. A stop that fails or hangs is raised, unless the
         block raised something else than a `PlayerSetStateError`: it is logged then."""
+        if self._loop is None:
+            return  # torn down in the block already
         error: MixTapeError | None = None
         try:
             await self.set_state(Gst.State.NULL)
@@ -422,12 +423,13 @@ class Player:
     async def set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
         """Set the pipeline state, returning once the change is complete."""
         self.setup()
+        self._raise_if_stuck()  # a refused change changes nothing
         self._interrupt_waits(state)
         self._target = state
         self._buffering = False  # the caller's state wins over buffering's pause
-        if self.state == state and self.pending == Gst.State.VOID_PENDING:
+        queued = self._changing is not None and not self._changing.done()
+        if not queued and self.state == state and self.pending == Gst.State.VOID_PENDING:
             return Gst.StateChangeReturn.SUCCESS
-        self._raise_if_stuck()
         if state in (Gst.State.PAUSED, Gst.State.PLAYING):
             self._error = None  # started again: the error is history
         error = self._error
@@ -438,10 +440,10 @@ class Player:
             old = self.state
             change = asyncio.wrap_future(self._change(state))
             downward = state in (Gst.State.NULL, Gst.State.READY)
-            done, _ = await asyncio.wait([change], timeout=self.state_timeout if downward else None)
+            bounded = downward or queued  # one behind a change that hangs hangs too
+            done, _ = await asyncio.wait([change], timeout=self.state_timeout if bounded else None)
             if not done:
-                self._stuck = self._changing
-                raise self._stuck_error(state)
+                raise self._mark_stuck(state, old)
             ret = change.result()
             if state == Gst.State.NULL and ret != Gst.StateChangeReturn.FAILURE:
                 self._published_null(old)
@@ -569,6 +571,34 @@ class Player:
         leaves = [e for e in elements if not isinstance(e, Gst.Bin)] or elements
         return f": {_names(leaves)} still changing" if leaves else ""
 
+    def _mark_stuck(self, state: Gst.State, old: Gst.State | None) -> PlayerSetStateError:
+        """Call the player stuck until the last change finishes, and do then what
+        `set_state` would have: its error is returned."""
+        error = self._stuck_error(state)
+        self._stuck = call = self._changing
+        assert call is not None
+        loop = self._loop
+
+        def finished(call: concurrent.futures.Future[Gst.StateChangeReturn]) -> None:
+            if call.result() == Gst.StateChangeReturn.FAILURE:
+                if state == Gst.State.NULL:
+                    self.bus.set_flushing(False)  # GstPipeline flushes it, even when it fails
+            elif loop is not None and old is not None:
+                with contextlib.suppress(RuntimeError):  # the loop closed meanwhile
+                    loop.call_soon_threadsafe(self._went_down, loop, state, old)
+
+        call.add_done_callback(finished)
+        return error
+
+    def _went_down(self, loop: asyncio.AbstractEventLoop, state: Gst.State, old: Gst.State) -> None:
+        """A change down that was stuck finished after all."""
+        if self._loop is not loop or state not in (Gst.State.NULL, Gst.State.READY):
+            return
+        self._eos = False
+        if state == Gst.State.NULL:
+            self._live = False
+            self._published_null(old)
+
     def _stuck_error(self, state: Gst.State) -> PlayerSetStateError:
         return PlayerSetStateError(
             f"Could not set the pipeline to {state.value_nick} within "
@@ -588,10 +618,23 @@ class Player:
         return PlayerSetStateError(f"Could not set the pipeline to {state.value_nick}{culprits}")
 
     def _set_null(self) -> None:
-        """Set the pipeline to NULL on the loop, after an error (unless it is stuck)."""
+        """Set the pipeline to NULL after an error: on the loop, or after the changes on
+        their way, so a change the error ended does not run after it (unless it is stuck)."""
         if self._stuck is not None and not self._stuck.done():
             return
         old = self.state
+        if self._changing is not None and not self._changing.done():
+            loop = self._attached_loop()
+
+            def finished(call: concurrent.futures.Future[Gst.StateChangeReturn]) -> None:
+                if call.result() == Gst.StateChangeReturn.FAILURE:
+                    self.bus.set_flushing(False)
+                else:
+                    with contextlib.suppress(RuntimeError):  # the loop closed meanwhile
+                        loop.call_soon_threadsafe(self._went_down, loop, Gst.State.NULL, old)
+
+            self._change(Gst.State.NULL).add_done_callback(finished)
+            return
         if self.pipeline.set_state(Gst.State.NULL) == Gst.StateChangeReturn.FAILURE:
             logger.warning("%s", self._failed(Gst.State.NULL))
         else:

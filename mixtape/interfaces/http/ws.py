@@ -104,6 +104,7 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
         return
     await websocket.accept()
     stream = player.events(position=True)  # before the values: nothing falls between them
+    last_error = player.error  # a later one comes through the stream
     lock = asyncio.Lock()  # a reply and an event must not interleave on the socket
 
     async def send(message: dict[str, Any] | str) -> None:
@@ -167,7 +168,7 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
             if not (isinstance(value, float) and not math.isfinite(value))  # as forward() does
         }
         await send({"type": "values", "values": values})
-        if player.error is not None and (error := encode_event(events.Error(player.error))):
+        if last_error is not None and (error := encode_event(events.Error(last_error))):
             await send(error)  # the page may load after the error that stopped the pipeline
         await asyncio.wait({forwarding, receiving}, return_when=asyncio.FIRST_COMPLETED)
     finally:

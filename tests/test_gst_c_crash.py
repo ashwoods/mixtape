@@ -27,18 +27,24 @@ pytestmark = pytest.mark.skipif(
 SRC = "videotestsrc num-buffers=110 ! video/x-raw,width=64,height=48"
 
 
-def run(*args: str, interrupt_after: float | None = None) -> tuple[int, str]:
+def run(*args: str, interrupt_on: str | None = None) -> tuple[int, str]:
+    """Run `mixtape -vv run`, interrupting it 1 s after it logs `interrupt_on`."""
     process = subprocess.Popen(
-        [sys.executable, "-m", "mixtape", "run", *args], stderr=subprocess.PIPE, text=True
+        [sys.executable, "-m", "mixtape", "-vv", "run", *args], stderr=subprocess.PIPE, text=True
     )
+    seen = ""
     try:
-        if interrupt_after is not None:
-            time.sleep(interrupt_after)
+        if interrupt_on is not None:
+            assert process.stderr is not None
+            while interrupt_on not in (line := process.stderr.readline()):
+                assert line, seen  # it ended first
+                seen += line
+            time.sleep(1)  # for what comes next, such as the first buffer
             process.send_signal(signal.SIGINT)
         _, err = process.communicate(timeout=20)
     finally:
         process.kill()
-    return process.returncode, err
+    return process.returncode, seen + err
 
 
 def test_an_error_while_playing():
@@ -62,7 +68,7 @@ def test_a_failed_stop():
 def test_a_hang_in_the_preroll_ends_on_one_interrupt():
     started = time.monotonic()
     hangs = f"{SRC} ! faulty name=f method=hang num-buffers=0 ! fakesink"
-    code, err = run(hangs, interrupt_after=1)
+    code, err = run(hangs, interrupt_on="to ready")
     assert code == 1
     assert "error: Could not set the pipeline to null within 5 s: f still changing" in err
     assert time.monotonic() - started < 10

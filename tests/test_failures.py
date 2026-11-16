@@ -51,8 +51,12 @@ async def test_a_stop_that_hangs_names_the_element_and_frees_the_loop():
         await bounded(play)
 
     RELEASE.set()  # the change finishes after all, and the player is usable again
-    while player.state != Gst.State.NULL:
-        await asyncio.sleep(0.01)
+
+    async def stopped() -> None:
+        while player.state != Gst.State.NULL:
+            await asyncio.sleep(0.01)
+
+    await bounded(stopped())
     await bounded(player.stop())
     player.teardown()
 

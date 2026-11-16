@@ -43,7 +43,8 @@ This release breaks the API.
   player refuses changes until it finishes, and `teardown` leaves such a pipeline.
 - Fix: a failed stop exited 0, and left the bus flushing so the next play hung; failed state
   changes name the elements that failed them, when those still say so. `mixtape run` exits 1 when the pipeline cannot
-  stop. `async with player` raises a stop that fails.
+  stop. `async with player` stops the pipeline before the teardown and raises a stop that fails;
+  the waits it ends get `PlayerSetStateError`, no longer `CancelledError`.
 - New: the `leaks` feature warns about the objects still alive once the pipeline is in NULL;
   `teardown` detaches the features after setting NULL. A page connecting over `--http` gets
   the error that stopped the pipeline. `error` is cleared when the pipeline starts again.

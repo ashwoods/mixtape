@@ -1498,7 +1498,7 @@ function build(m) {
   const main = document.getElementById("main");
   main.replaceChildren(graphSection());
   const commands = Object.values(m.commands).filter((c) => !(c.builtin && ["play", "pause", "stop", "eos", "seek"].includes(c.name)));
-  const aliases = Object.values(m.properties).filter((p) => p.target);
+  const ownProps = Object.values(m.properties).filter((p) => !p.builtin);
   // the player's own commands and properties get a column of their own, beside the pipeline on
   // wide screens and in view while the elements scroll; without commands the page stays one column
   const side = commands.length > 0;
@@ -1508,9 +1508,9 @@ function build(m) {
   if (commands.length) {
     own.append(h("h2", { class: "sec-h" }, "Commands"), ...commands.map(commandRow));
   }
-  if (aliases.length) {
+  if (ownProps.length) {
     own.append(h("h2", { class: "sec-h" }, "Properties"),
-      ...aliases.map((p) => propertyRow(p, p.path, `→ ${p.target}`).el));
+      ...ownProps.map((p) => propertyRow(p, p.path, p.target ? `→ ${p.target}` : null).el));
   }
   const els = h("div", { class: "els" });
   main.append(...(side ? [own] : []), els);

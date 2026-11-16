@@ -49,16 +49,18 @@ class Warning(Event):
 
 @dataclass(frozen=True, slots=True)
 class PropertyChanged(Event):
-    """An exposed element property changed, on whatever thread changed it.
+    """A property changed: an exposed element's, on whatever thread changed it, or a
+    computed one, published on the loop by `Player.notify`.
 
     `path` is the element path (`enc.bitrate`, or `a.enc.bitrate` when the element name
     is not unique); aliases map to it via `PropSpec.target`. The element's key is fixed
-    when the player starts watching it.
+    when the player starts watching it. A computed property (`feature.name`) has no
+    element: `element` and `property` are None.
     """
 
     path: str
-    element: str
-    property: str
+    element: str | None
+    property: str | None
     value: Any
     """The JSON-friendly value, as `Player.get` returns it"""
 

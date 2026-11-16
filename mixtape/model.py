@@ -28,6 +28,7 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    ValidationError,
     create_model,
 )
 
@@ -39,11 +40,15 @@ class _Spec(BaseModel):
 
 
 class PropSpec(_Spec):
-    """A readable and/or writable value: an element property, an alias or a built-in."""
+    """A readable and/or writable value: an element property, an alias, a computed property
+    or a built-in."""
 
     path: str
     """`enc.bitrate` for element properties (`a.enc.bitrate` when the name is not unique),
-    a bare name for aliases and built-ins"""
+    a bare name for aliases, computed properties and built-ins, `feature.name` for those of
+    a feature"""
+    builtin: bool = False
+    """One of the properties every player has: `state`, `position` and `duration`"""
     element: str | None = None
     property: str | None = None
     """The element and its GObject property name, for element properties and aliases"""
@@ -80,7 +85,7 @@ class PlayerSpec(_Spec):
     name: str
     commands: dict[str, CommandSpec]
     properties: dict[str, PropSpec]
-    """The built-ins and the declared aliases"""
+    """The built-ins, the declared aliases and the computed properties"""
     elements: dict[str, ElementSpec]
 
 
@@ -330,7 +335,7 @@ def describe_element(element: Gst.Element, key: str) -> ElementSpec:
 
 def _builtin_prop(path: str, annotation: Any, description: str) -> PropSpec:
     schema = {**_adapter(annotation).json_schema(), "description": description}
-    return PropSpec(path=path, schema=schema, writable=False, description=description)
+    return PropSpec(path=path, schema=schema, writable=False, description=description, builtin=True)
 
 
 BUILTIN_PROPS = {
@@ -382,8 +387,69 @@ class Prop:
         )
 
 
-def prop(target: str, *, label: str | None = None, description: str | None = None) -> Any:
-    """Declare an alias of the element property `target` (`"enc.bitrate"`) on a `Player`."""
+class Computed[T]:
+    """A read-only property computed by a getter, see `prop()`. Reading it on an instance
+    calls the getter, so it works before the player is set up."""
+
+    name: str
+
+    def __init__(self, getter: Callable[[Any], T]) -> None:
+        self.getter = getter
+        self.name = getter.__name__
+        self.description = (inspect.getdoc(getter) or "").partition("\n")[0] or None
+        self._built: tuple[TypeAdapter[Any], dict[str, Any]] | None = None
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self.name = name
+
+    @overload
+    def __get__(self, instance: None, owner: type) -> Self: ...
+    @overload
+    def __get__(self, instance: Any, owner: type) -> T: ...
+    def __get__(self, instance: Any, owner: type) -> Self | T:
+        return self if instance is None else self.getter(instance)
+
+    def __set__(self, instance: Any, value: Any) -> None:
+        raise AttributeError(f"{self.name!r} is read-only")
+
+    def build(self) -> tuple[TypeAdapter[Any], dict[str, Any]]:
+        """The adapter of the value and its JSON Schema, from the getter's return type hint.
+        Built when the class collects its declarations, so a missing hint fails there."""
+        if self._built is None:
+            what = getattr(self.getter, "__qualname__", self.name)
+            hints = typing.get_type_hints(self.getter, include_extras=True)
+            if "return" not in hints:
+                raise TypeError(f"{what}: a property getter needs a return type hint")
+            adapter = TypeAdapter(hints["return"])
+            self._built = adapter, _inline_defs(adapter.json_schema(), f"{what} value")
+        return self._built
+
+    def read(self, owner: Any) -> Any:
+        """The current value as JSON-friendly data, like `Player.get` returns it."""
+        adapter, _ = self.build()
+        return adapter.dump_python(self.getter(owner), mode="json")
+
+    def spec(self, path: str) -> PropSpec:
+        """The spec of the property, known as `path`."""
+        schema = dict(self.build()[1])
+        if self.description:
+            schema["description"] = self.description
+        return PropSpec(path=path, schema=schema, writable=False, description=self.description)
+
+
+@overload
+def prop[T](target: Callable[[Any], T], /) -> Computed[T]: ...
+@overload
+def prop(target: str, *, label: str | None = None, description: str | None = None) -> Any: ...
+def prop(
+    target: str | Callable[[Any], Any], *, label: str | None = None, description: str | None = None
+) -> Any:
+    """Declare an alias of the element property `target` (`"enc.bitrate"`) on a `Player`.
+
+    As a decorator of a method (`@prop`) it declares a read-only computed property instead,
+    typed by the method's return hint and described by its docstring."""
+    if callable(target):
+        return Computed(target)
     return Prop(target, label, description)
 
 
@@ -428,17 +494,25 @@ def _inline_defs(schema: dict[str, Any], what: str) -> dict[str, Any]:
     return resolved
 
 
-def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Command:
-    hints = typing.get_type_hints(method, include_extras=True)
+def args_model(
+    method: Callable[..., Any], name: str, hints: dict[str, Any], what: str
+) -> type[BaseModel]:
+    """The pydantic model of the parameters of `method` after `self` (`what` names them in
+    errors: "commands", "options"), which rejects unknown ones."""
     fields: dict[str, Any] = {}
     for param in list(inspect.signature(method).parameters.values())[1:]:  # after self
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
-            raise TypeError(f"{method.__qualname__}: commands take no *args or **kwargs")
+            raise TypeError(f"{method.__qualname__}: {what} take no *args or **kwargs")
         if param.name not in hints:
             raise TypeError(f"{method.__qualname__}: parameter {param.name!r} needs a type hint")
         default = ... if param.default is param.empty else param.default
         fields[param.name] = (hints[param.name], default)
-    args = create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
+    return create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
+
+
+def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Command:
+    hints = typing.get_type_hints(method, include_extras=True)
+    args = args_model(method, name, hints, "commands")
     returns = hints.get("return", type(None))
     what = method.__qualname__
     result = None
@@ -458,18 +532,32 @@ def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Comm
 class Declarations(NamedTuple):
     props: dict[str, Prop]
     commands: dict[str, Command]
+    computed: dict[str, Computed[Any]]
 
 
 def collect(cls: type, root: type) -> Declarations:
     """The `prop` and `@command` declarations of `cls` and its bases; `root`'s are built-in."""
     props: dict[str, Prop] = {}
     commands: dict[str, Command] = {}
+    computed: dict[str, Computed[Any]] = {}
     for klass in reversed(cls.__mro__):
         for name, attr in vars(klass).items():
-            if isinstance(attr, Prop):
+            if isinstance(attr, Prop | Computed):
                 if name in BUILTIN_PROPS:
                     raise TypeError(f"{klass.__qualname__}.{name} clashes with a built-in property")
-                props[name] = attr
+                if isinstance(attr, Prop):
+                    props[name] = attr
+                else:
+                    attr.build()  # a getter without a return hint fails here
+                    computed[name] = attr
             elif getattr(attr, _COMMAND, False):
                 commands[name] = _build_command(attr, name, klass is root)
-    return Declarations(props, commands)
+    return Declarations(props, commands, computed)
+
+
+def validation_reasons(exc: ValidationError) -> str:
+    """Pydantic's errors on one line, for a CLI or an HTTP detail."""
+    errors = exc.errors(include_url=False, include_context=False)
+    return "; ".join(
+        f"{'.'.join(map(str, e['loc']))}: {e['msg']}" if e["loc"] else str(e["msg"]) for e in errors
+    )

@@ -14,6 +14,7 @@ import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
 
+from . import features
 from .events import Error, EventStream
 from .exceptions import (
     ModelError,
@@ -104,6 +105,15 @@ def _add_target(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="expose every element, not only the named ones",
     )
+    installed = ", ".join(sorted(features.available())) or "none installed"
+    parser.add_argument(
+        "--feature",
+        action="append",
+        default=[],
+        metavar="NAME[,KEY=VALUE…]",
+        help="enable a feature with its options, e.g. stats,interval=1; repeatable. "
+        f"Available: {installed}",
+    )
 
 
 def _assignment(text: str) -> tuple[str, str]:
@@ -158,11 +168,15 @@ def _load_player(args: argparse.Namespace) -> Player | None:
     target = " ".join(args.description)
     try:
         if _IMPORT_PATH.fullmatch(target) is None:
-            return Player.from_description(target, expose_all=args.expose_all)
+            return Player.from_description(
+                target, expose_all=args.expose_all, features=args.feature
+            )
         cls = _import_player_class(target)
         if cls.description is None:
             raise ValueError(f"{target} has no description to build a player from")
-        return cls.from_description(cls.description, expose_all=args.expose_all)
+        return cls.from_description(
+            cls.description, expose_all=args.expose_all, features=args.feature
+        )
     except (ValueError, PlayerDescriptionError, ModelError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return None
@@ -214,6 +228,8 @@ def _inspect(args: argparse.Namespace) -> int:
         print(spec.model_dump_json(indent=2))
         return 0
     print(spec.name)
+    if player.enabled_features:
+        print(f"Features: {', '.join(player.enabled_features)}")
     if spec.commands:
         print("\nCommands:")
         print(_table([_command_row(c) for c in spec.commands.values()], cap=64))

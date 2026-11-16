@@ -67,5 +67,9 @@ class NotWritableError(ModelError):
     """The property cannot be written: it is read-only or construct-only"""
 
 
+class FeatureError(ModelError):
+    """A feature could not be resolved, configured or enabled"""
+
+
 class CommandError(ModelError):
     """A built-in command could not do what was asked"""

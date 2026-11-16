@@ -21,6 +21,7 @@ from websockets.typing import Origin
 from mixtape import Player, command
 from mixtape.interfaces.http import Listening, serve
 from mixtape.interfaces.http.security import check_headers
+from tests.players import Feat
 
 PIPELINE = "videotestsrc name=src ! queue name=q ! fakesink name=sink"
 COLLIDING = "bin.( name=a queue name=q ! fakesink ) bin.( name=b queue name=q ! fakesink )"
@@ -225,6 +226,33 @@ async def test_openapi_has_typed_bodies_and_no_defs(Gst: Any) -> None:
             assert ok.json() == {"result": {"x": 2, "y": 0}}
             bad = await client.post("/api/commands/go", json={"where": {"x": "a"}, "path": []})
             assert bad.status_code == 422 and bad.json()["errors"][0]["loc"][:2] == ["where", "x"]
+
+
+@pytest.mark.asyncio
+async def test_a_feature_in_the_model_commands_and_events(Gst: Any) -> None:
+    player = Player.from_description(PIPELINE, features=[Feat(step=2)])
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        async with httpx.AsyncClient(base_url=listening.url) as client:
+            model = (await client.get("/api/model")).json()
+            assert model["properties"]["feat.level"]["builtin"] is False
+            assert "feat.bump" in model["commands"]
+            assert (await client.get("/api/properties")).json()["feat.level"] == 0
+            bad = await client.patch("/api/properties", json={"feat.level": 1})
+            assert bad.status_code == 422
+            ws_url = f"ws://127.0.0.1:{listening.port}/api/events"
+            async with websockets.connect(ws_url) as ws:
+                assert (await message(ws))["values"]["feat.level"] == 0
+                response = await client.post("/api/commands/feat.bump", json={"times": 2})
+                assert (response.status_code, response.json()) == (200, {"result": 4})
+                seen = await until(ws, lambda m: m["type"] == "property")
+                assert seen[-1] == {
+                    "type": "property",
+                    "path": "feat.level",
+                    "element": None,
+                    "property": None,
+                    "value": 4,
+                }
+            assert (await client.post("/api/commands/feat.nope")).status_code == 404
 
 
 @pytest.mark.asyncio

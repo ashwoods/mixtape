@@ -7,8 +7,10 @@ import inspect
 import logging
 import warnings
 from collections import Counter
-from collections.abc import Callable, Coroutine, Iterable, Iterator
-from typing import Any, ClassVar, Self
+from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
+from dataclasses import replace
+from types import MappingProxyType
+from typing import Any, ClassVar, NamedTuple, Self
 
 import gi
 
@@ -19,6 +21,7 @@ from pydantic import NonNegativeFloat, ValidationError
 from . import events
 from .exceptions import (
     CommandError,
+    FeatureError,
     InvalidValueError,
     MixTapeError,
     NotReadableError,
@@ -29,9 +32,12 @@ from .exceptions import (
     PlayerSetStateError,
     UnknownNameError,
 )
+from .features import Feature, FeatureSpec, resolve_all
 from .model import (
     BUILTIN_PROPS,
     Codec,
+    Command,
+    Computed,
     Declarations,
     GraphSpec,
     LinkSpec,
@@ -45,6 +51,7 @@ from .model import (
     element_prop_spec,
     exposed_props,
     is_user_named,
+    validation_reasons,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,10 +91,15 @@ def _real_peer(pad: Gst.Pad) -> Gst.Pad | None:
 def _invalid(what: str, exc: ValidationError) -> InvalidValueError:
     """An InvalidValueError with pydantic's errors on one line, for a CLI or an HTTP detail."""
     errors = exc.errors(include_url=False, include_context=False)
-    reasons = "; ".join(
-        f"{'.'.join(map(str, e['loc']))}: {e['msg']}" if e["loc"] else str(e["msg"]) for e in errors
-    )
-    return InvalidValueError(f"Invalid {what}: {reasons}", errors)
+    return InvalidValueError(f"Invalid {what}: {validation_reasons(exc)}", errors)
+
+
+class _Bound(NamedTuple):
+    """A command of one player: the declaration, whose method `owner` has under `attr`."""
+
+    declared: Command
+    owner: object
+    attr: str
 
 
 class Player:
@@ -100,9 +112,13 @@ class Player:
 
     Its controls and state are described by `describe()`: the properties of the
     named elements (all of them with `expose_all`), the aliases declared with
-    `prop()`, the commands declared with `@command`, and the built-ins.
+    `prop()`, the computed properties declared with `@prop`, the commands declared with
+    `@command`, and the built-ins. The features it enables add their own, as `feature.name`.
     """
 
+    features: ClassVar[Sequence[str | type[Feature]]] = ()
+    """The features every instance enables, as `"name,key=value"` strings or classes: never
+    instances, which would be shared. The `features` argument adds to them and wins by name."""
     description: ClassVar[str | None] = None
     """The pipeline description of a subclass that carries its own, for `mixtape run`"""
     position_interval: ClassVar[float] = 0.25
@@ -113,6 +129,8 @@ class Player:
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         cls._declarations()  # a bad declaration fails when the class is defined
+        if any(isinstance(spec, Feature) for spec in cls.features):
+            raise TypeError(f"{cls.__qualname__}.features takes names and classes, not instances")
 
     @classmethod
     def _declarations(cls) -> Declarations:
@@ -120,7 +138,16 @@ class Player:
             cls._declared = collect(cls, Player)
         return cls._declared
 
-    def __init__(self, pipeline: Gst.Pipeline, *, expose_all: bool = False) -> None:
+    def __init__(
+        self,
+        pipeline: Gst.Pipeline,
+        *,
+        expose_all: bool = False,
+        features: Iterable[FeatureSpec] = (),
+    ) -> None:
+        self._features = resolve_all(features, type(self).features)
+        for feature in self._features.values():
+            feature._prepare_once()  # no-op when `from_description` did
         ensure_init()
         if not isinstance(pipeline, Gst.Pipeline):
             raise TypeError(f"pipeline must be a Gst.Pipeline, not {type(pipeline).__name__}")
@@ -141,12 +168,23 @@ class Player:
         self._expose_all = expose_all
         self._notify_ids: list[tuple[Gst.Element, int]] = []
         self._bin_ids: list[int] = []  # the pipeline's deep-element-added/removed handlers
+        self._attached: list[Feature] = []  # in the order they attached
         for alias in self._declarations().props.values():
             self._locate(alias.target, exposed=False)  # a typo fails here
+        self._check_features()
+        self._commands, self._computed = self._build_model()
 
     @classmethod
-    def from_description(cls, description: str, *, expose_all: bool = False) -> Self:
-        """Build a player from a `gst-launch` style pipeline description."""
+    def from_description(
+        cls, description: str, *, expose_all: bool = False, features: Iterable[FeatureSpec] = ()
+    ) -> Self:
+        """Build a player from a `gst-launch` style pipeline description.
+
+        The features are prepared first: before GStreamer is initialised, so they can set
+        its environment."""
+        resolved = list(resolve_all(features, cls.features).values())
+        for feature in resolved:
+            feature._prepare_once()
         ensure_init()
         try:
             element = Gst.parse_launch(description)
@@ -158,7 +196,7 @@ class Player:
             pipeline = Gst.Pipeline.new(None)
             pipeline.add(element)
             element = pipeline
-        return cls(element, expose_all=expose_all)
+        return cls(element, expose_all=expose_all, features=resolved)
 
     @classmethod
     def run(cls, description_or_pipeline: str | Gst.Pipeline, timeout: float | None = None) -> None:
@@ -206,6 +244,11 @@ class Player:
         return self._error
 
     @property
+    def enabled_features(self) -> Mapping[str, Feature]:
+        """The features of this player by name, in the order they were enabled"""
+        return MappingProxyType(self._features)
+
+    @property
     def sinks(self) -> list[Gst.Element]:
         """Returns all sink elements"""
         return list(self.pipeline.iterate_sinks())
@@ -233,6 +276,7 @@ class Player:
         except RuntimeError as exc:
             raise PlayerNotConfigured("setup needs a running asyncio loop") from exc
         if self._loop is not None and self._loop.is_closed():
+            self._detach_features()  # they were attached to it
             self._loop = self._fd = None  # the loop died without a teardown
             self._events = events.Broadcast()  # and its subscribers with it
             self._position_task = self._last_position = None
@@ -244,9 +288,29 @@ class Player:
         loop.add_reader(fd, self._drain)
         self._loop, self._fd = loop, fd
         self._connect_notify()
+        for feature in self._features.values():
+            feature.player = self
+            try:
+                feature.attach(self)
+            except BaseException:
+                feature.player = None
+                self.teardown()  # detaches those before it
+                raise
+            self._attached.append(feature)
+
+    def _detach_features(self) -> None:
+        """Detach the attached features, the last first. A failing one is logged, not raised."""
+        attached, self._attached = self._attached, []
+        for feature in reversed(attached):
+            try:
+                feature.detach(self)
+            except Exception:
+                logger.exception("Feature %r failed to detach", feature.name)
+            feature.player = None
 
     def teardown(self) -> None:
         """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after."""
+        self._detach_features()
         self._disconnect_notify()
         self.pipeline.set_state(Gst.State.NULL)
         self._target = Gst.State.NULL
@@ -440,6 +504,40 @@ class Player:
 
     # -- the model: properties and commands -- #
 
+    def _check_features(self) -> None:
+        """Fail for a feature whose GStreamer plugin features are missing, or whose name would
+        shadow the `element.property` paths of an element."""
+        registry = Gst.Registry.get()
+        keys = self._element_keys()
+        for feature in self._features.values():
+            if missing := [r for r in feature.requires if registry.lookup_feature(r) is None]:
+                raise FeatureError(
+                    f"The feature {feature.name!r} needs the GStreamer plugin features "
+                    f"{', '.join(map(repr, missing))}, which are not installed"
+                )
+            if feature.name in keys:
+                raise FeatureError(
+                    f"The feature {feature.name!r} has the name of an element: "
+                    "its properties would shadow the element's"
+                )
+
+    def _build_model(self) -> tuple[dict[str, _Bound], dict[str, tuple[Computed[Any], object]]]:
+        """The commands and computed properties of this player: its class's, then each
+        feature's as `feature.name`."""
+        declared = self._declarations()
+        commands = {name: _Bound(c, self, name) for name, c in declared.commands.items()}
+        computed: dict[str, tuple[Computed[Any], object]] = {
+            name: (c, self) for name, c in declared.computed.items()
+        }
+        for feature in self._features.values():
+            for name, c in feature._declared.commands.items():
+                path = f"{feature.name}.{name}"
+                renamed = replace(c, spec=c.spec.model_copy(update={"name": path}))
+                commands[path] = _Bound(renamed, feature, name)
+            for name, p in feature._declared.computed.items():
+                computed[f"{feature.name}.{name}"] = (p, feature)
+        return commands, computed
+
     def describe(self) -> PlayerSpec:
         """A snapshot of the player's commands, properties and exposed elements."""
         properties = dict(BUILTIN_PROPS)
@@ -447,11 +545,13 @@ class Player:
             element, ps, codec = self._locate(alias.target, exposed=False)
             key = alias.target.rpartition(".")[0]  # what `_locate` found it by
             properties[name] = alias.spec(element_prop_spec(element, key, ps, codec))
+        for path, (computed, _) in self._computed.items():
+            properties[path] = computed.spec(path)
         return PlayerSpec(
             name=type(self).__name__,
-            commands={name: c.spec for name, c in self._declarations().commands.items()},
+            commands={name: bound.declared.spec for name, bound in self._commands.items()},
             properties=properties,
-            elements={key: describe_element(e, key) for key, e in self._exposed_elements().items()},
+            elements={key: describe_element(e, key) for key, e in self.exposed_elements().items()},
         )
 
     def graph(self) -> GraphSpec:
@@ -491,9 +591,12 @@ class Player:
         return GraphSpec(pipeline=pipeline_key, nodes=nodes, links=links)
 
     def get(self, path: str) -> Any:
-        """Read a property by path: a built-in, an alias or `element.property`, as JSON-friendly."""
+        """Read a property by path: a built-in, a computed property (`feature.name`), an alias
+        or `element.property`, as JSON-friendly."""
         if path in BUILTIN_PROPS:
             return self._read_builtin(path)
+        if (computed := self._computed.get(path)) is not None:
+            return computed[0].read(computed[1])
         element, ps, codec = self._resolve(path)
         if not ps.flags & GObject.ParamFlags.READABLE:
             raise NotReadableError(f"{path!r} is write-only")
@@ -502,7 +605,7 @@ class Player:
     async def set(self, path: str, value: Any) -> None:
         """Validate `value` and set the property. Nothing changes when it is rejected."""
         self.setup()
-        if path in BUILTIN_PROPS:
+        if path in BUILTIN_PROPS or path in self._computed:
             raise NotWritableError(f"{path!r} is read-only")
         element, ps, codec = self._resolve(path)
         flags = int(ps.flags)
@@ -527,13 +630,14 @@ class Player:
 
         Built-in commands return None, as their specs say."""
         self.setup()
-        if (declared := self._declarations().commands.get(name)) is None:
+        if (bound := self._commands.get(name)) is None:
             raise UnknownNameError(f"Unknown command {name!r}")
+        declared = bound.declared
         try:
             validated = declared.args.model_validate(args)
         except ValidationError as exc:
             raise _invalid(f"arguments for {name!r}", exc) from exc
-        result = getattr(self, name)(
+        result = getattr(bound.owner, bound.attr)(
             **{k: getattr(validated, k) for k in type(validated).model_fields}
         )
         if inspect.isawaitable(result):
@@ -570,7 +674,15 @@ class Player:
             keys[".".join(names)] = element
         return keys
 
-    def _exposed_elements(self) -> dict[str, Gst.Element]:
+    def notify(self, path: str) -> None:
+        """Publish the current value of the computed property `path` (`feature.name`) as a
+        `PropertyChanged` with no element. On the loop thread only: the events are not
+        thread safe, `call_soon_threadsafe` brings a call from another thread there."""
+        if path not in self._computed:
+            raise UnknownNameError(f"Unknown computed property {path!r}")
+        self._publish(events.PropertyChanged(path, None, None, self.get(path)))
+
+    def exposed_elements(self) -> dict[str, Gst.Element]:
         """The elements the model exposes by key: the named ones, or all with `expose_all`.
         The pipeline itself counts too: `playbin name=pb` is the pipeline."""
         return {key: e for key, e in self._element_keys().items() if self._is_exposed(e)}
@@ -634,7 +746,7 @@ class Player:
             ("deep-element-removed", self._unwatch),
         ):
             self._bin_ids.append(self.pipeline.connect(signal, self._on_element_signal, callback))
-        for key, element in self._exposed_elements().items():
+        for key, element in self.exposed_elements().items():
             self._watch(element, key)
 
     def _disconnect_notify(self) -> None:

@@ -4,7 +4,7 @@ Server to client, one JSON object per message:
 
     {"type": "values", "values": {path: value}}      first, every readable property
     {"type": "state", "old", "new", "pending"}       the pipeline's state (`void-pending`)
-    {"type": "property", "path", "element", "property", "value"}
+    {"type": "property", "path", "element", "property", "value"}   (null for a computed one)
     {"type": "eos"}
     {"type": "error" | "warning", "source", "message", "debug"}
     {"type": "position", "position", "duration"}

@@ -11,6 +11,7 @@ import time
 import pytest
 
 from mixtape.cli import main
+from tests.players import Feat, register
 
 
 def test_run_until_eos() -> None:
@@ -83,6 +84,48 @@ def test_run_set_needs_a_value(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_run_player_class() -> None:
     assert main(["run", "tests.players:Demo"]) == 0
+
+
+def test_inspect_feature(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    register(monkeypatch, Feat)
+    assert main(["inspect", PIPELINE, "--feature", "feat,step=0.5"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == ["Player", "Features: feat"]
+    assert any(line.lstrip().startswith("feat.bump(times: integer = 1)") for line in lines)
+    assert any("feat.level" in line and "r-" in line and "= 0" in line for line in lines)
+    assert main(["inspect", "--json", PIPELINE, "--feature", "feat"]) == 0
+    assert "feat.level" in json.loads(capsys.readouterr().out)["properties"]
+    assert main(["inspect", "tests.players:Demo", "--feature", "feat"]) == 0
+    assert "Features: feat" in capsys.readouterr().out
+    assert main(["run", PIPELINE, "--feature", "feat"]) == 0
+
+
+def test_help_lists_the_features(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    register(monkeypatch, Feat)
+    assert main(["inspect", "--help"]) == 0
+    assert "Available: feat" in " ".join(capsys.readouterr().out.split())
+
+
+@pytest.mark.parametrize("command", ["run", "inspect"])
+@pytest.mark.parametrize(
+    "feature", ["nofeat", "feat,step=x", "feat,step"], ids=["unknown", "bad-option", "no-value"]
+)
+def test_a_bad_feature_is_a_usage_error(
+    command: str,
+    feature: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    register(monkeypatch, Feat)
+    assert main([command, PIPELINE, "--feature", feature]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and len(err.splitlines()) == 1
+    if feature == "nofeat":
+        assert "available: feat" in err
 
 
 @pytest.mark.parametrize(

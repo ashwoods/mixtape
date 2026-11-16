@@ -4,10 +4,9 @@ in C, for the tests that run where that plugin is not built.
 
 Its `mode` picks the failure: `start` fails to start, `start-error` too after posting an ERROR
 and then a second one, as basesrc follows its subclass's with its own, `start-once` fails the
-first start only, `stop` fails READY to
-NULL, and `hang` blocks its streaming thread on its first buffer until `RELEASE` is set.
-`HANGING` is set once it blocks. `release_all` lets every one go and sets their pipelines to
-NULL."""
+first start only, `stop` fails READY to NULL, and `hang` blocks its streaming thread on its
+first buffer until `RELEASE` is set. `HANGING` is set once it blocks. `release_all` lets every
+one go and sets their pipelines to NULL."""
 
 import threading
 

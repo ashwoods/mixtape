@@ -284,8 +284,8 @@ class Player:
 
     @property
     def error(self) -> PlayerPipelineError | None:
-        """The first error since the pipeline last left NULL, which stopped it, until it is
-        set to another state than NULL again"""
+        """The first error since the last change to another state than NULL, which stopped
+        the pipeline, until the next such change"""
         return self._error
 
     @property

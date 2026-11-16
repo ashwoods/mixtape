@@ -5,6 +5,7 @@ import concurrent.futures
 import contextlib
 import inspect
 import logging
+import threading
 import warnings
 from collections import Counter
 from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
@@ -88,6 +89,30 @@ def _real_peer(pad: Gst.Pad) -> Gst.Pad | None:
     return None
 
 
+def _in_thread[T](
+    fn: Callable[..., T], *args: object, after: concurrent.futures.Future[Any] | None = None
+) -> concurrent.futures.Future[T]:
+    """Call `fn(*args)` on a daemon thread, once `after` is done: a call blocked in
+    GStreamer (a hung streaming thread holds its locks) blocks neither the loop nor the exit."""
+    future: concurrent.futures.Future[T] = concurrent.futures.Future()
+
+    def run() -> None:
+        if after is not None:
+            concurrent.futures.wait([after])
+        if future.set_running_or_notify_cancel():
+            try:
+                future.set_result(fn(*args))
+            except BaseException as exc:
+                future.set_exception(exc)
+
+    threading.Thread(target=run, name="mixtape", daemon=True).start()
+    return future
+
+
+def _names(elements: Iterable[Gst.Element]) -> str:
+    return ", ".join(element.get_name() for element in elements)
+
+
 def _invalid(what: str, exc: ValidationError) -> InvalidValueError:
     """An InvalidValueError with pydantic's errors on one line, for a CLI or an HTTP detail."""
     errors = exc.errors(include_url=False, include_context=False)
@@ -123,6 +148,9 @@ class Player:
     """The pipeline description of a subclass that carries its own, for `mixtape run`"""
     position_interval: ClassVar[float] = 0.25
     """Seconds between the reads that publish `Position` to `events(position=True)` streams"""
+    state_timeout: ClassVar[float] = 5.0
+    """Seconds a change down to READY or NULL may take: a streaming thread that hangs blocks
+    it, and the player then calls the pipeline stuck until the change finishes after all"""
 
     _declared: ClassVar[Declarations]
 
@@ -155,6 +183,8 @@ class Player:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._fd: int | None = None
         self._error: PlayerPipelineError | None = None
+        self._changing: concurrent.futures.Future[Gst.StateChangeReturn] | None = None  # last
+        self._stuck: concurrent.futures.Future[Gst.StateChangeReturn] | None = None
         self._target = Gst.State.NULL  # what the caller asked for, to decide bus policy
         self._live = False
         self._buffering = False
@@ -313,9 +343,24 @@ class Player:
     def teardown(self) -> None:
         """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after.
 
-        The features detach once the pipeline is in NULL, so they see what it left behind."""
+        A pipeline that fails to stop, or does not within `state_timeout`, is left as it is
+        with a warning. The features detach once it is in NULL, so they see what it left."""
+        self._teardown(null=True)
+
+    def _teardown(self, *, null: bool) -> None:
         self._disconnect_notify()
-        self.pipeline.set_state(Gst.State.NULL)
+        if null:
+            try:
+                self._raise_if_stuck()
+                ret = self._change(Gst.State.NULL).result(self.state_timeout)
+            except PlayerSetStateError as exc:
+                logger.warning("%s: leaving it", exc)
+            except TimeoutError:
+                self._stuck = self._changing
+                logger.warning("%s: leaving it", self._stuck_error(Gst.State.NULL))
+            else:
+                if ret == Gst.StateChangeReturn.FAILURE:
+                    logger.warning("%s", self._failed(Gst.State.NULL))
         self._detach_features()
         self._target = Gst.State.NULL
         self._live = self._buffering = self._eos = False
@@ -340,8 +385,21 @@ class Player:
         self.setup()
         return self
 
-    async def __aexit__(self, *exc: object) -> None:
-        self.teardown()
+    async def __aexit__(self, exc_type: type[BaseException] | None, *rest: object) -> None:
+        """Stop the pipeline and tear down. A stop that fails or hangs is raised, unless the
+        block raised something else than a `PlayerSetStateError`: it is logged then."""
+        error: MixTapeError | None = None
+        try:
+            await self.set_state(Gst.State.NULL)
+        except MixTapeError as exc:
+            error = exc
+        finally:
+            self._teardown(null=error is None)
+        if error is None:
+            return
+        if exc_type is None or issubclass(exc_type, PlayerSetStateError):
+            raise error
+        logger.warning("%s", error)
 
     def call_soon_threadsafe(self, callback: Callable[..., object], *args: object) -> None:
         """Run `callback(*args)` on the player's loop, from any thread."""
@@ -369,6 +427,7 @@ class Player:
         self._buffering = False  # the caller's state wins over buffering's pause
         if self.state == state and self.pending == Gst.State.VOID_PENDING:
             return Gst.StateChangeReturn.SUCCESS
+        self._raise_if_stuck()
         if state in (Gst.State.PAUSED, Gst.State.PLAYING):
             self._error = None  # started again: the error is history
         error = self._error
@@ -376,8 +435,17 @@ class Player:
         waiter = (state, future)
         self._state_waiters.append(waiter)
         try:
-            ret = self._set_null() if state == Gst.State.NULL else self.pipeline.set_state(state)
-            if state in (Gst.State.NULL, Gst.State.READY):
+            old = self.state
+            change = asyncio.wrap_future(self._change(state))
+            downward = state in (Gst.State.NULL, Gst.State.READY)
+            done, _ = await asyncio.wait([change], timeout=self.state_timeout if downward else None)
+            if not done:
+                self._stuck = self._changing
+                raise self._stuck_error(state)
+            ret = change.result()
+            if state == Gst.State.NULL and ret != Gst.StateChangeReturn.FAILURE:
+                self._published_null(old)
+            if downward:
                 self._eos = False  # going down flushes the stream
             if state == Gst.State.NULL:
                 self._live = False
@@ -390,7 +458,7 @@ class Player:
                 self._drain()  # the element's ERROR is more useful than a bare failure
                 if self._error is not error and self._error is not None:
                     raise self._error
-                raise PlayerSetStateError(f"Could not set the pipeline to {state.value_nick}")
+                raise self._failed(state)
             return ret
         finally:
             with contextlib.suppress(ValueError):  # teardown may have cleared it
@@ -455,7 +523,11 @@ class Player:
         async def send_and_wait() -> None:
             # A source blocked on a full downstream holds its lock, and send_event waits for
             # it: send from a thread so the loop (and a second Ctrl-C) stays responsive.
-            if not await asyncio.to_thread(self.pipeline.send_event, Gst.Event.new_eos()):
+            sent = asyncio.wrap_future(_in_thread(self.pipeline.send_event, Gst.Event.new_eos()))
+            await asyncio.wait([sent, future], return_when=asyncio.FIRST_COMPLETED)
+            if future.done():  # a stop or an error interrupts a send that is blocked
+                return future.result()
+            if not sent.result():
                 raise MixTapeError("The pipeline did not handle the EOS event")
             await future
 
@@ -479,18 +551,57 @@ class Player:
         finally:
             self._discard_eos_waiter(future)
 
-    def _set_null(self) -> Gst.StateChangeReturn:
-        """Set the pipeline to NULL, publishing the `StateChanged` the bus cannot: it
-        flushes its messages on the way down (unless `auto-flush-bus` is off)."""
+    def _change(self, state: Gst.State) -> concurrent.futures.Future[Gst.StateChangeReturn]:
+        """Set the pipeline state on a thread, after the changes asked before."""
+        self._changing = _in_thread(self.pipeline.set_state, state, after=self._changing)
+        return self._changing
+
+    def _raise_if_stuck(self) -> None:
+        """Fail at once while a change that timed out is still blocked."""
+        if self._stuck is not None and not self._stuck.done():
+            raise PlayerSetStateError(f"The pipeline is stuck changing state{self._changing_in()}")
+        self._stuck = None
+
+    def _changing_in(self) -> str:
+        """`: name, … still changing state` for the elements a change waits for, if any: a
+        thread blocked in GStreamer may hold the pipeline's own lock instead."""
+        elements = [e for e in _retrying(self.pipeline.iterate_recurse) if e.get_state(0)[2]]
+        leaves = [e for e in elements if not isinstance(e, Gst.Bin)] or elements
+        return f": {_names(leaves)} still changing" if leaves else ""
+
+    def _stuck_error(self, state: Gst.State) -> PlayerSetStateError:
+        return PlayerSetStateError(
+            f"Could not set the pipeline to {state.value_nick} within "
+            f"{self.state_timeout:g} s{self._changing_in()}"
+        )
+
+    def _failed(self, state: Gst.State) -> PlayerSetStateError:
+        """The error of a failed change, naming the elements that failed it when they still
+        say so: undoing a failed change up, GstBin may reset what they return."""
+        if state == Gst.State.NULL and self.state != Gst.State.NULL:
+            self.bus.set_flushing(False)  # GstPipeline flushes it for NULL, even when it fails
+        failure = Gst.StateChangeReturn.FAILURE
+        elements = _retrying(self.pipeline.iterate_recurse)
+        failed = [e for e in elements if e.get_state(0)[0] == failure]
+        leaves = [e for e in failed if not isinstance(e, Gst.Bin)] or failed
+        culprits = f": {_names(leaves)} failed" if leaves else ""
+        return PlayerSetStateError(f"Could not set the pipeline to {state.value_nick}{culprits}")
+
+    def _set_null(self) -> None:
+        """Set the pipeline to NULL on the loop, after an error (unless it is stuck)."""
+        if self._stuck is not None and not self._stuck.done():
+            return
         old = self.state
-        ret = self.pipeline.set_state(Gst.State.NULL)
-        if (
-            old != Gst.State.NULL
-            and ret != Gst.StateChangeReturn.FAILURE
-            and self.pipeline.get_auto_flush_bus()
-        ):
+        if self.pipeline.set_state(Gst.State.NULL) == Gst.StateChangeReturn.FAILURE:
+            logger.warning("%s", self._failed(Gst.State.NULL))
+        else:
+            self._published_null(old)
+
+    def _published_null(self, old: Gst.State) -> None:
+        """Publish the `StateChanged` to NULL the bus cannot: it flushes its messages on
+        the way down (unless `auto-flush-bus` is off)."""
+        if old != Gst.State.NULL and self.pipeline.get_auto_flush_bus():
             self._publish(events.StateChanged(old, Gst.State.NULL, Gst.State.VOID_PENDING))
-        return ret
 
     def _interrupt_waits(self, state: Gst.State) -> None:
         """Fail the waits a change to `state` ends: other targets, and EOS on NULL."""

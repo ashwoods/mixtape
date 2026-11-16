@@ -69,6 +69,10 @@ Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI d
 
     docker compose run --rm test
 
+`tests/test_gst_c_crash.py` runs `mixtape run` against the failing elements of
+[gst-c-crash](https://github.com/ashwoods/gst-c-crash) and skips unless they are found: build it
+and run `GST_PLUGIN_PATH=<build>/gst scripts/check`.
+
 ## Command line
 `mixtape run` plays a `gst-launch` style pipeline until EOS or an error, like
 `gst-launch-1.0 -e`; the description can be one quoted string or several words:
@@ -76,9 +80,10 @@ Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI d
     mixtape run "videotestsrc num-buffers=150 ! autovideosink"
     python -m mixtape run -v videotestsrc ! fakesink
 
-It exits 0 on EOS, 1 on a pipeline error, 2 on a bad description or usage. The first Ctrl-C
-(or SIGTERM) sends EOS and stops; a second one stops at once and exits 130, and a third kills it if
-GStreamer blocks while stopping. `-v` logs at info
+It exits 0 on EOS, 1 on a pipeline error or a pipeline that cannot stop, 2 on a bad description
+or usage. The first Ctrl-C (or SIGTERM) sends EOS and stops; a second one stops at once and exits
+130, and a third kills it. A pipeline whose streaming thread hangs gets 5 s for the EOS and 5 s
+to stop, then `mixtape run` exits 1 naming the elements still changing state. `-v` logs at info
 level and shows the error's debug string, `-vv` logs at debug level. On macOS, `mixtape run`
 runs the main run loop so video windows appear.
 

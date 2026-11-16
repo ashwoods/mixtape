@@ -37,6 +37,16 @@ This release breaks the API.
 - Fix: EOS flags were never reset, so a second `play_until_eos` returned at once.
 - Fix: teardown from `__del__` failed outside a running loop.
 - Fix: `Player(...)` raised on Python 3.14+ outside a running loop.
+- Fix: a hung streaming thread froze the loop, so neither Ctrl-C nor `--http` worked: state
+  changes run on a thread, and one down to READY or NULL that takes longer than
+  `state_timeout` (5 s) raises `PlayerSetStateError` naming the elements still changing; the
+  player refuses changes until it finishes, and `teardown` leaves such a pipeline.
+- Fix: a failed stop exited 0, and left the bus flushing so the next play hung; failed state
+  changes name the elements that failed them, when those still say so. `mixtape run` exits 1 when the pipeline cannot
+  stop. `async with player` raises a stop that fails.
+- New: the `leaks` feature warns about the objects still alive once the pipeline is in NULL;
+  `teardown` detaches the features after setting NULL. A page connecting over `--http` gets
+  the error that stopped the pipeline. `error` is cleared when the pipeline starts again.
 - Packaging moved to `pyproject.toml` managed by uv; Python 3.12+
 - Checks are ruff, mypy and pytest, run by `scripts/check`; CI moved to GitHub Actions
 - Docker test image based on Ubuntu 24.04 packages

@@ -14,6 +14,11 @@ import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
 
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+
 from . import features
 from .events import Error, EventStream
 from .exceptions import (
@@ -336,9 +341,10 @@ async def _play(
             print("Interrupt: stopping (EOS)…", file=sys.stderr)
             stopping = loop.create_task(player.stop(eos=True))
             interrupted.set()
-        else:
-            # GStreamer can block in the teardown that follows (as it does in gst-launch):
-            # a third Ctrl-C then kills the process, as the default handler does.
+        elif interrupts == 2:
+            # The teardown that follows waits for a hung pipeline for up to its
+            # `state_timeout`: a third Ctrl-C then kills the process, as the default does.
+            print("Interrupt: stopping now (Ctrl-C again to kill)…", file=sys.stderr)
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             if main_task is not None:
                 main_task.cancel()
@@ -380,7 +386,7 @@ async def _play(
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except PlayerSetStateError as exc:
-        if interrupts:  # the stop could not finish an EOS, but it was asked for
+        if interrupts and player.state == Gst.State.NULL:  # the stop ended a wait, as asked
             return 0
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -390,6 +396,8 @@ async def _play(
         for task in (pump, stopping):
             if task is not None:
                 task.cancel()
+        if stopping is not None and stopping.done() and not stopping.cancelled():
+            stopping.exception()  # the teardown raised it again, or it did not matter
     return 0
 
 

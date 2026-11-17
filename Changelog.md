@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.8.0 (unreleased)
 
 ### Added
+- `mixtape inspect --json` and `GET /api/model` have `features`, the names of the enabled
+  features.
+- `mixtape --version` prints the versions of mixtape, GStreamer, PyGObject and Python, with
+  `not found` for what is missing, for a bug report.
+- A target can be a file: `mixtape run path/to/file.py:Class`; its folder is put on `sys.path`.
 - `GraphChanged` and `ModelChanged` events: the player follows the pipeline's shape as it runs
   (elements a decodebin adds, pads, links, caps) and publishes the new `graph()`, and the new
   `describe()` when the exposed elements change, at most every `Player.shape_interval` (0.1 s).
@@ -32,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tests.
 
 ### Changed
+- The command line is built with Typer: a usage error prints `error: …`, the usage line of the
+  command and a pointer to its `--help`, and exits 2. Options go anywhere, `-v` before and after
+  the command still adds up.
+- `mixtape perf compare --json` (and `compare.json` of `--mixtape-perf-baseline`): `added` and
+  `removed` are lists of objects with the keys that name what changed (`{"test"}`,
+  `{"test", "metric"}`, or `{"metric", "subject"}`) and not strings of `"metric  subject"`;
+  `threshold` (a fraction) is now `threshold_percent`, as `--threshold` is given; the result has
+  `base` and `new`, the folders as given.
+- `--feature NAME,nope=1` says which options the feature has: `feature 'perf' has no option
+  'nope'; its options: out (path), interval (number > 0)`.
+- `mixtape run demo:Demo extra words` is refused, as a player class takes no description words;
+  it was read as a description.
 - The README is an overview with a quick start; the reference moved to the documentation site.
 - `WS /api/events` opens with a `model` message, then `values` and `graph`: a client that
   expects `values` first must skip the `model` one.

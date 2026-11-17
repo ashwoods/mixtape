@@ -162,7 +162,8 @@ $ mixtape inspect "videotestsrc ! x264enc name=enc ! fakesink" | grep bitrate
 
 `--json` prints the same model as JSON: each property has its JSON Schema, and each command
 the schema of its parameters and of its result. It is what `GET /api/model` of the
-[HTTP API](http.md) returns. This is the `gain` property of the player above:
+[HTTP API](http.md) returns, with the names of the enabled `features`. From 0.8, fields are only
+added, never renamed or removed. This is the `gain` property of the player above:
 
 ```console
 $ cd examples && mixtape inspect --json demo:Demo \

@@ -134,10 +134,12 @@ runs on one machine):
 --8<-- "examples/proxy_link.py:eos"
 ```
 
-And the base time is what keeps the two on one timeline. Here the producer plays for 1.5
-seconds before the consumer starts. With a shared base time the consumer's first frame comes in
-well under that; with a base time of its own, its sink, which waits for the clock, holds the
-frame back until the consumer has been running as long as the producer had:
+The base time is what keeps the two on one timeline. Here the producer plays for 1.5 seconds
+before the consumer starts. With a shared base time, the consumer's first frame comes in well
+under that.
+
+With a base time of its own, the consumer's sink waits for the clock and holds the frame back
+until the consumer has been running as long as the producer had:
 
 ```python
 --8<-- "examples/proxy_link.py:lag"
@@ -156,7 +158,8 @@ description has none. The producer has to be listening before the consumer start
 
 Each process is a `mixtape run --http`, with its own control page and its own `perf`. Run the
 two commands in two terminals; the block below runs both in one shell, asks each process for
-the pads its `perf` measured, and stops them:
+the pads its `perf` measured, and stops them in its last command. Their own output, the address each one serves,
+goes to `/dev/null`:
 
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
@@ -180,27 +183,22 @@ flowchart LR
 ```console
 $ dir=$(mktemp -d)
 $ mixtape run --http 8101 --feature perf \
-    "videotestsrc is-live=true name=cam ! unixfdsink socket-path=$dir/cam.sock" &
+    "videotestsrc is-live=true name=cam ! unixfdsink socket-path=$dir/cam.sock" > /dev/null 2>&1 &
 $ producer=$!
 $ until [ -S $dir/cam.sock ]; do sleep 0.1; done
 $ mixtape run --http 8102 --feature perf \
-    "unixfdsrc name=feed socket-path=$dir/cam.sock ! videoconvert name=conv ! fakesink" &
+    "unixfdsrc name=feed socket-path=$dir/cam.sock ! videoconvert name=conv ! fakesink" \
+    > /dev/null 2>&1 &
 $ consumer=$!
 $ sleep 3
-$ echo "producer, :8101:"; curl -s localhost:8101/api/properties | grep -o '"[a-z]*:src"' | sort -u
-$ echo "consumer, :8102:"; curl -s localhost:8102/api/properties | grep -o '"[a-z]*:src"' | sort -u
-$ kill $producer $consumer
-$ wait
-$ rm -r $dir
-Serving on http://127.0.0.1:8101
-Serving on http://127.0.0.1:8102
-producer, :8101:
+$ for port in 8101 8102; do echo "port $port:"; \
+    curl -s 127.0.0.1:$port/api/properties | grep -o '"[a-z]*:src"' | sort -u; done; \
+    kill $producer $consumer; wait; rm -r $dir
+port 8101:
 "cam:src"
-consumer, :8102:
+port 8102:
 "conv:src"
 "feed:src"
-Interrupt: stopping (EOS)…
-Interrupt: stopping (EOS)…
 ```
 
 Open the two addresses and each page has the graph and the charts of its own pipeline. Each
@@ -215,9 +213,8 @@ picks one.
 
 The tracers are another matter. GStreamer creates them once per process, when it initialises,
 and mixtape's `perf`, `leaks` and `tracers` features read them: they are **one per process**,
-not one per player. For `perf` that is the collector in `mixtape/perf/collect.py`, one per
-process, and every recorder (`mixtape/perf/record.py`) gets every sample the process makes.
-So with `perf` on two players in one process:
+not one per player. For `perf` that means one collector per process, and every recorder gets
+every sample the process makes. So with `perf` on two players in one process:
 
 - each player records both pipelines, and shows both on its page;
 - elements of the same name in the two pipelines share one subject: two queues named `q` are
@@ -262,6 +259,6 @@ player at a time can track.
 To measure two pipelines apart, run them in two processes, as in the unixfd example above: each
 has its own tracers, its own `perf` and its own control page. Names are free to repeat there.
 
-A way to group the players of a process or of several, one control page and one `perf` for
-the session as a whole, is a feature mixtape may get one day (a "Session"). Nothing of it
-exists today.
+One option under consideration is a way to group the players of a process or of several, with
+one control page and one `perf` for the session as a whole (a "Session"). It is not planned, and
+nothing of it exists today.

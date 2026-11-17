@@ -122,11 +122,11 @@ SAMPLES: list[Sample] = [
     run(
         PAGE,
         "live",
-        "--feature perf --http 8000",
+        "--feature perf --http 8047",
         elements=ENCODER,
         hangs=True,
         timeout=10,
-        expect=("Serving on http://127.0.0.1:8000",),
+        expect=("Serving on http://127.0.0.1:8047",),
         exact=True,
     ),
     run(PAGE, "late", "python3 examples/perf_late.py", exact=True),

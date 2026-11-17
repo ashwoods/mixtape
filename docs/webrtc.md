@@ -38,7 +38,8 @@ frames arrived are properties.
     $ export GST_PLUGIN_PATH=~/.cache/gst-rs-plugins
     ```
 
-Check that both elements are there:
+Check that both elements are there. Without them, a pipeline fails with
+`no element "webrtcsink"`: see [Troubleshooting](troubleshooting.md#no-element-webrtcsink).
 
 ```console
 $ gst-inspect-1.0 --exists webrtcsink && gst-inspect-1.0 --exists webrtcsrc && echo found
@@ -134,8 +135,8 @@ deadlock when a peer's status arrives just as it stops, and it would take the lo
 
 ### The properties
 
-What the client knows is read-only properties. A control page shows them, and the client says
-when one changes with `notify`.
+What the client knows is in read-only properties, which a control page shows. When one changes,
+the client calls `notify` so that the page shows the new value.
 
 ```python
 --8<-- "examples/webrtc_client.py:props"
@@ -202,7 +203,7 @@ flowchart TB
 ### The host
 
 A `Host` is a client that also runs the signalling server. It exists so that
-`mixtape run examples.webrtc_client:Host` starts one, and it keeps the server quiet: the
+`mixtape run examples/webrtc_client.py:Host` starts one, and it keeps the server quiet: the
 plugin logs a line for every peer that joins.
 
 ```python
@@ -225,11 +226,13 @@ each with its page, make a call you can drive from the browser: open the client'
 `call` the host from its commands.
 
 ```console
-$ mixtape run examples.webrtc_client:Host --http 8000 &
-$ mixtape run examples.webrtc_client:Client --http 8001
-Serving on http://127.0.0.1:8000
-Serving on http://127.0.0.1:8001
+$ mixtape run examples/webrtc_client.py:Host --http 8047 > /dev/null &
+$ mixtape run examples/webrtc_client.py:Client --http 8048
+Serving on http://127.0.0.1:8048
 ```
+
+The first command is in the background, with its output silenced; in a terminal of yours,
+run each in a terminal of its own and the host says `Serving on http://127.0.0.1:8047`.
 
 The page lists the properties of the last section, and the elements of the pipeline: `out`,
 the sink with its signaller, and during a call `in`, the source with its webrtcbin, and the
@@ -242,8 +245,8 @@ up.
 the start, and is measured as any pipeline is:
 
 ```console
-$ mixtape run examples.webrtc_client:Host --http 8000 --feature perf
-Serving on http://127.0.0.1:8000
+$ mixtape run examples/webrtc_client.py:Host --http 8047 --feature perf
+Serving on http://127.0.0.1:8047
 ```
 
 The receiving side is different: `call` adds its elements after perf has started, so perf has no

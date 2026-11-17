@@ -1,7 +1,7 @@
 """A WebRTC client: publishes a video source and plays another client's. Two of them make a call.
 
-mixtape run examples.webrtc_client:Host --http 8000
-mixtape run examples.webrtc_client:Client --http 8001
+mixtape run examples/webrtc_client.py:Host --http 8047
+mixtape run examples/webrtc_client.py:Client --http 8048
 python3 examples/webrtc_client.py --help
 """
 

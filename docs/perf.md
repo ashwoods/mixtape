@@ -10,7 +10,8 @@ falls behind. We record it, read what `perf` wrote, find the cause, fix it, prov
 then keep it fixed with budgets in a test suite.
 
 The recorder needs `x264enc`, from `gst-plugins-ugly` (Homebrew's `gstreamer` has it; on Ubuntu
-install `gstreamer1.0-plugins-ugly`). `perf` also reads three tracers of `gst-plugins-rs`:
+install `gstreamer1.0-plugins-ugly`; without it, `no element "x264enc"`: see
+[Troubleshooting](troubleshooting.md#no-element-x264enc)). `perf` also reads three tracers of `gst-plugins-rs`:
 `queue-levels`, `buffer-lateness` and `pad-push-timings`. Without them their metrics (the
 queues' fill, lateness and push time) are left out, with a warning.
 
@@ -61,12 +62,15 @@ $ mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
     --feature perf,out=/tmp/perf-slow
 $ python3 examples/perf_worst.py /tmp/perf-slow
 metric            subject        p95     max
-element.latency   enc           9.4s    9.5s
-pipeline.latency  src→sink     10.0s   10.1s
+element.latency   enc           3.7s    3.9s
+pipeline.latency  src→sink      3.9s    4.1s
 queue.fill        q             100%    100%
-process.cpu       process        82%     87%
-thread.cpu        q:src          76%     82%
+process.cpu       process       103%    104%
+thread.cpu        q:src          94%     95%
 ```
+
+Your numbers will differ: they depend on the machine and on what else it is doing. What to read
+is the shape, as the next sections do.
 
 The folder has more than the summary:
 
@@ -144,35 +148,41 @@ $ mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
     ! x264enc name=enc speed-preset=ultrafast tune=zerolatency threads=1 bitrate=4000 \
     ! mp4mux name=mux ! filesink name=sink location=/tmp/rec.mp4" \
     --feature perf,out=/tmp/perf-fast
-$ mixtape perf compare /tmp/perf-slow /tmp/perf-fast
-$ echo "exit status $?"
+$ mixtape perf compare /tmp/perf-slow /tmp/perf-fast; echo "exit status $?"
 Improvements:
-  pipeline.latency  max  src→sink     7.63 s → 111 ms    -99%
-  pipeline.latency  p95  src→sink     7.52 s → 73.1 ms   -99%
-  element.latency  max   enc          7.17 s → 51.3 ms   -99%
-  element.latency  p95   enc          7.05 s → 29.1 ms   -100%
-  element.latency  max   q            747 ms → 87.9 ms   -88%
-  element.latency  p95   q            592 ms → 50.7 ms   -91%
-  element.latency  max   capsfilter0  3.76 ms → 1.45 ms  -61%
-  thread.cpu  max        q:src        85.8% → 41.9%      -51%
-  thread.cpu  p95        q:src        84.8% → 41.7%      -51%
+  pipeline.latency  max  src→sink     4.06 s → 20.9 ms                -99%
+  pipeline.latency  p95  src→sink     3.93 s → 17.2 ms                -99%
+  element.latency   max  enc          3.87 s → 16.7 ms                -99%
+  element.latency   p95  enc          3.73 s → 12.4 ms                -99%
+  element.latency   max  q            353 ms → 13.3 ms                -96%
+  element.latency   p95  q            282 ms → 8.36 ms                -97%
+  queue.bytes       p95  q            11059200 bytes → 5529600 bytes  -50%
+  queue.time        p95  q            66.7 ms → 33.3 ms               -50%
+  element.latency   max  capsfilter0  2.48 ms → 262 µs                -89%
+  element.latency   max  mux          2.61 ms → 1.17 ms               -55%
+  thread.cpu        max  q:src        94.6% → 25.0%                   -74%
+  thread.cpu        p95  q:src        94.4% → 24.8%                   -74%
+  process.cpu       max  process      104% → 45.3%                    -57%
+  process.cpu       p95  process      103% → 44.3%                    -57%
+  queue.fill        p95  q            100% → 52.7%                    -47%
 
-0 regressions, 9 improvements, 0 added, 0 removed (threshold 50%, 32 values compared)
+0 regressions, 15 improvements, 0 added, 0 removed (threshold 50%, 32 values compared)
 exit status 0
 ```
 
 The latency of the whole pipeline fell by two orders of magnitude, and the encoder is no longer
 the busiest thing in the process. A value counts only when it changed by more than the threshold
 (`--threshold`, default 50%) of the base *and* by more than a floor of its unit: 100 µs, 5 points
-of CPU, 5% of a queue. It compares the p95 and max of the metrics where a higher value is
-worse and which are steady enough between two runs (latencies, CPU and queue levels; not rates,
-lateness or push time: bound those with a budget).
+of CPU, 5% of a queue. It compares the p95 and the max of each latency, each CPU use and each
+queue level, where a higher value is worse. It leaves out rates, lateness and push time, which
+vary too much between two runs: bound those with a budget. The
+[command line page](cli.md#compare-two-runs) has its options and its exit status.
 
 !!! note "On a busy machine"
     A short run ends with a window of a fraction of a second, in which a few milliseconds of
     CPU of a thread look large. On a busy machine the compare above can list the CPU of
-    `other` or `asyncio_0`, which have nothing to do with the encoder, as regressions, and
-    exit 1. The numbers of the latency are not affected.
+    `other` or `asyncio_0`, which have nothing to do with the encoder, or the latency of `mux`,
+    as regressions, and exit 1. The numbers of the latency are not affected.
 
 ## Other sources
 
@@ -202,7 +212,7 @@ a camera or a server:
 === "RTSP"
 
     ```console
-    $ mixtape run "rtspsrc location=rtsp://192.168.1.20/stream latency=200 \
+    $ mixtape run "rtspsrc location=rtsp://192.0.2.10/stream latency=200 \
         ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert name=conv \
         ! queue name=q ! x264enc name=enc speed-preset=ultrafast tune=zerolatency \
         ! mp4mux name=mux ! filesink name=sink location=/tmp/cam.mp4" \
@@ -226,8 +236,8 @@ $ mixtape run "videotestsrc name=src is-live=true \
     ! video/x-raw,width=1280,height=720,framerate=30/1 ! queue name=q \
     ! x264enc name=enc speed-preset=ultrafast tune=zerolatency threads=1 bitrate=4000 \
     ! mp4mux name=mux ! filesink name=sink location=/tmp/rec.mp4" \
-    --feature perf --http 8000
-Serving on http://127.0.0.1:8000
+    --feature perf --http 8047
+Serving on http://127.0.0.1:8047
 ```
 
 ## First in the process
@@ -235,7 +245,8 @@ Serving on http://127.0.0.1:8000
 GStreamer's tracers exist only if GStreamer creates them when it initialises, once per process.
 `mixtape run` and `Player.from_description` prepare the features before anything initialises
 GStreamer, so a `perf` they build works. A program that initialised GStreamer first, or imported
-something that did, cannot have it, and the error says so:
+something that did, cannot have it, and the error says so
+([Troubleshooting](troubleshooting.md#gst-tracers) has the fix):
 
 ```python
 --8<-- "examples/perf_late.py:late"
@@ -340,31 +351,34 @@ and the new one runs only the 360p test with the slow one:
 ```console
 $ pytest -q examples/recorder_suite --mixtape-perf /tmp/perf-base > /dev/null
 $ RECORDER_ENCODER="speed-preset=slow" pytest -q examples/recorder_suite -k 360p \
-    --mixtape-perf /tmp/perf-new --mixtape-perf-baseline /tmp/perf-base
-$ echo "exit status $?"
+    --mixtape-perf /tmp/perf-new --mixtape-perf-baseline /tmp/perf-base; echo "exit status $?"
 .                                                                        [100%]
 mixtape perf: 1 of 1 tests measured, index at /tmp/perf-new/index.html
 ============================= mixtape perf compare =============================
 /tmp/perf-base → /tmp/perf-new
 Regressions:
-  examples/recorder_suite/test_recorder.py::test_records_360p  element.latency  max   enc       12.0 ms → 1.85 s               +15262%
-  examples/recorder_suite/test_recorder.py::test_records_360p  pipeline.latency  max  src→sink  16.0 ms → 1.85 s               +11432%
-  examples/recorder_suite/test_recorder.py::test_records_360p  element.latency  p95   enc       9.95 ms → 1.74 s               +17403%
-  examples/recorder_suite/test_recorder.py::test_records_360p  pipeline.latency  p95  src→sink  14.3 ms → 1.74 s               +12088%
-  examples/recorder_suite/test_recorder.py::test_records_360p  queue.bytes  max       q         4147200 bytes → 6912000 bytes  +67%
-  examples/recorder_suite/test_recorder.py::test_records_360p  queue.time  max        q         100 ms → 167 ms                +67%
-  examples/recorder_suite/test_recorder.py::test_records_360p  thread.cpu  max        q:src     14.2% → 98.0%                  +591%
-  examples/recorder_suite/test_recorder.py::test_records_360p  process.cpu  max       process   24.7% → 105%                   +324%
-  examples/recorder_suite/test_recorder.py::test_records_360p  thread.cpu  p95        q:src     14.2% → 91.9%                  +549%
-  examples/recorder_suite/test_recorder.py::test_records_360p  process.cpu  p95       process   24.6% → 98.6%                  +301%
-  examples/recorder_suite/test_recorder.py::test_records_360p  queue.fill  max        q         39.6% → 65.9%                  +66%
-  examples/recorder_suite/test_recorder.py::test_records_360p  queue.buffers  max     q         3 buffers → 5 buffers          +67%
+  examples/recorder_suite/test_recorder.py::test_records_360p  element.latency   max  enc       7.78 ms → 1.86 s               +23820%
+  examples/recorder_suite/test_recorder.py::test_records_360p  pipeline.latency  max  src→sink  11.5 ms → 1.86 s               +16127%
+  examples/recorder_suite/test_recorder.py::test_records_360p  element.latency   p95  enc       7.25 ms → 1.85 s               +25370%
+  examples/recorder_suite/test_recorder.py::test_records_360p  pipeline.latency  p95  src→sink  10.1 ms → 1.85 s               +18115%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.bytes       max  q         2764800 bytes → 6912000 bytes  +150%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.time        max  q         66.7 ms → 167 ms               +150%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.bytes       p95  q         2764800 bytes → 5529600 bytes  +100%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.time        p95  q         66.7 ms → 133 ms               +100%
+  examples/recorder_suite/test_recorder.py::test_records_360p  process.cpu       max  process   23.5% → 115%                   +391%
+  examples/recorder_suite/test_recorder.py::test_records_360p  process.cpu       p95  process   23.4% → 109%                   +365%
+  examples/recorder_suite/test_recorder.py::test_records_360p  thread.cpu        max  q:src     14.2% → 71.9%                  +406%
+  examples/recorder_suite/test_recorder.py::test_records_360p  thread.cpu        p95  q:src     14.2% → 70.8%                  +399%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.fill        max  q         26.4% → 65.9%                  +150%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.fill        p95  q         26.4% → 52.7%                  +100%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.buffers     max  q         2 buffers → 5 buffers          +150%
+  examples/recorder_suite/test_recorder.py::test_records_360p  queue.buffers     p95  q         2 buffers → 4 buffers          +100%
 
 Removed:
   examples/recorder_suite/test_recorder.py::test_records_720p
 
-12 regressions, 0 improvements, 0 added, 1 removed (threshold 50%, 16 values compared)
-1 passed, 1 deselected in 2.56s
+16 regressions, 0 improvements, 0 added, 1 removed (threshold 50%, 16 values compared)
+1 passed, 1 deselected in 3.27s
 exit status 1
 ```
 

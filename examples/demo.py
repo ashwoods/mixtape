@@ -1,6 +1,6 @@
-"""A player with an alias of an element property and a command: `mixtape inspect demo:Demo`.
+"""A player with an alias of an element property and a command: `mixtape inspect examples/demo.py:Demo`.
 
-cd examples && mixtape inspect demo:Demo
+mixtape inspect examples/demo.py:Demo
 """
 
 # --8<-- [start:player]

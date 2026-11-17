@@ -7,7 +7,7 @@ PAGE = "two-pipelines.md"
 
 def separate_pads(out: str) -> None:
     """Each process reports the pads of its own pipeline."""
-    producer, _, consumer = out.partition("consumer, :8102:")
+    producer, _, consumer = out.partition("port 8102:")
     assert '"cam:src"' in producer and '"feed:src"' not in producer, out
     assert '"feed:src"' in consumer and '"conv:src"' in consumer, out
     assert '"cam:src"' not in consumer, out
@@ -30,7 +30,7 @@ SAMPLES: list[Sample] = [
         PAGE,
         "unixfd",
         "mktemp -d",
-        expect=("Serving on http://127.0.0.1:8101", "Serving on http://127.0.0.1:8102"),
+        expect=("port 8101:", "port 8102:"),
         check=separate_pads,
         check_shown=True,
         elements=("unixfdsink", "unixfdsrc"),

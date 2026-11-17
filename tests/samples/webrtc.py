@@ -54,19 +54,19 @@ SAMPLES: list[Sample] = [
     run(
         PAGE,
         "http",
-        "Client --http 8001",
+        "Client --http 8048",
         hangs=True,
         timeout=10,
-        expect=("Serving on http://127.0.0.1:8000", "Serving on http://127.0.0.1:8001"),
+        expect=("Serving on http://127.0.0.1:8048",),
         elements=("webrtcsink", "nicesrc"),
     ),
     run(
         PAGE,
         "perf",
-        "--http 8000 --feature perf",
+        "--http 8047 --feature perf",
         hangs=True,
         timeout=8,
-        expect=("Serving on http://127.0.0.1:8000",),
+        expect=("Serving on http://127.0.0.1:8047",),
         elements=("webrtcsink", "nicesrc", "queue-levels"),
     ),
 ]

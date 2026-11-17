@@ -91,12 +91,12 @@ runs the main run loop so video windows appear.
 `mixtape perf compare BASE NEW` finds what got slower between two sessions of
 `pytest --mixtape-perf` (folders with an `index.json`) or two single runs (folders with a
 `summary.json`, as `mixtape run --feature perf,out=DIR` writes). It compares the p95 and max of
-the metrics where higher is worse (latencies, lateness, push time, CPU, queue levels; not
-buffers/s, bitrate or the interval): for each test the worst of its subjects in a session, for
+the metrics where higher is worse and that are steady enough (latencies, CPU, queue levels;
+not buffers/s, bitrate or the interval, nor lateness and push time, which swing by tens of ms
+between two runs of a short test: bound those with a budget): for each test the worst of its subjects in a session, for
 each subject in a run. A value is a regression when it grew by more than `--threshold` percent
 (default 50) of the base *and* by more than a floor of its unit (100 µs, 5 points of CPU, 5% of
-a queue, one buffer, 4 KiB; 50 ms for `pad.push` and `pad.lateness`, which swing by tens of
-ms between runs of short tests; `FLOORS` and `METRIC_FLOORS` in `mixtape/perf/compare.py`). It prints the regressions,
+a queue, one buffer, 4 KiB; `FLOORS` in `mixtape/perf/compare.py`). It prints the regressions,
 the improvements beyond the same bounds, what only one side has (added or removed, never a
 regression) and a line of counts, and exits 1 on a regression, 2 when a folder is not one of
 those. `--json` prints the comparison as JSON instead.
@@ -348,7 +348,7 @@ The built-in ones:
   gst-plugins-rs `buffer-lateness`, `pad-push-timings` and `queue-levels`, left out with a
   warning when they are not installed; `process.cpu`; and `thread.cpu` by thread name (on
   Linux and macOS; GStreamer names a streaming thread after its pad, `q:src`, and the
-  unnamed ones are `other`). No Python runs on a streaming
+  unnamed ones are `other`; idle ones, under 0.1% of a core, are left out). No Python runs on a streaming
   thread: the core tracers write to the debug log, which a thread reads from GStreamer's ring
   buffer logger, in memory (it replaces the default logger and echoes the lines that are not
   the tracers' to stderr; with a `GST_DEBUG_FILE` in the environment the default logger stays,

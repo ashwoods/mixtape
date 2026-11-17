@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 OTHER = "other"
 """The subject of the threads without a name of their own"""
 
+IDLE = 0.1
+"""Percent of one core under which the threads of a name get no sample in a window"""
+
 _PROC_PIDTHREADINFO, _PROC_PIDLISTTHREADS = 5, 6
 
 
@@ -71,7 +74,7 @@ class ThreadCpu:
     def sample(self, t_ns: int) -> list[Sample]:
         """`thread.cpu` of each thread name since the last call, at `t_ns`: the first call
         only takes the baseline. A thread that came in between counts from zero, one that
-        left is not counted, as what it used is not known."""
+        left is not counted, as what it used is not known; a name under `IDLE` is left out."""
         if self._read is None:
             return []
         threads = self._read()
@@ -85,7 +88,11 @@ class ThreadCpu:
             before = last[1].get(tid, 0)
             used = ns - before if ns >= before else ns  # an id reused by a new thread
             percents[subject] = percents.get(subject, 0.0) + used / 1e9 / (wall - last[0]) * 100
-        return [Sample(t_ns, "thread.cpu", subject, value) for subject, value in percents.items()]
+        return [
+            Sample(t_ns, "thread.cpu", subject, value)
+            for subject, value in percents.items()
+            if value >= IDLE  # an idle thread is no line on the chart
+        ]
 
     def _linux(self) -> dict[int, tuple[str, int]]:
         """Every thread by id: its name and CPU time in ns, from `/proc/self/task`"""

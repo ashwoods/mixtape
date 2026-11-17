@@ -1,11 +1,11 @@
 """Compare two runs of the perf measuring, to see what got slower: two sessions of the pytest
 plugin (folders with an `index.json`) or two single runs (folders with a `summary.json`).
 
-Only the metrics where a higher value is worse (`Metric.higher_is_worse`) are compared, and by
-their p95 and max: a session by the worst of each test's subjects, a run by each subject. A
-value is a regression when it grew by more than `threshold` of the base *and* by more than the
-floor of its unit, so that a big relative change of something tiny (a latency of 50 µs that
-reads 90 µs) is not one; an improvement is the same, the other way."""
+Only the metrics where a higher value is worse and that are steady enough (`Metric.compared`)
+are compared, and by their p95 and max: a session by the worst of each test's subjects, a run
+by each subject. A value is a regression when it grew by more than `threshold` of the base
+*and* by more than the floor of its unit, so that a big relative change of something tiny (a
+latency of 50 µs that reads 90 µs) is not one; an improvement is the same, the other way."""
 
 import json
 from pathlib import Path
@@ -22,16 +22,6 @@ At 25% two runs of the same code flagged the CPU of short tests (`tests/test_pla
 FLOORS = {"ns": 100_000.0, "%": 5.0, "ratio": 0.05, "buffers": 1.0, "bytes": 4096.0}
 """How much a value must change in absolute terms to count, by unit (the unit's own: 100 µs, 5
 percentage points, 5% of a queue, one buffer, a page); the one place to tune them"""
-
-METRIC_FLOORS = {"pad.push": 50e6, "pad.lateness": 50e6}
-"""The floor of a metric, where it is not its unit's: a push takes what the sink waits for the
-clock too, and the lateness of a short test swings by tens of ms between two runs of the same
-code (`tests/test_player.py`)"""
-
-
-def floor(metric: str, unit: str) -> float:
-    """How much the value of `metric` (in `unit`) must change to count."""
-    return METRIC_FLOORS.get(metric, FLOORS.get(unit, 0.0))
 
 
 STATS = ("p95", "max")
@@ -57,14 +47,14 @@ def _values(document: dict[str, Any], what: str) -> dict[tuple[str, ...], dict[s
         for test in document["tests"]:
             for metric, worst in test["metrics"].items():
                 # a metric of a newer version is not known: skipped
-                if metric in METRICS and METRICS[metric].higher_is_worse:
+                if metric in METRICS and METRICS[metric].compared:
                     found[test["id"], metric] = {
                         "unit": worst["unit"],
                         **{stat: (worst[stat]["value"], worst[stat]["subject"]) for stat in STATS},
                     }
     else:
         for metric, entry in document["metrics"].items():
-            if metric in METRICS and METRICS[metric].higher_is_worse:
+            if metric in METRICS and METRICS[metric].compared:
                 for subject, stats in entry["subjects"].items():
                     found[metric, subject] = {
                         "unit": entry["unit"],
@@ -113,14 +103,14 @@ def compare(
                 "base": was,
                 "new": now,
             }
-            least = floor(change["metric"], unit)
+            least = FLOORS.get(unit, 0.0)
             if now - was > max(threshold * abs(was), least):
                 regressions.append(change)
             elif was - now > max(threshold * abs(now), least):
                 improvements.append(change)
 
-    def size(change: dict[str, Any]) -> float:  # how big it is, in floors of its metric
-        return abs(change["new"] - change["base"]) / (floor(change["metric"], change["unit"]) or 1)
+    def size(change: dict[str, Any]) -> float:  # how big it is, in floors of its unit
+        return abs(change["new"] - change["base"]) / (FLOORS.get(change["unit"]) or 1)
 
     regressions.sort(key=size, reverse=True)
     improvements.sort(key=size, reverse=True)

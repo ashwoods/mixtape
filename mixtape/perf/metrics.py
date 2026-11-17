@@ -6,8 +6,8 @@ from typing import NamedTuple
 
 class Sample(NamedTuple):
     """One measurement: at `t_ns` (nanoseconds since GStreamer initialised, the clock of its
-    tracers), `metric` of `subject` (an element, `element:pad`, `src→sink` or `process`)
-    had `value`, in the unit of the metric."""
+    tracers), `metric` of `subject` (an element, `element:pad`, `src→sink`, `process` or a
+    thread's name) had `value`, in the unit of the metric."""
 
     t_ns: int
     metric: str
@@ -51,6 +51,11 @@ METRICS: dict[str, Metric] = {
         "(queue-levels)",
     ),
     "process.cpu": Metric("%", "CPU time of the process over wall time; 100 is one core"),
+    "thread.cpu": Metric(
+        "%",
+        "CPU time of a thread over wall time; 100 is one core. Threads are named by GStreamer "
+        "after their pad (`q:src`); unnamed ones are `other`",
+    ),
 }
 """Every metric by name, with its unit: the live page and the report key on these names"""
 

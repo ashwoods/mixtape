@@ -18,6 +18,7 @@ const CHARTS = [
   { metric: "element.latency", title: "Element latency", stat: "mean" },
   { metric: "queue.fill", title: "Queue fill", stat: "max" },
   { metric: "process.cpu", title: "CPU", stat: "mean" },
+  { metric: "thread.cpu", title: "Thread CPU", stat: "mean", more: true },
   { metric: "pad.push", title: "Push time", stat: "mean", more: true },
   { metric: "pad.lateness", title: "Lateness", stat: "mean", more: true },
   { metric: "pad.bitrate", title: "Bitrate", stat: "mean", more: true },

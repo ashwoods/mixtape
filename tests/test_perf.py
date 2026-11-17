@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 from typing import Any
 
@@ -248,6 +249,61 @@ def test_the_reader_takes_only_the_new_lines_in_time_order() -> None:
     assert tail.lost == 0
 
 
+def test_the_reader_anchors_on_a_message_that_ends_in_a_newline() -> None:
+    """The ring keeps the newlines of a message: `multi\nline\n` is stored with one more."""
+    rings, echo = Rings(), io.StringIO()
+    tail = ring_tail(rings, echo)
+    try:
+        rings.log("0xa", other(1, "0xa", "multi\nline\n"))
+        tail.catch_up()
+        assert echo.getvalue() == other(1, "0xa", "multi\nline\n") + "\n"
+        rings.log("0xa", other(2, "0xa", "next"))
+        rings.log("0xa", other(3, "0xa", "line\n"))  # ends as the first did, and as it continues
+        tail.catch_up()
+    finally:
+        tail.close()
+    assert echo.getvalue().count("next") == 1 and echo.getvalue().count("multi") == 1
+    assert echo.getvalue().endswith(other(3, "0xa", "line\n") + "\n")
+    assert tail.lost == 0
+
+
+def test_the_reader_finds_the_thread_of_a_ring_that_starts_inside_a_message() -> None:
+    rings, echo = Rings(size=500), io.StringIO()
+    tail = ring_tail(rings, echo)
+    try:
+        for i in range(30):  # the ring drops the first lines of the oldest message as it fills
+            rings.log("0xa", other(i, "0xa", f"message {i:<20}\nand its second line\n"))
+            tail.catch_up()
+    finally:
+        tail.close()
+    assert not rings.threads["0xa"].startswith("0:00")  # the ring does start inside one
+    assert [echo.getvalue().count(f"message {i} ") for i in range(30)] == [1] * 30
+    assert tail.lost == 0
+
+
+def test_the_poll_thread_survives_a_ring_it_cannot_read(caplog: pytest.LogCaptureFixture) -> None:
+    rings, echo = Rings(), io.StringIO()
+    calls = 0
+
+    def get_logs() -> list[str]:
+        nonlocal calls
+        calls += 1
+        if calls <= 3:
+            raise ValueError("invalid utf-8")
+        return rings()
+
+    tail = RingTail(echo, get_logs, size=rings.size, poll=0.01)
+    try:
+        rings.log("0xa", other(1, "0xa", "later"))
+        deadline = time.monotonic() + 5
+        while "later" not in echo.getvalue() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        tail.close()
+    assert "later" in echo.getvalue()  # read by the thread, after its failures
+    assert len([r for r in caplog.records if "could not read" in r.getMessage()]) == 1
+
+
 def test_the_reader_counts_a_ring_that_wrapped_past_the_last_line_it_read(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -294,6 +350,39 @@ def test_perf_needs_the_tracers_from_before_gstreamer_initialised(
         monkeypatch.setenv(key, os.environ.get(key, ""))  # `prepare` sets them: restored
     with pytest.raises(FeatureError, match="'latency', 'stats', but .* features=\\['perf'\\]"):
         Player.from_description("fakesrc ! fakesink", features=["perf"])
+
+
+BUILT_FIRST = textwrap.dedent("""
+    import json
+    import gi
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst
+    from mixtape import Player
+    from mixtape.exceptions import FeatureError
+    from mixtape.perf.collect import prepare
+
+    prepare()  # what `Player.from_description` does before it initialises GStreamer
+    Gst.init(None)
+    pipeline = Gst.parse_launch("videotestsrc num-buffers=3 ! queue name=q ! fakesink")
+    try:
+        Player(pipeline, features=["perf"])
+    except FeatureError as exc:
+        print(json.dumps(str(exc)))
+""")
+
+
+def test_perf_refuses_a_pipeline_built_before_its_log() -> None:
+    done = subprocess.run(
+        [sys.executable, "-c", BUILT_FIRST],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=run_env(),
+    )
+    assert done.returncode == 0, done.stderr
+    message = json.loads(done.stdout.splitlines()[-1])
+    assert "no record of the creation of 'fakesink0', 'pipeline0', 'q', 'videotestsrc0'" in message
+    assert "Player.from_description" in message
 
 
 def run_env() -> dict[str, str]:

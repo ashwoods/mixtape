@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import PositiveFloat
 
+from ..exceptions import FeatureError
 from ..model import prop
 from ..perf import Artifacts, Sample, Window, rates, window
 from ..perf.collect import Collector, prepare
@@ -91,6 +92,14 @@ class Perf(Feature):
 
     def check(self, player: "Player") -> None:
         self._collector = Collector.get()
+        unknown = self._collector.unknown(e.get_name() for e in player._element_keys().values())
+        if unknown:
+            raise FeatureError(
+                f"The feature 'perf' has no record of the creation of "
+                f"{', '.join(map(repr, unknown))}: the pipeline was built before it set up the "
+                "debug log, so its measures would have no names; build the player with "
+                "Player.from_description or `mixtape run`"
+            )
 
     def attach(self, player: "Player") -> None:
         assert self._collector is not None  # `check` ran

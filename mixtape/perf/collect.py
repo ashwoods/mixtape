@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -50,9 +51,14 @@ class Collector:
     their records are not in the log."""
 
     _instance: "Collector | None" = None
+    _failure: FeatureError | None = None
+    """What kept the first one from starting, once its log was set up: that cannot be undone, so
+    a second try raises the same rather than set it up again and echo each line twice"""
 
     @classmethod
     def get(cls) -> "Collector":
+        if cls._failure is not None:
+            raise cls._failure
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -79,9 +85,13 @@ class Collector:
         elif ours != [LOG]:
             logger.warning("GST_DEBUG already has %r: keeping it", ",".join(ours))
         atexit.register(self._close)
-        self._init_ns = self._calibrate()
-        """`time.monotonic_ns()` as GStreamer initialised, the start of its tracers' clock (that
-        clock is `gst_util_get_timestamp`, the monotonic clock Python reads too)"""
+        # `time.monotonic_ns()` as GStreamer initialised, the start of its tracers' clock (that
+        # clock is `gst_util_get_timestamp`, the monotonic clock Python reads too)
+        try:
+            self._init_ns = self._calibrate()
+        except FeatureError as exc:
+            type(self)._failure = exc  # the tail goes on echoing, as the default logger is gone
+            raise
 
     def _calibrate(self) -> int:
         """`time.monotonic_ns()` as GStreamer initialised, which it does not tell: from the ts
@@ -97,6 +107,13 @@ class Collector:
                 "to log GST_TRACER at level 7"
             )
         return (before + after) // 2 - ts
+
+    def unknown(self, names: Iterable[str]) -> list[str]:
+        """Those of the element `names` that it saw no creation of (`new-element`): made before
+        it started, so what the tracers measure of them has no name."""
+        self.tail.catch_up()
+        created = self.tail.parser.created  # for good: `reset` keeps the names
+        return sorted({name for name in names if name not in created})
 
     def _close(self) -> None:
         with contextlib.suppress(Exception):

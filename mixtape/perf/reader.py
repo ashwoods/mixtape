@@ -29,7 +29,8 @@ TIMEOUT = 5
 POLL = 0.25
 """Seconds between two reads of the rings"""
 
-_TIME = re.compile(r"\d+:\d\d:\d\d\.\d{9} ")  # a line starts with its time: `H:MM:SS.nnnnnnnnn`
+_TIME = re.compile(r"\d+:\d\d:\d\d\.\d{9} ")  # a message starts with its time: `H:MM:SS.nnnnnnnnn`
+_START = re.compile(_TIME.pattern, re.MULTILINE)  # at the start of a line
 
 
 def _logs() -> list[str]:
@@ -64,6 +65,7 @@ class RingTail:
         self._get_logs = get_logs or _logs
         self._last: dict[str, str] = {}  # thread: the last line of its ring that was read
         self._warned = False
+        self._failed = False
         self._lock = threading.Lock()  # the parser and `_last`
         if get_logs is None:
             Gst.debug_add_ring_buffer_logger(size, TIMEOUT)
@@ -76,26 +78,46 @@ class RingTail:
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
-            self.catch_up()
+            try:
+                self.catch_up()
+            except Exception:  # the thread has to outlive it: every `take` reads as well
+                if not self._failed:  # once, not every poll
+                    self._failed = True
+                    logger.exception("perf could not read GStreamer's debug log")
+
+    @staticmethod
+    def _last_message(text: str) -> int:
+        """Where the last message of a ring starts, which has a message at its start. A message
+        is a line with its time and the lines after it that have none: the ring keeps the
+        newlines of a message (`multi\nline\n` is stored as `…: multi\nline\n\n`)."""
+        pos = len(text)
+        while pos > 0:
+            pos = text.rfind("\n", 0, pos - 1) + 1
+            if _TIME.match(text, pos):
+                return pos
+        return 0
 
     def _read(self) -> None:
         """Handle the lines logged since the last read, oldest first."""
         fresh: list[tuple[tuple[int, str], str]] = []  # (time, line), of the rings together
         last: dict[str, str] = {}
         for text in self._get_logs():
-            if not text:
+            # a full ring starts anywhere in a message: what comes before the first one is not
+            # of a thread we can tell
+            if (first := _START.search(text)) is None:
                 continue
+            text = text[first.start() :]
             fields = text[:400].split(None, 3)
             thread = fields[2] if len(fields) > 2 else ""
-            last[thread] = text[text.rfind("\n", 0, len(text) - 1) + 1 :]
+            last[thread] = text[self._last_message(text) :]  # whole, and unique: it has its time
             seen = self._last.get(thread)
             if seen is not None and (at := text.rfind(seen)) >= 0:
                 text = text[at + len(seen) :]
             elif seen is not None and len(text) >= self.size * 3 // 4:
                 self._overflow()  # a ring far under its size is a new thread of the same name
             key = (0, "")
-            for line in text.split("\n")[:-1]:  # a line that does not start with its time
-                if (stamp := _TIME.match(line)) is not None:  # continues the one before
+            for line in text.split("\n")[:-1]:
+                if (stamp := _TIME.match(line)) is not None:  # one without continues the message
                     key = (stamp.end(), line[: stamp.end()])
                 fresh.append((key, line))
         self._last = last  # a thread whose ring is gone is forgotten

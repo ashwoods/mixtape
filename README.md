@@ -334,8 +334,9 @@ The built-in ones:
   thread: the core tracers write to the debug log, which a thread reads from GStreamer's ring
   buffer logger, in memory (it replaces the default logger and echoes the lines that are not
   the tracers' to stderr; with a `GST_DEBUG_FILE` in the environment the default logger stays,
-  writing there, and it echoes nothing), and the gst-plugins-rs ones write their logs when
-  asked, once per window. With `out`, a folder gets
+  writing there, and it echoes nothing; set `GST_DEBUG_FILE` when debugging a crash, as the
+  lines of the last 0.25 s are lost when the process is killed), and the gst-plugins-rs ones
+  write their logs when asked, once per window. With `out`, a folder gets
   `samples.jsonl` (every sample), `<metric>.csv` (`t_ns,subject,value`), `windows.jsonl` and,
   when the player is torn down, `summary.json`: n, mean, p50, p95, p99 and max of the whole
   run, the pipeline, its graph and the tracers; and `report.html`, all of it on one page that

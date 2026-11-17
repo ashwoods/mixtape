@@ -278,8 +278,9 @@ What each part does:
 - A pad probe, a signal handler or a callback of an element runs on a GStreamer thread, where
   the loop's objects are off limits. `player.call_soon_threadsafe(callback, *args)` runs a
   function on the loop, and `player.run_coroutine_threadsafe(coroutine)` runs a coroutine there
-  and returns a `concurrent.futures.Future` with its result. The probe uses the first, to
-  publish the frames from the loop; `notify` is for the loop thread only.
+  and returns a `concurrent.futures.Future` with its result. The probe uses the first: it
+  counts each frame on the loop, which also publishes the count, as `notify` is for the loop
+  thread only.
 
 `describe()` returns the player's model as a pydantic model (`describe().model_dump_json()` is
 JSON with JSON Schema for every type), `get(path)` reads a property, `set(path, value)` sets one

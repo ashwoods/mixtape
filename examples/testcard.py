@@ -45,11 +45,14 @@ class Testcard(Player):
         return pattern
 
     def _on_buffer(self, pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
-        # a streaming thread: tell the loop, which publishes on it
+        # a streaming thread: count on the loop, which publishes
+        self.call_soon_threadsafe(self._count)
+        return Gst.PadProbeReturn.OK
+
+    def _count(self) -> None:
         self._frames += 1
         if self._frames % 10 == 0:
-            self.call_soon_threadsafe(self.notify, "frames")
-        return Gst.PadProbeReturn.OK
+            self.notify("frames")
 
 
 # --8<-- [end:player]

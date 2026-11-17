@@ -431,7 +431,8 @@ the subject of [Measuring performance](perf.md); the command line is
 `GST_PLUGIN_PATH`, in any language, with no Python of its own. The `KEY=VALUE` options are the
 tracer's parameters: `gst:latency,flags=element` is `latency(flags=element)` in `GST_TRACERS`.
 The tracer's readable properties become read-only properties, `gst:NAME.property`, published
-when the tracer notifies them:
+when the tracer notifies them (the `latency` tracer has its `flags` as a property since
+GStreamer 1.26):
 
 ```sh
 mixtape inspect --feature gst:latency,flags=element "videotestsrc ! fakesink" | grep "gst:"

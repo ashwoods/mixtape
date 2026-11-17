@@ -1,6 +1,6 @@
 """The samples of cli.md: see tests/doc_samples.py."""
 
-from tests.doc_samples import Sample, run
+from tests.doc_samples import Sample, on, run
 
 PAGE = "cli.md"
 
@@ -107,7 +107,12 @@ SAMPLES: list[Sample] = [
         PAGE,
         "gst-latency",
         "^mixtape inspect --feature gst:latency,flags=element",
-        expect=("Features: gst:latency\n", "gst:latency.flags", "= element", "gst:latency.params"),
+        # the latency tracer's flags property is new in GStreamer 1.26 (Ubuntu 24.04 has 1.24)
+        expect=(
+            "Features: gst:latency\n",
+            "gst:latency.params",
+            *on("darwin", "gst:latency.flags", "= element"),
+        ),
     ),
     run(
         PAGE,

@@ -10,11 +10,17 @@ of its setup to the end of its teardown, as the samples carry the time of the tr
 The worst p95 and max of each metric go to the test's JUnit properties as
 `perf.<metric>.p95` and `perf.<metric>.max`.
 
+Two checks keep a test from getting slower. A budget, `@pytest.mark.perf(pipeline_latency_p95=
+"20ms")`, fails the test at the end of its call when the worst subject of the metric is over
+its limit (`mixtape.perf.budget`). `--mixtape-perf-baseline BASE` compares the session with an
+earlier one at its end (`mixtape.perf.compare`) and fails it on a regression.
+
 Tracers exist only if `Gst.init` creates them, once per process: with the option, the plugin
 initialises GStreamer before the first conftest is read, and fails with a usage error when
 something did so first. Without the option it does nothing, and imports nothing of GStreamer."""
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -27,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 if TYPE_CHECKING:  # not at run time: it imports GStreamer
+    from .perf.budget import Budget
     from .perf.record import Recorder
 
 logger = logging.getLogger(__name__)
@@ -49,6 +56,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--mixtape-perf-samples",
         action="store_true",
         help="also write every sample of each test (samples.jsonl and a CSV per metric)",
+    )
+    group.addoption(
+        "--mixtape-perf-baseline",
+        metavar="BASE",
+        type=Path,
+        help="compare the session with an earlier one, the DIR of its --mixtape-perf, at the "
+        "end: write DIR/compare.json, print the regressions and fail the session on any",
     )
     group.addoption(
         "--mixtape-perf-interval",
@@ -98,8 +112,16 @@ def _start_tracers() -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "perf(metric_stat=limit, ...): with --mixtape-perf, fail the test when the worst subject "
+        "of a metric is over its limit at the end of the call, e.g. "
+        'perf(pipeline_latency_p95="20ms", process_cpu_mean="150%")',
+    )
     if config.getoption("mixtape_perf") is not None:
         config.pluginmanager.register(Measure(config), "mixtape-perf")
+    elif config.getoption("mixtape_perf_baseline") is not None:
+        raise pytest.UsageError("--mixtape-perf-baseline needs --mixtape-perf")
 
 
 def _folder_name(nodeid: str, taken: set[str]) -> str:
@@ -148,9 +170,41 @@ class Measure:
         self.interval: float = config.getoption("mixtape_perf_interval")
         if self.interval <= 0:
             raise pytest.UsageError("--mixtape-perf-interval takes a number of seconds above 0")
+        self.baseline: Path | None = config.getoption("mixtape_perf_baseline")
+        if self.baseline is not None:
+            from .perf import compare
+
+            try:
+                if compare.kind(self.baseline) != "session":
+                    raise compare.CompareError(f"{self.baseline} has no index.json")
+            except compare.CompareError as error:
+                raise pytest.UsageError(f"--mixtape-perf-baseline: {error}") from None
+        self._comparison: dict[str, Any] | None = None
+        self._comparison_text = ""
+        self._budgets: dict[str, list[Budget]] = {}  # by test id
         self._runs: dict[str, _Run] = {}
         self._tests: dict[str, dict[str, Any]] = {}  # the index's entries, by test id
         self._folders: set[str] = set()
+
+    def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
+        from .perf import budget
+
+        for item in items:
+            keywords: dict[str, Any] = {}
+            for mark in item.iter_markers("perf"):  # the closest first
+                if mark.args:
+                    raise pytest.UsageError(
+                        f"{item.nodeid}: the perf marker takes keywords like "
+                        f"pipeline_latency_p95='20ms', not {mark.args!r}"
+                    )
+                for keyword, value in mark.kwargs.items():
+                    keywords.setdefault(keyword, value)
+            try:
+                budgets = budget.parse(keywords)
+            except ValueError as error:
+                raise pytest.UsageError(f"{item.nodeid}: perf marker {error}") from None
+            if budgets:
+                self._budgets[item.nodeid] = budgets
 
     @pytest.hookimpl(wrapper=True, tryfirst=True)
     def pytest_runtest_setup(self, item: pytest.Item) -> Any:
@@ -181,6 +235,21 @@ class Measure:
                 return
 
     @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_runtest_call(self, item: pytest.Item) -> Any:
+        result = yield  # a test that fails by itself keeps its own failure
+        run = self._runs.get(item.nodeid)
+        if run is not None and (budgets := self._budgets.get(item.nodeid)):
+            from .perf import budget
+
+            # the statistics of everything since the setup, as the summary will have them but
+            # for the teardown: the recorder keeps every value of the run, which is what a
+            # percentile of the whole run needs
+            run.recorder.window()
+            if breaches := budget.check(budgets, run.recorder.stats()):
+                pytest.fail("\n".join(breaches), pytrace=False)
+        return result
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
     def pytest_runtest_teardown(self, item: pytest.Item) -> Any:
         try:
             return (yield)
@@ -193,6 +262,8 @@ class Measure:
         if run.thread is not None:
             run.thread.join()
         entry = self._tests[item.nodeid]
+        for limit in self._budgets.get(item.nodeid, ()):
+            item.user_properties.append((f"perf.budget.{limit.metric}.{limit.stat}", limit.limit))
         recorder = run.recorder
         try:
             recorder.window()
@@ -239,8 +310,8 @@ class Measure:
         elif report.skipped and report.when == "setup":
             entry["outcome"] = "skipped"
 
-    def pytest_sessionfinish(self) -> None:
-        from .perf import index
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        from .perf import compare, index
 
         index.write(
             self.out,
@@ -250,6 +321,15 @@ class Measure:
                 "tests": list(self._tests.values()),
             },
         )
+        if self.baseline is not None:
+            result = compare.compare_folders(self.baseline, self.out, compare.THRESHOLD)
+            self._comparison = {"base": str(self.baseline), "new": str(self.out), **result}
+            self._comparison_text = compare.format_text(result)
+            (self.out / "compare.json").write_text(
+                json.dumps(self._comparison, indent=2) + "\n", encoding="utf-8"
+            )
+            if result["regressions"] and session.exitstatus == pytest.ExitCode.OK:
+                session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
     def pytest_terminal_summary(self, terminalreporter: pytest.TerminalReporter) -> None:
         measured = sum(entry["folder"] is not None for entry in self._tests.values())
@@ -257,3 +337,9 @@ class Measure:
             f"mixtape perf: {measured} of {len(self._tests)} tests measured, "
             f"index at {self.out / 'index.html'}"
         )
+        if self._comparison is not None:
+            terminalreporter.section("mixtape perf compare")
+            terminalreporter.write_line(f"{self.baseline} → {self.out}")
+            terminalreporter.write_line(
+                self._comparison_text, red=bool(self._comparison["regressions"])
+            )

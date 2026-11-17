@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .aggregate import Window, rates, window
+from .aggregate import RunStat, Window, rates, window
 from .collect import Collector
 from .metrics import Sample
 from .output import Artifacts
@@ -69,6 +69,14 @@ class Recorder:
             self.measured.update(result.metrics)
             self.end_ns = end
             return result
+
+    def stats(self) -> dict[str, dict[str, RunStat]]:
+        """The statistics of the whole run so far, by metric and subject, from the windows
+        closed: what `summary.json` has at the end. Needs `out`: the artifacts keep every value
+        of the run (8 bytes each) for these, whether or not they write the samples."""
+        with self._lock:
+            assert self._artifacts is not None, "a recorder keeps the run only with `out`"
+            return self._artifacts.totals.stats()
 
     def _cpu_sample(self) -> Sample | None:
         """`process.cpu` since the last window (`thread.cpu` is `ThreadCpu`'s)."""

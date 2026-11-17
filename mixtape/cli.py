@@ -12,6 +12,7 @@ import re
 import signal
 import sys
 from collections.abc import AsyncIterator, Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 import gi
@@ -28,6 +29,7 @@ from .exceptions import (
     PlayerSetStateError,
 )
 from .model import CommandSpec, PropSpec
+from .perf import compare as perf_compare
 from .player import Player
 
 logger = logging.getLogger("mixtape")
@@ -95,6 +97,37 @@ def build_parser() -> argparse.ArgumentParser:
     _add_target(inspect)
     inspect.add_argument("--json", action="store_true", help="print the model as JSON")
     inspect.set_defaults(handler=_inspect)
+
+    perf = commands.add_parser(
+        "perf",
+        help="work with what the perf feature measured",
+        description="Work with the folders the perf feature and `pytest --mixtape-perf` write.",
+    )
+    perf_commands = perf.add_subparsers(dest="perf_command", required=True, metavar="COMMAND")
+    compare = perf_commands.add_parser(
+        "compare",
+        help="find what got slower between two sessions or two runs",
+        description="Compare two sessions of `pytest --mixtape-perf` (folders with an "
+        "index.json) or two single runs (folders with a summary.json, as `mixtape run "
+        "--feature perf,out=DIR` writes): the p95 and max of every metric where higher is "
+        "worse. A value is a regression when it grew by more than the threshold and by more "
+        "than a floor of its unit (100 µs, 5 points of CPU, 5% of a queue). Exits 1 on a "
+        "regression.",
+    )
+    compare.add_argument(
+        "-v", "--verbose", action="count", default=argparse.SUPPRESS, help="log more"
+    )
+    compare.add_argument("base", type=Path, metavar="BASE", help="the folder to compare with")
+    compare.add_argument("new", type=Path, metavar="NEW", help="the folder to check")
+    compare.add_argument(
+        "--threshold",
+        type=_percentage,
+        default=perf_compare.THRESHOLD * 100,
+        metavar="PERCENT",
+        help="how much a value may grow over the base, in percent (default: %(default).0f)",
+    )
+    compare.add_argument("--json", action="store_true", help="print the comparison as JSON")
+    compare.set_defaults(handler=_perf_compare)
     return parser
 
 
@@ -134,6 +167,16 @@ def _http_address(text: str) -> tuple[str, int]:
     if not port.isascii() or not port.isdecimal() or int(port) > 65535:
         raise argparse.ArgumentTypeError(f"{text!r} is not [HOST:]PORT")
     return host.strip("[]") or HTTP_HOST, int(port)
+
+
+def _percentage(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        value = -1.0
+    if not value >= 0:  # also nan
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of percent, 0 or more")
+    return value
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -220,6 +263,19 @@ def _run(args: argparse.Namespace) -> int:
     if player is None:
         return EXIT_USAGE
     return asyncio.run(_play(player, args.verbose, args.assignments, args.http))
+
+
+# -- perf -- #
+
+
+def _perf_compare(args: argparse.Namespace) -> int:
+    try:
+        result = perf_compare.compare_folders(args.base, args.new, args.threshold / 100)
+    except perf_compare.CompareError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    print(json.dumps(result, indent=2) if args.json else perf_compare.format_text(result))
+    return EXIT_ERROR if result["regressions"] else 0
 
 
 # -- inspect -- #

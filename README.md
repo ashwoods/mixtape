@@ -87,6 +87,21 @@ to stop, then `mixtape run` exits 1 naming the elements still changing state. `-
 level and shows the error's debug string, `-vv` logs at debug level. On macOS, `mixtape run`
 runs the main run loop so video windows appear.
 
+### Comparing perf runs
+`mixtape perf compare BASE NEW` finds what got slower between two sessions of
+`pytest --mixtape-perf` (folders with an `index.json`) or two single runs (folders with a
+`summary.json`, as `mixtape run --feature perf,out=DIR` writes). It compares the p95 and max of
+the metrics where higher is worse (latencies, lateness, push time, CPU, queue levels; not
+buffers/s, bitrate or the interval): for each test the worst of its subjects in a session, for
+each subject in a run. A value is a regression when it grew by more than `--threshold` percent
+(default 50) of the base *and* by more than a floor of its unit (100 µs, 5 points of CPU, 5% of
+a queue, one buffer, 4 KiB; `FLOORS` in `mixtape/perf/compare.py`). It prints the regressions,
+the improvements beyond the same bounds, what only one side has (added or removed, never a
+regression) and a line of counts, and exits 1 on a regression, 2 when a folder is not one of
+those. `--json` prints the comparison as JSON instead.
+
+    mixtape perf compare perf-main perf-pr --threshold 30
+
 ### Inspecting and setting properties
 A `Player` describes what it exposes: its properties, with types, ranges and current values,
 and its commands. Declare your own with `prop()`, an alias of an element property, `@prop` on a
@@ -364,6 +379,29 @@ it, and `perf-out/index.html` is the same as a page that links to the reports. T
 gets `perf.<metric>.p95` and `perf.<metric>.max` properties on each test, such as
 `perf.element.latency.p95` (nanoseconds). Without the option the plugin does nothing and
 imports nothing of GStreamer.
+
+Two checks catch a test that got slower. A budget, `@pytest.mark.perf`, fails the test at the
+end of its call when the worst subject of a metric is over its limit over the whole run so far:
+
+```python
+@pytest.mark.perf(pipeline_latency_p95="20ms", process_cpu_mean="150%", queue_fill_max=0.9)
+def test_stream(): ...
+```
+
+The keywords are a metric (`.` as `_`) and a statistic (`n`, `mean`, `p50`, `p95`, `p99` or
+`max`, as in `summary.json`); the limit is a string with a unit (`ns`, `us` or `µs`, `ms`, `s` for
+the metrics in nanoseconds; `%` for CPU, and for a ratio like `queue.fill`, where `90%` is
+0.9) or a number in the metric's own unit. A failure says `perf budget: pipeline.latency p95 is
+31.2 ms on videotestsrc0→fakesink, over 20 ms`; a metric the test has no samples of fails too. An
+unknown metric, statistic or unit is a usage error naming the keyword, before any test runs. The
+budgets go to the JUnit properties as `perf.budget.<metric>.<stat>`. Without `--mixtape-perf`
+the marker is registered and does nothing. A budget needs the samples of the whole run, which
+the recorder keeps in memory (8 bytes each) for the summary anyway.
+
+The other check is a stored baseline: `--mixtape-perf-baseline BASE`, the `perf-out` of an
+earlier session, compares this session with it at the end as `mixtape perf compare` does
+(above), writes `perf-out/compare.json`, prints the result in its own section and fails the
+session (exit status 1) when there are regressions.
 
 Tracers only exist when `Gst.init` creates them, so the plugin initialises GStreamer before the
 first conftest is read, and stops with a usage error when something did so earlier. It gives

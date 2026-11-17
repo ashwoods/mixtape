@@ -144,13 +144,16 @@ def test_nothing_of_gstreamer_is_imported_or_written_without_the_option(
         import os
         import sys
 
+        import pytest
 
+
+        @pytest.mark.perf(pipeline_latency_p95="1ns", nope=1)  # known, and ignored
         def test_it():
             assert not {"gi", "mixtape.perf.collect"} & set(sys.modules)
             assert "GST_TRACERS" not in os.environ
         """
     )
-    result = pytester.runpytest_subprocess(timeout=60)
+    result = pytester.runpytest_subprocess("--strict-markers", timeout=60)
     result.assert_outcomes(passed=1)
     assert not [p for p in pytester.path.rglob("*") if p.name.startswith(("index", "summary"))]
     assert "mixtape perf" not in result.stdout.str()
@@ -230,3 +233,122 @@ def test_it(name):
     assert len(set(folders)) == 2 and all("<" not in f and " " not in f for f in folders)
     page = (out / "index.html").read_text(encoding="utf-8")
     assert "<script" not in page and "&lt;script&gt;x&lt;/script&gt;" in page
+
+
+BUDGETS = (
+    PLAIN
+    + """
+import pytest
+
+
+@pytest.mark.perf(pipeline_latency_p95="1ns", process_cpu_mean="100000%")
+def test_tight():
+    run(20)
+
+
+@pytest.mark.perf(pipeline_latency_p95="10s", queue_fill_max=1, process_cpu_mean="100000%")
+def test_generous():
+    run(20)
+
+
+@pytest.mark.perf(pipeline_latency_max="1ns")
+def test_the_test_fails_by_itself():
+    run(5)
+    assert False, "its own"
+
+
+def test_no_budget():
+    run(5)
+"""
+)
+
+
+def test_a_budget_fails_the_test_that_is_over_it(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_suite=BUDGETS)
+    result, out = measure(pytester, "--junitxml=junit.xml")
+    result.assert_outcomes(passed=2, failed=2)  # a failure, not an error in the teardown
+    result.stdout.fnmatch_lines(
+        ["*perf budget: pipeline.latency p95 is * on videotestsrc0→fakesink0, over 1 ns*"]
+    )
+    result.stdout.fnmatch_lines(["*AssertionError: its own*"])  # its own failure, not the budget
+    outcomes = {test["id"]: test["outcome"] for test in load(out / "index.json")["tests"]}
+    assert outcomes["test_suite.py::test_tight"] == "failed"
+    assert outcomes["test_suite.py::test_generous"] == "passed"
+    properties = {
+        case.get("name"): {p.get("name"): p.get("value") for p in case.iter("property")}
+        for case in ET.parse(pytester.path / "junit.xml").iter("testcase")
+    }
+    assert properties["test_tight"]["perf.budget.pipeline.latency.p95"] == "1.0"
+    assert properties["test_tight"]["perf.budget.process.cpu.mean"] == "100000.0"
+    assert properties["test_generous"]["perf.budget.queue.fill.max"] == "1.0"
+    assert not [name for name in properties["test_no_budget"] if "budget" in (name or "")]
+
+
+def test_a_bad_budget_is_a_usage_error(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(
+        test_suite="""
+        import pytest
+
+
+        @pytest.mark.perf(nope_p95=1)
+        def test_it():
+            pass
+        """
+    )
+    result, _ = measure(pytester)
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*test_suite.py::test_it: perf marker nope_p95: unknown metric*"])
+
+
+def baseline(path: Path, value: float) -> Path:
+    """A session in which `test_one` had `value` ns of pipeline latency, and a test that is no
+    more."""
+    worst = {"unit": "ns", **{stat: {"value": value, "subject": "a→b"} for stat in ("p95", "max")}}
+    test = {"outcome": "passed", "duration": 1.0, "folder": None, "lost": 0}
+    index = {
+        "interval": 1.0,
+        "samples": False,
+        "tests": [
+            {"id": "test_suite.py::test_one", **test, "metrics": {"pipeline.latency": worst}},
+            {"id": "test_suite.py::test_old", **test, "metrics": {}},
+        ],
+    }
+    path.mkdir()
+    (path / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(("value", "regressed"), [(1, True), (1e12, False)])
+def test_a_session_is_compared_with_its_baseline(
+    pytester: pytest.Pytester, value: float, regressed: bool
+) -> None:
+    pytester.makepyfile(test_suite=PLAIN + "\ndef test_one():\n    run(20)\n")
+    base = baseline(pytester.path / "base", value)
+    result, out = measure(pytester, f"--mixtape-perf-baseline={base}")
+    comparison = load(out / "compare.json")
+    assert comparison["base"] == str(base) and comparison["new"] == str(out)
+    assert comparison["removed"] == ["test_suite.py::test_old"]
+    if regressed:
+        assert result.ret == pytest.ExitCode.TESTS_FAILED
+        result.assert_outcomes(passed=1)  # the tests did not fail, the session did
+        assert {c["test"] for c in comparison["regressions"]} == {"test_suite.py::test_one"}
+        result.stdout.fnmatch_lines(
+            [
+                "*mixtape perf compare*",
+                "Regressions:",
+                "*test_suite.py::test_one  pipeline.latency  p95*videotestsrc0→fakesink0*",
+            ]
+        )
+    else:
+        assert result.ret == pytest.ExitCode.OK
+        assert comparison["regressions"] == [] and comparison["improvements"]
+
+
+def test_a_baseline_needs_the_option_and_a_session(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_suite="def test_it():\n    pass\n")
+    result = pytester.runpytest_subprocess("--mixtape-perf-baseline=nowhere", timeout=60)
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*--mixtape-perf-baseline needs --mixtape-perf*"])
+    result, _ = measure(pytester, "--mixtape-perf-baseline=nowhere")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*--mixtape-perf-baseline: *nowhere has neither an index.json*"])

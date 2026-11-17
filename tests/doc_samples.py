@@ -1,14 +1,18 @@
 """The machinery of tests/test_doc_samples.py: the fenced blocks of the pages and the samples
 that test them. The samples themselves are in tests/samples/, one module per page.
 
-Every fenced block in README.md and docs/*.md that is not an example program (`--8<--`) is
-either a command (`sh`) or an output (no language, or `text`), and every one needs a sample:
+A command is shown with its output, as click's documentation does: a ```console block is the
+`$ ` command (with its `\\` continuations), then what it prints. The tests read it as two
+blocks, the command and the output. Every fenced block in README.md and docs/*.md that is not
+an example program (`--8<--`) is a command, an output or a graph, and every one needs a sample:
 
-- `run`: a command block, run verbatim with `bash -c` in the repository. Its status and its
-  expected strings are checked, and every expected string must also be in the output block
-  that follows it (or the one `shows` names), so the output the page shows cannot drift from
-  what the command prints.
-- `output`: an output block with no command before it: `command` produces it.
+- `run`: a command, run verbatim with `bash -c` in the repository. Its status and its expected
+  strings are checked, and every expected string must also be in the output under it (or in
+  the block `shows` names), so the output the page shows cannot drift from what it prints.
+- `output`: an output whose command is not the one shown: `command` produces it.
+- `prints`: a program of examples/ whose output is on the page as pydantic's documentation
+  shows it, in `# >` comments under its prints (ruff format writes `#>` as `# >`). It must
+  print those lines, in order, and the page must include the sections that have them.
 - `not_run`: a command that is setup, needs a camera, or runs until Ctrl-C, with the reason.
 - `illustrative`: an output that cannot be checked. The page must say so in the block's title.
 - `graph`: a ```mermaid graph of pipelines, which must be what tests/graphs.py makes of
@@ -64,10 +68,13 @@ class Block:
             return "example"
         if self.lang == "mermaid":
             return "graph"
-        if self.lang in ("sh", "console"):
+        if self.lang == "console":
             return "command"
         if self.lang in ("", "text"):
             return "output"
+        assert self.lang != "sh", (
+            f"{self.where}: write a command as ```console, `$ ` and its output"
+        )
         raise AssertionError(
             f"{self.where}: a ```{self.lang} block without --8<-- is neither a command nor an"
             " output: put the code in examples/ and include a section of it"
@@ -95,7 +102,28 @@ def extract(path: Path) -> list[Block]:
             i += 1
         i += 1
         title = re.search(r'title="([^"]*)"', rest)
-        blocks.append(Block(page, start, lang, title[1] if title else "", "\n".join(body)))
+        if lang == "console":
+            blocks.extend(console(page, start, title[1] if title else "", body))
+        else:
+            blocks.append(Block(page, start, lang, title[1] if title else "", "\n".join(body)))
+    return blocks
+
+
+def console(page: str, start: int, title: str, body: list[str]) -> list[Block]:
+    """A ```console block is a command, its `$ ` lines and their `\\` continuations, and the
+    output that follows them: the two blocks of a sample."""
+    command: list[str] = []
+    n = 0
+    while n < len(body) and (body[n].startswith("$ ") or (command and command[-1].endswith("\\"))):
+        command.append(body[n].removeprefix("$ "))
+        n += 1
+    assert command, f"{page}:{start}: a console block starts with a `$ ` command"
+    blocks = [Block(page, start, "console", "", "\n".join(command))]
+    if n < len(body):
+        assert not any(line.startswith("$ ") for line in body[n:]), (
+            f"{page}:{start}: one command per console block, then its output"
+        )
+        blocks.append(Block(page, start + n, "text", title, "\n".join(body[n:])))
     return blocks
 
 
@@ -112,7 +140,7 @@ class Sample:
     page: str
     name: str
     contains: str  # a unique substring of the block; `^` starts it with it
-    kind: str  # run, output, not-run, illustrative, graph
+    kind: str  # run, output, prints, not-run, illustrative, graph
     why: str = ""
     command: str = ""  # output: the command that produces the block
     shows: str | None = AUTO  # run: contains of the output block (AUTO: the next block)
@@ -148,6 +176,11 @@ def run(page: str, name: str, contains: str, **kw: Any) -> Sample:
 
 def output(page: str, name: str, contains: str, command: str, **kw: Any) -> Sample:
     return Sample(page, name, contains, "output", command=command, **kw)
+
+
+def prints(page: str, name: str, program: str, **kw: Any) -> Sample:
+    """A program of examples/ whose output is on the page as `# >` comments under its prints."""
+    return Sample(page, name, program, "prints", command=f"python3 {program}", **kw)
 
 
 def not_run(page: str, name: str, contains: str, why: str) -> Sample:
@@ -204,6 +237,30 @@ def shown_block(sample: Sample, blocks: list[Block] = BLOCKS) -> Block | None:
         if b.page == sample.page and b.category == "output" and sample.shows in b.text
     ]
     return shown[0] if len(shown) == 1 else None
+
+
+# --- the output in a program's comments -------------------------------------------------------
+
+INLINE = re.compile(r"^\s*# >(?: (.*))?$")  # ruff format writes pydantic's `#>` as `# >`
+INCLUDED = re.compile(r'--8<-- "([^":]+):([^"]+)"')
+
+
+def inline_output(program: str) -> list[str]:
+    """The lines of the `# >` comments of a program, in order: what it prints."""
+    lines = (ROOT / program).read_text().splitlines()
+    return [m[1] or "" for line in lines if (m := INLINE.match(line))]
+
+
+def shown_code(page: str, program: str, blocks: list[Block] = BLOCKS) -> str:
+    """The sections of a program that a page includes, one after the other."""
+    text = (ROOT / program).read_text()
+    shown = []
+    for block in blocks:
+        if block.page == page and (m := INCLUDED.search(block.text)) and m[1] == program:
+            section = re.search(rf"\[start:{m[2]}\]\n(.*?)\n[^\n]*\[end:{m[2]}\]", text, re.S)
+            assert section, f"{program} has no section {m[2]}"
+            shown.append(section[1])
+    return "\n".join(shown)
 
 
 # --- running a sample -------------------------------------------------------------------------

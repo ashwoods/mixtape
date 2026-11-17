@@ -7,8 +7,8 @@ the player's model, so it exposes what [`mixtape inspect`](cli.md#inspect-a-play
 for any pipeline or [player class](library.md). No threads are involved: the server runs in the
 player's own asyncio loop.
 
-```sh
-pip install 'mixtape[http]'
+```console
+$ pip install 'mixtape[http]'
 ```
 
 ## Serve a player
@@ -28,11 +28,8 @@ flowchart LR
   p0n1 --> p0n2
 ```
 
-```sh
-cd examples && mixtape run --http 8047 demo:Demo
-```
-
-```
+```console
+$ cd examples && mixtape run --http 8047 demo:Demo
 Serving on http://127.0.0.1:8047
 ```
 
@@ -81,18 +78,15 @@ new pads, links and caps, without a reload. With the `perf` feature (see
 Here is a player that plays a live source, started with `--set vol.volume=0.25`, which is
 already in the values:
 
-```sh
-mixtape run --http 8047 --set vol.volume=0.25 \
+```console
+$ mixtape run --http 8047 --set vol.volume=0.25 \
     "audiotestsrc is-live=true ! volume name=vol ! fakesink name=sink" 2>/dev/null &
-until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-curl -s 127.0.0.1:8047/api/model | head -c 90; echo
-curl -s 127.0.0.1:8047/api/graph; echo
-curl -s 127.0.0.1:8047/api/elements/vol; echo
-curl -s 127.0.0.1:8047/api/properties; echo
-kill -INT $!
-```
-
-```
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s 127.0.0.1:8047/api/model | head -c 90; echo
+$ curl -s 127.0.0.1:8047/api/graph; echo
+$ curl -s 127.0.0.1:8047/api/elements/vol; echo
+$ curl -s 127.0.0.1:8047/api/properties; echo
+$ kill -INT $!
 {"name":"Player","commands":{"pause":{"name":"pause","description":"Pause the pipeline.","param
 {"pipeline":"pipeline0","nodes":{"audiotestsrc0":{"name":"audiotestsrc0","factory":"audiotestsrc","parent":null,"bin":false,"exposed":false},"vol":{"name":"vol","factory":"volume","parent":null,"bin":false,"exposed":true},"sink":{"name":"sink","factory":"fakesink","parent":null,"bin":false,"exposed":true}},"links":[{"source":"audiotestsrc0","source_pad":"src","sink":"vol","sink_pad":"sink","caps":"audio/x-raw, format=(string)S16LE, layout=(string)interleaved, rate=(int)44100, channels=(int)1"},{"source":"vol","source_pad":"src","sink":"sink","sink_pad":"sink","caps":"audio/x-raw, format=(string)S16LE, layout=(string)interleaved, rate=(int)44100, channels=(int)1"}]}
 {"qos":false,"mute":false,"volume":0.25,"volume-full-range":0.25}
@@ -111,17 +105,14 @@ wrong; those before it stay set. It returns the new values of what it set. `POST
 is a route: the transport (`play`, `pause`, `stop`, `eos`, `seek`), those of your player class,
 and those that elements and features add:
 
-```sh
-mixtape run --http 8047 \
+```console
+$ mixtape run --http 8047 \
     "audiotestsrc is-live=true ! volume name=vol ! fakesink name=sink" 2>/dev/null &
-until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-curl -s -X PATCH 127.0.0.1:8047/api/elements/vol -d '{"volume": 0.5, "mute": true}'; echo
-curl -s -X POST 127.0.0.1:8047/api/commands/pause; echo
-curl -s 127.0.0.1:8047/api/properties | grep -o '"state":"[a-z]*"'
-kill -INT $!
-```
-
-```
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s -X PATCH 127.0.0.1:8047/api/elements/vol -d '{"volume": 0.5, "mute": true}'; echo
+$ curl -s -X POST 127.0.0.1:8047/api/commands/pause; echo
+$ curl -s 127.0.0.1:8047/api/properties | grep -o '"state":"[a-z]*"'
+$ kill -INT $!
 {"volume":0.5,"mute":true}
 {"result":null}
 "state":"paused"
@@ -131,17 +122,14 @@ The aliases of a player class and its own commands work the same, in `/api/prope
 under `/api/commands`. The `gain` alias of the `Demo` player is the `volume` of its `vol`, and
 `shout` returns a result:
 
-```sh
-cd examples
-mixtape run --http 8047 demo:Demo 2>/dev/null &
-until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-curl -s -X PATCH 127.0.0.1:8047/api/properties -d '{"gain": 0.25}'; echo
-curl -s 127.0.0.1:8047/api/elements/vol; echo
-curl -s -X POST 127.0.0.1:8047/api/commands/shout -d '{"word": "hi", "times": 3}'; echo
-kill -INT $!
-```
-
-```
+```console
+$ cd examples
+$ mixtape run --http 8047 demo:Demo 2>/dev/null &
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s -X PATCH 127.0.0.1:8047/api/properties -d '{"gain": 0.25}'; echo
+$ curl -s 127.0.0.1:8047/api/elements/vol; echo
+$ curl -s -X POST 127.0.0.1:8047/api/commands/shout -d '{"word": "hi", "times": 3}'; echo
+$ kill -INT $!
 {"gain":0.25}
 {"qos":false,"mute":false,"volume":0.25,"volume-full-range":0.25}
 {"result":"hihihi"}
@@ -160,20 +148,17 @@ refused, with what is wrong with it. The status says whose fault it is:
 | 500 | the pipeline failed: `detail` has the element and its message |
 | 403 | the `Host` or `Origin` of the request is refused (see [Security](#security)) |
 
-```sh
-mixtape run --http 8047 \
+```console
+$ mixtape run --http 8047 \
     "audiotestsrc is-live=true ! volume name=vol ! fakesink name=sink" 2>/dev/null &
-until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-curl -s -X PATCH 127.0.0.1:8047/api/elements/vol -d '{"volume": 11}' -w ' %{http_code}\n'
-curl -s -X PATCH 127.0.0.1:8047/api/elements/nosuch -d '{"volume": 1}' -w ' %{http_code}\n'
-curl -s -X PATCH 127.0.0.1:8047/api/properties -d '{"state": "null"}' -w ' %{http_code}\n'
-curl -s -X POST 127.0.0.1:8047/api/commands/seek -d '{"position": -1}' -w ' %{http_code}\n'
-curl -s -X POST 127.0.0.1:8047/api/commands/pause > /dev/null
-curl -s -X POST 127.0.0.1:8047/api/commands/eos -w ' %{http_code}\n'
-kill -INT $!
-```
-
-```
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s -X PATCH 127.0.0.1:8047/api/elements/vol -d '{"volume": 11}' -w ' %{http_code}\n'
+$ curl -s -X PATCH 127.0.0.1:8047/api/elements/nosuch -d '{"volume": 1}' -w ' %{http_code}\n'
+$ curl -s -X PATCH 127.0.0.1:8047/api/properties -d '{"state": "null"}' -w ' %{http_code}\n'
+$ curl -s -X POST 127.0.0.1:8047/api/commands/seek -d '{"position": -1}' -w ' %{http_code}\n'
+$ curl -s -X POST 127.0.0.1:8047/api/commands/pause > /dev/null
+$ curl -s -X POST 127.0.0.1:8047/api/commands/eos -w ' %{http_code}\n'
+$ kill -INT $!
 {"detail":"Invalid value for 'vol.volume': Input should be less than or equal to 10","errors":[{"type":"less_than_equal","loc":[],"msg":"Input should be less than or equal to 10","input":11}]} 422
 {"detail":"Unknown element 'nosuch'"} 404
 {"detail":"'state' is read-only"} 422
@@ -185,15 +170,12 @@ A pipeline that cannot play does not stop the server. Its error is printed when 
 the API answers with 500 when a command needs the pipeline, while the model and the values stay
 readable:
 
-```sh
-mixtape run --http 8047 "filesrc location=/tmp/missing.mp4 ! fakesink" 2>/dev/null &
-until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-curl -s -X POST 127.0.0.1:8047/api/commands/play -w ' %{http_code}\n'
-curl -s 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
-kill -INT $!
-```
-
-```
+```console
+$ mixtape run --http 8047 "filesrc location=/tmp/missing.mp4 ! fakesink" 2>/dev/null &
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s -X POST 127.0.0.1:8047/api/commands/play -w ' %{http_code}\n'
+$ curl -s 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
+$ kill -INT $!
 {"detail":"filesrc0: Resource not found."} 500
 {"state":"null","position":null,"duration":null} 200
 ```
@@ -234,21 +216,6 @@ replies are keyed by `id`, as the order that they and the events arrive in is no
 --8<-- "examples/http_events.py:client"
 ```
 
-```sh
-python3 examples/http_events.py
-```
-
-```
-first: model
-first: values
-first: graph
-reply 1 {'vol.volume': 0.5}
-reply 2 {'status': 404, 'detail': "Unknown command 'no-such-command'"}
-reply 3 None
-property [('vol.volume', 0.5)]
-states ['ready', 'paused', 'playing']
-```
-
 ### A pipeline that changes shape
 
 Some pipelines are not the same when they play as when they were built: a `decodebin` adds the
@@ -283,29 +250,16 @@ flowchart LR
 --8<-- "examples/http_shape.py:watch"
 ```
 
-```sh
-python3 examples/http_shape.py
-```
-
-```
-at first, wavparse0 is in the graph: False
-graph: wavparse0 is in the graph, inside dec
-model: wavparse0 is exposed, with {'wavparse0.ignore-length': False}
-```
-
 ## Security
 
 There is no authentication. The server binds to `127.0.0.1` by default, and binding it to
 another address says so, as anyone who can reach the port can control the player:
 
-```sh
-mixtape run --http 0.0.0.0:8047 "videotestsrc is-live=true ! fakesink" 2>&1 &
-sleep 2
-kill -INT $!
-wait $!
-```
-
-```
+```console
+$ mixtape run --http 0.0.0.0:8047 "videotestsrc is-live=true ! fakesink" 2>&1 &
+$ sleep 2
+$ kill -INT $!
+$ wait $!
 warning: serving on 0.0.0.0 without authentication: anyone who can reach it can control the player
 Serving on http://0.0.0.0:8047
 Interrupt: stopping (EOS)…
@@ -321,16 +275,13 @@ a player on your machine, by a cross-origin request or by DNS rebinding:
   loopback address, the `Host` must be a loopback one as well.
 - The WebSocket is checked the same way, and a connection that is refused is closed with code 1008.
 
-```sh
-mixtape run --http 8047 "videotestsrc is-live=true ! fakesink" 2>/dev/null &
-until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-curl -s -H "Origin: http://evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
-curl -s -H "Host: evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
-curl -s -H "Origin: http://127.0.0.1:8047" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
-kill -INT $!
-```
-
-```
+```console
+$ mixtape run --http 8047 "videotestsrc is-live=true ! fakesink" 2>/dev/null &
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s -H "Origin: http://evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
+$ curl -s -H "Host: evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
+$ curl -s -H "Origin: http://127.0.0.1:8047" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
+$ kill -INT $!
 {"detail":"Origin 'http://evil.example' does not match Host '127.0.0.1:8047'"} 403
 {"detail":"Host 'evil.example' is not allowed"} 403
 {"state":"playing","position":0.51,"duration":null} 200
@@ -349,16 +300,6 @@ it:
 
 ```python
 --8<-- "examples/http_serve.py:serve"
-```
-
-```sh
-python3 examples/http_serve.py
-```
-
-```
-serving a player named Player
-the server says {'volume': 0.5}
-the player says 0.5
 ```
 
 A program that serves until it is stopped waits for what stops it inside the block, such as

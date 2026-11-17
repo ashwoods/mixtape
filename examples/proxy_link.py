@@ -97,11 +97,15 @@ async def first_frame(*, share_base_time: bool) -> float:
 # --8<-- [start:main]
 async def main() -> None:
     print(f"the consumer waits for the producer to play: {await start_order()}")
+    # > the consumer waits for the producer to play: True
     print(f"all 50 buffers and the EOS arrive: {await lossless()}")
+    # > all 50 buffers and the EOS arrive: True
     shared = await first_frame(share_base_time=True)
     print(f"shared base time: first frame before the producer's age: {shared < HEAD_START}")
+    # > shared base time: first frame before the producer's age: True
     own = await first_frame(share_base_time=False)
     print(f"own base time: first frame after the producer's age: {own >= HEAD_START}")
+    # > own base time: first frame after the producer's age: True
 
 
 asyncio.run(main())

@@ -18,8 +18,12 @@ async def main() -> None:
         async for event in events:
             if isinstance(event, StateChanged):
                 print(f"{event.old.value_nick} -> {event.new.value_nick}")
+                # > null -> ready
+                # > ready -> paused
+                # > paused -> playing
             elif isinstance(event, Eos):
                 print("end of stream")
+                # > end of stream
                 break
 
 

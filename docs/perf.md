@@ -53,16 +53,13 @@ prints the worst subject of the main metrics by their p95:
 
 Record, and read it:
 
-```sh
-mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
+```console
+$ mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
     ! video/x-raw,width=1280,height=720,framerate=30/1 ! queue name=q \
     ! x264enc name=enc speed-preset=slow threads=1 bitrate=4000 \
     ! mp4mux name=mux ! filesink name=sink location=/tmp/rec.mp4" \
     --feature perf,out=/tmp/perf-slow
-python3 examples/perf_worst.py /tmp/perf-slow
-```
-
-```
+$ python3 examples/perf_worst.py /tmp/perf-slow
 metric            subject        p95     max
 element.latency   enc           9.4s    9.5s
 pipeline.latency  src→sink     10.0s   10.1s
@@ -136,22 +133,19 @@ below changes only that. `mixtape perf compare BASE NEW` compares two runs and l
 improved and what got slower beyond a threshold; it exits 0 when nothing got slower and 1 when
 something did. The first command is the recording from above, so that this block runs on its own:
 
-```sh
-mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
+```console
+$ mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
     ! video/x-raw,width=1280,height=720,framerate=30/1 ! queue name=q \
     ! x264enc name=enc speed-preset=slow threads=1 bitrate=4000 \
     ! mp4mux name=mux ! filesink name=sink location=/tmp/rec.mp4" \
     --feature perf,out=/tmp/perf-slow
-mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
+$ mixtape run "videotestsrc name=src is-live=true num-buffers=90 \
     ! video/x-raw,width=1280,height=720,framerate=30/1 ! queue name=q \
     ! x264enc name=enc speed-preset=ultrafast tune=zerolatency threads=1 bitrate=4000 \
     ! mp4mux name=mux ! filesink name=sink location=/tmp/rec.mp4" \
     --feature perf,out=/tmp/perf-fast
-mixtape perf compare /tmp/perf-slow /tmp/perf-fast
-echo "exit status $?"
-```
-
-```
+$ mixtape perf compare /tmp/perf-slow /tmp/perf-fast
+$ echo "exit status $?"
 Improvements:
   pipeline.latency  max  src→sink     7.63 s → 111 ms    -99%
   pipeline.latency  p95  src→sink     7.52 s → 73.1 ms   -99%
@@ -187,8 +181,8 @@ a camera or a server:
 
 === "macOS"
 
-    ```sh
-    mixtape run "avfvideosrc device-index=0 \
+    ```console
+    $ mixtape run "avfvideosrc device-index=0 \
         ! video/x-raw,width=1280,height=720,framerate=30/1 ! videoconvert name=conv \
         ! queue name=q ! x264enc name=enc speed-preset=ultrafast tune=zerolatency \
         ! mp4mux name=mux ! filesink name=sink location=/tmp/cam.mp4" \
@@ -197,8 +191,8 @@ a camera or a server:
 
 === "Ubuntu"
 
-    ```sh
-    mixtape run "v4l2src device=/dev/video0 \
+    ```console
+    $ mixtape run "v4l2src device=/dev/video0 \
         ! video/x-raw,width=1280,height=720,framerate=30/1 ! videoconvert name=conv \
         ! queue name=q ! x264enc name=enc speed-preset=ultrafast tune=zerolatency \
         ! mp4mux name=mux ! filesink name=sink location=/tmp/cam.mp4" \
@@ -207,8 +201,8 @@ a camera or a server:
 
 === "RTSP"
 
-    ```sh
-    mixtape run "rtspsrc location=rtsp://192.168.1.20/stream latency=200 \
+    ```console
+    $ mixtape run "rtspsrc location=rtsp://192.168.1.20/stream latency=200 \
         ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert name=conv \
         ! queue name=q ! x264enc name=enc speed-preset=ultrafast tune=zerolatency \
         ! mp4mux name=mux ! filesink name=sink location=/tmp/cam.mp4" \
@@ -227,15 +221,12 @@ every metric. `perf` publishes the latest window as the property `perf.summary`,
 [HTTP API](http.md) serves like any other. A live source has no `num-buffers`, and with
 `--http` the player keeps running after the end of a stream, until it is interrupted:
 
-```sh
-mixtape run "videotestsrc name=src is-live=true \
+```console
+$ mixtape run "videotestsrc name=src is-live=true \
     ! video/x-raw,width=1280,height=720,framerate=30/1 ! queue name=q \
     ! x264enc name=enc speed-preset=ultrafast tune=zerolatency threads=1 bitrate=4000 \
     ! mp4mux name=mux ! filesink name=sink location=/tmp/rec.mp4" \
     --feature perf --http 8000
-```
-
-```
 Serving on http://127.0.0.1:8000
 ```
 
@@ -250,11 +241,8 @@ something that did, cannot have it, and the error says so:
 --8<-- "examples/perf_late.py:late"
 ```
 
-```sh
-python3 examples/perf_late.py
-```
-
-```
+```console
+$ python3 examples/perf_late.py
 The feature 'perf' needs the tracers 'latency', 'stats', but GStreamer could not create them (its warnings say why) or was initialised before it could set GST_TRACERS: build the player with Player.from_description(..., features=['perf']) or run `mixtape run --feature perf` before anything else initialises GStreamer, or set GST_TRACERS yourself
 ```
 
@@ -291,13 +279,10 @@ numbers in it too: `perf.<metric>.p95` and `perf.<metric>.max` for each test (ti
 nanoseconds), and the budgets as `perf.budget.<metric>.<stat>`. The second command picks out
 the properties of the pipeline latency, with the name of each test before its properties:
 
-```sh
-pytest -q examples/recorder_suite --mixtape-perf /tmp/perf-out --junitxml=/tmp/junit.xml
-grep -oE '(name="test_[a-z0-9_]+"|name="perf\.(budget|pipeline\.latency)[a-z.0-9]*" value="[^"]*")' \
+```console
+$ pytest -q examples/recorder_suite --mixtape-perf /tmp/perf-out --junitxml=/tmp/junit.xml
+$ grep -oE '(name="test_[a-z0-9_]+"|name="perf\.(budget|pipeline\.latency)[a-z.0-9]*" value="[^"]*")' \
     /tmp/junit.xml
-```
-
-```
 ..                                                                       [100%]
 mixtape perf: 2 of 2 tests measured, index at /tmp/perf-out/index.html
 2 passed in 4.16s
@@ -323,12 +308,9 @@ nothing.
 
 Break the recorder: `RECORDER_ENCODER` puts the slow preset back.
 
-```sh
-RECORDER_ENCODER="speed-preset=slow" pytest -q examples/recorder_suite \
+```console
+$ RECORDER_ENCODER="speed-preset=slow" pytest -q examples/recorder_suite \
     --mixtape-perf /tmp/perf-slow-out
-```
-
-```
 F.                                                                       [100%]
 =================================== FAILURES ===================================
 ______________________________ test_records_720p _______________________________
@@ -354,14 +336,11 @@ writes `compare.json` next to the index, prints the result in its own section an
 session, exit status 1, on a regression. Here the baseline is a session with the fast encoder,
 and the new one runs only the 360p test with the slow one:
 
-```sh
-pytest -q examples/recorder_suite --mixtape-perf /tmp/perf-base > /dev/null
-RECORDER_ENCODER="speed-preset=slow" pytest -q examples/recorder_suite -k 360p \
+```console
+$ pytest -q examples/recorder_suite --mixtape-perf /tmp/perf-base > /dev/null
+$ RECORDER_ENCODER="speed-preset=slow" pytest -q examples/recorder_suite -k 360p \
     --mixtape-perf /tmp/perf-new --mixtape-perf-baseline /tmp/perf-base
-echo "exit status $?"
-```
-
-```
+$ echo "exit status $?"
 .                                                                        [100%]
 mixtape perf: 1 of 1 tests measured, index at /tmp/perf-new/index.html
 ============================= mixtape perf compare =============================

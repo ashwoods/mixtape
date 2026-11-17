@@ -38,6 +38,9 @@ async def frames_in_a_second(player: Player) -> int:
 async def report(step: str, consumer: Player) -> None:
     frames = await frames_in_a_second(consumer)
     print(f"producer {step}: the consumer rendered more than 10 frames: {frames > 10}")
+    # > producer playing: the consumer rendered more than 10 frames: True
+    # > producer stopped: the consumer rendered more than 10 frames: True
+    # > producer restarted: the consumer rendered more than 10 frames: True
 
 
 async def main() -> None:

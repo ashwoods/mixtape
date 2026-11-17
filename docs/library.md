@@ -30,16 +30,6 @@ flowchart LR
 --8<-- "examples/lib_lifecycle.py:lifecycle"
 ```
 
-```sh
-python3 examples/lib_lifecycle.py
-```
-
-```
-playing
-paused
-null
-```
-
 `play()`, `pause()`, `ready()` and `stop()` return when the pipeline has reached the state, not
 before. `stop()` sets it to NULL, after an EOS with `stop(eos=True)`. A player that is torn down can
 be used again. Without `async with`, call `player.setup()` on the loop to attach it and
@@ -54,15 +44,6 @@ then; calling it again plays the stream again, from READY:
 --8<-- "examples/lib_until_eos.py:until_eos"
 ```
 
-```sh
-python3 examples/lib_until_eos.py
-```
-
-```
-run 1: playing at the end of the stream
-run 2: playing at the end of the stream
-```
-
 `Player.run` is the shortcut for a script: it plays a description (or a `Gst.Pipeline`) until
 EOS, tears the player down and returns. It starts the loop itself, so it cannot be called from
 a coroutine. It raises `TimeoutError` when `timeout` seconds pass first, and
@@ -70,14 +51,6 @@ a coroutine. It raises `TimeoutError` when `timeout` seconds pass first, and
 
 ```python
 --8<-- "examples/lib_run.py:run"
-```
-
-```sh
-python3 examples/lib_run.py
-```
-
-```
-done
 ```
 
 ### From a pipeline you built
@@ -98,16 +71,6 @@ flowchart LR
 
 ```python
 --8<-- "examples/lib_dynamic.py:build"
-```
-
-```sh
-python3 examples/lib_dynamic.py
-```
-
-```
-elements: dynamic, src, sink
-links: [('src', 'sink')]
-played
 ```
 
 Only elements with a name of your own are in the model: `describe().elements` lists the
@@ -158,23 +121,8 @@ flowchart LR
 --8<-- "examples/lib_errors.py:playing"
 ```
 
-The program calls the three functions in turn:
-
-```sh
-python3 examples/lib_errors.py
-```
-
-```
-Invalid pipeline 'videotestsrc ! nosuchelement ! fakesink': no element "nosuchelement"
-filesink0: Could not open file "/nonexistent/x" for writing.
-state: null
-flaky: Failed after iterations as requested.
-player.error is the exception: True
-error after playing again: None
-```
-
 The player also logs an error and a warning through the `mixtape.player` logger. The program
-turns that off to keep its output to what it prints.
+turns that off to keep its output to what it prints, the `# >` lines.
 
 An error that happens while nothing awaits, a pipeline that plays while the program sleeps, does
 not raise anywhere: it is an `Error` event and `player.error`.
@@ -213,17 +161,6 @@ flowchart LR
 --8<-- "examples/lib_events.py:events"
 ```
 
-```sh
-python3 examples/lib_events.py
-```
-
-```
-src.pattern = ball
-playing
-the position moves
-end of stream
-```
-
 `Position` is read every `Player.position_interval` seconds (0.25) while some stream asks for it,
 and published when the value changed. A stream that asks for them gets the current one at once.
 
@@ -235,15 +172,6 @@ logged and does not stop the others.
 
 ```python
 --8<-- "examples/lib_handler.py:handler"
-```
-
-```sh
-python3 examples/lib_handler.py
-```
-
-```
-a stream started
-done
 ```
 
 Use `add_handler` to react to one kind of message with a function, and `events()` to read
@@ -287,16 +215,6 @@ flowchart LR
 
 ```python
 --8<-- "examples/lib_shape.py:shape"
-```
-
-```sh
-python3 examples/lib_shape.py
-```
-
-```
-exposed: t, main
-links: 5
-exposed: t, main, extra
 ```
 
 The web page of the [HTTP API](http.md) follows the same events: its graph and its element
@@ -361,28 +279,11 @@ make. A name that does not exist is an `UnknownNameError`, a rejected value or a
 --8<-- "examples/testcard.py:main"
 ```
 
-```sh
-python3 examples/testcard.py
-```
-
-```
-commands: eos, pause, play, seek, show, stop
-properties: duration, frames, pattern, position, state
-pattern: smpte
-show: snow
-from a thread: smpte
-rejected: Invalid arguments for 'show': pattern: Input should be 'smpte', 'ball' or 'snow'
-frames: 10
-```
-
 The command line reads the same model without playing, from the module and the class. Here is
 the command of the test card:
 
-```sh
-PYTHONPATH=examples mixtape inspect testcard:Testcard | grep 'show('
-```
-
-```
+```console
+$ PYTHONPATH=examples mixtape inspect testcard:Testcard | grep 'show('
   show(pattern: smpte|ball|snow = smpte)                  Show a test pattern.
 ```
 
@@ -443,19 +344,6 @@ flowchart LR
 --8<-- "examples/heartbeat_plugin/heartbeat_demo.py:demo"
 ```
 
-```sh
-python3 examples/heartbeat_plugin/heartbeat_demo.py
-```
-
-```
-in the model: heartbeat.reset heartbeat.beats
-heartbeat.beats = 3
-reset: None 0
-detached: True
-Invalid options for feature 'heartbeat': interval: Input should be greater than 0
-heartbeat needs a pipeline with a sink
-```
-
 ### Make it available by name
 
 Register the class in the `mixtape.features` entry points of your package, and `--feature
@@ -468,15 +356,12 @@ heartbeat`, `features=["heartbeat"]` and `mixtape inspect --help` know it. This 
 
 Install it into the environment that has mixtape:
 
-```sh
-pip install ./examples/heartbeat_plugin
+```console
+$ pip install ./examples/heartbeat_plugin
 ```
 
-```sh
-mixtape inspect --feature heartbeat,interval=0.5 "videotestsrc ! fakesink" | grep heartbeat
-```
-
-```
+```console
+$ mixtape inspect --feature heartbeat,interval=0.5 "videotestsrc ! fakesink" | grep heartbeat
 Features: heartbeat
   heartbeat.reset()                                       Start counting again
   heartbeat.beats  r-  integer                    = 0       Beats since the player was set up

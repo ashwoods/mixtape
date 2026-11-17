@@ -24,10 +24,13 @@ async def main() -> None:
     async with player, serve(player, "127.0.0.1", 0) as listening:
         await player.play()
         print("serving a player named", player.describe().name)
+        # > serving a player named Player
         # the server runs in this loop: a client in the same program must not block it
         reply = await asyncio.to_thread(patch, f"{listening.url}/api/elements/vol", {"volume": 0.5})
         print("the server says", reply)
+        # > the server says {'volume': 0.5}
         print("the player says", player.get("vol.volume"))
+        # > the player says 0.5
 
 
 asyncio.run(main())

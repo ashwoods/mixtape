@@ -110,6 +110,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N803"] # the `Gst` fixture mirrors the module name
+# a `# > ` comment is a line the example prints, as long as the line is (ruff format wraps the code)
+"examples/**" = ["E501"]
 
 [tool.mypy]
 files = ["mixtape", "tests", "examples"]

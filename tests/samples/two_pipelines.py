@@ -1,6 +1,6 @@
 """The samples of two-pipelines.md: see tests/doc_samples.py."""
 
-from tests.doc_samples import Sample, run
+from tests.doc_samples import Sample, prints, run
 
 PAGE = "two-pipelines.md"
 
@@ -14,18 +14,16 @@ def separate_pads(out: str) -> None:
 
 
 SAMPLES: list[Sample] = [
-    run(
+    prints(
         PAGE,
         "inter",
-        "python3 examples/inter_restart.py",
-        exact=True,
+        "examples/inter_restart.py",
         elements=("intervideosink", "intervideosrc"),
     ),
-    run(
+    prints(
         PAGE,
         "proxy",
-        "python3 examples/proxy_link.py",
-        exact=True,
+        "examples/proxy_link.py",
         elements=("proxysink", "proxysrc"),
     ),
     run(
@@ -39,5 +37,9 @@ SAMPLES: list[Sample] = [
         needs=("curl",),
         timeout=30,
     ),
-    run(PAGE, "two-players", "python3 examples/two_players.py", exact=True),
+    prints(
+        PAGE,
+        "two-players",
+        "examples/two_players.py",
+    ),
 ]

@@ -14,6 +14,8 @@ async def main() -> None:
         for run in (1, 2):
             await player.play_until_eos()
             print(f"run {run}: {player.state.value_nick} at the end of the stream")
+            # > run 1: playing at the end of the stream
+            # > run 2: playing at the end of the stream
 
 
 asyncio.run(main())

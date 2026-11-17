@@ -15,33 +15,24 @@ the same commands, properties and control page that a [`Player`](library.md) you
 `mixtape run` plays the description until EOS or an error, like `gst-launch-1.0 -e`. The
 description is one quoted string, or the words of it:
 
-```sh
-mixtape run videotestsrc num-buffers=60 ! fakesink; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run videotestsrc num-buffers=60 ! fakesink; echo "exit status $?"
 exit status 0
 ```
 
 It exits 0 at EOS, 1 on a pipeline error, and 2 on a bad description or bad usage. A
 description that GStreamer cannot parse never starts:
 
-```sh
-mixtape run "videotestsrc ! nosuchelement ! fakesink"; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run "videotestsrc ! nosuchelement ! fakesink"; echo "exit status $?"
 error: Invalid pipeline 'videotestsrc ! nosuchelement ! fakesink': no element "nosuchelement"
 exit status 2
 ```
 
 An element that fails while playing says which one, and exits 1:
 
-```sh
-mixtape run "filesrc location=/tmp/missing.mp4 ! fakesink"; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run "filesrc location=/tmp/missing.mp4 ! fakesink"; echo "exit status $?"
 error: filesrc0: Resource not found.
 exit status 1
 ```
@@ -50,11 +41,8 @@ exit status 1
 line of GStreamer's source and the details that belong to it. `-vv` logs at debug level. It
 works before or after `run`:
 
-```sh
-mixtape run -v "filesrc location=/tmp/missing.mp4 ! fakesink" 2>&1 | grep "No such file"
-```
-
-```
+```console
+$ mixtape run -v "filesrc location=/tmp/missing.mp4 ! fakesink" 2>&1 | grep "No such file"
 No such file "/tmp/missing.mp4"
 ```
 
@@ -66,14 +54,11 @@ the other video sinks appear.
 The first Ctrl-C (or SIGTERM) sends an EOS and stops cleanly, so a recorder finishes its
 file, and `mixtape run` exits 0:
 
-```sh
-mixtape run "videotestsrc is-live=true ! fakesink" &
-sleep 2
-kill -INT $!
-wait $!; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run "videotestsrc is-live=true ! fakesink" &
+$ sleep 2
+$ kill -INT $!
+$ wait $!; echo "exit status $?"
 Interrupt: stopping (EOS)…
 exit status 0
 ```
@@ -82,14 +67,11 @@ A pipeline whose streaming thread hangs never carries the EOS to its sinks. It g
 the EOS and 5 s to stop, and then `mixtape run` exits 1 and names the elements that are still
 changing state. Here `identity` sleeps for 30 s on each buffer:
 
-```sh
-mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &
-sleep 2
-kill -INT $!
-wait $!; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &
+$ sleep 2
+$ kill -INT $!
+$ wait $!; echo "exit status $?"
 Interrupt: stopping (EOS)…
 error: Could not set the pipeline to null within 5 s: identity0 still changing
 exit status 1
@@ -98,16 +80,13 @@ exit status 1
 A second Ctrl-C does not wait for that: it stops at once and exits 130. A third one kills
 the process, as it would without `mixtape`.
 
-```sh
-mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &
-sleep 2
-kill -INT $!
-sleep 1
-kill -INT $!
-wait $!; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &
+$ sleep 2
+$ kill -INT $!
+$ sleep 1
+$ kill -INT $!
+$ wait $!; echo "exit status $?"
 Interrupt: stopping (EOS)…
 Interrupt: stopping now (Ctrl-C again to kill)…
 WARNING mixtape.player: Could not set the pipeline to null within 5 s: identity0 still changing: leaving it
@@ -140,11 +119,8 @@ flowchart LR
 
 `demo` is a module in the current folder, which `mixtape` finds there:
 
-```sh
-cd examples && mixtape inspect demo:Demo
-```
-
-```
+```console
+$ cd examples && mixtape inspect demo:Demo
 Demo
 
 Commands:
@@ -177,11 +153,8 @@ An element property can say `mutable: playing`, which is only what the element d
 changing it in that state: `mixtape` does not enforce it, and setting a property while
 playing is up to the element:
 
-```sh
-mixtape inspect "videotestsrc ! x264enc name=enc ! fakesink" | grep bitrate
-```
-
-```
+```console
+$ mixtape inspect "videotestsrc ! x264enc name=enc ! fakesink" | grep bitrate
   bitrate                      rw  integer 1..2048000                = 2048      mutable: playing  Bitrate in kbit/sec
 ```
 
@@ -191,12 +164,9 @@ mixtape inspect "videotestsrc ! x264enc name=enc ! fakesink" | grep bitrate
 the schema of its parameters and of its result. It is what `GET /api/model` of the
 [HTTP API](http.md) returns. This is the `gain` property of the player above:
 
-```sh
-cd examples && mixtape inspect --json demo:Demo \
+```console
+$ cd examples && mixtape inspect --json demo:Demo \
     | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["properties"]["gain"], indent=2))'
-```
-
-```
 {
   "path": "gain",
   "builtin": false,
@@ -223,21 +193,15 @@ cd examples && mixtape inspect --json demo:Demo \
 Only the elements you name (`name=src`) are exposed. The others are implementation, and
 `videotestsrc0` is not a stable name to build on:
 
-```sh
-mixtape inspect "videotestsrc name=src ! fakesink" | grep -E ' \(.*\) — '
-```
-
-```
+```console
+$ mixtape inspect "videotestsrc name=src ! fakesink" | grep -E ' \(.*\) — '
 src (videotestsrc) — Video test source
 ```
 
 `--expose-all` exposes every element, and the pipeline itself:
 
-```sh
-mixtape inspect --expose-all "videotestsrc ! fakesink" | grep -E ' \(.*\) — '
-```
-
-```
+```console
+$ mixtape inspect --expose-all "videotestsrc ! fakesink" | grep -E ' \(.*\) — '
 pipeline0 (pipeline) — Pipeline object
 videotestsrc0 (videotestsrc) — Video test source
 fakesink0 (fakesink) — Fake Sink
@@ -249,11 +213,8 @@ with `--expose-all`.
 When two elements have the same name, in different bins, each is keyed by its dotted path,
 `a.q` and `b.q`, and a bare `q` names neither:
 
-```sh
-mixtape inspect "bin.( name=a queue name=q ) bin.( name=b queue name=q )" | grep -E ' \(.*\) — '
-```
-
-```
+```console
+$ mixtape inspect "bin.( name=a queue name=q ) bin.( name=b queue name=q )" | grep -E ' \(.*\) — '
 a (bin) — Generic bin
 a.q (queue) — Queue
 b (bin) — Generic bin
@@ -267,11 +228,8 @@ no names for their arguments, so they are `arg1`, `arg2`... The model supports t
 whose arguments and result are booleans, numbers, strings, enums, caps or structures; a tag list or a
 structure comes back as JSON. An `appsrc` named `src` gets `src.end-of-stream`:
 
-```sh
-mixtape inspect "appsrc name=src ! fakesink" | grep "src\."
-```
-
-```
+```console
+$ mixtape inspect "appsrc name=src ! fakesink" | grep "src\."
   src.end-of-stream()                                     Emit the action signal 'end-of-stream' of GstAppSrc
 ```
 
@@ -281,11 +239,8 @@ mixtape inspect "appsrc name=src ! fakesink" | grep "src\."
 a property of the player, an alias such as `gain` or a built-in, or `element.property`; this
 is the name that `inspect` prints first in each row:
 
-```sh
-cd examples && mixtape run demo:Demo --set gain=0.5 --set vol.mute=true && echo done
-```
-
-```
+```console
+$ cd examples && mixtape run demo:Demo --set gain=0.5 --set vol.mute=true && echo done
 done
 ```
 
@@ -293,23 +248,17 @@ The value is a string on the command line; `mixtape` validates it against the ty
 range of the property, and converts it. One that is out of range, of the wrong type or for a
 property that does not exist is refused before anything plays, with `error: ` and exit status 2:
 
-```sh
-mixtape run "audiotestsrc num-buffers=10 ! volume name=vol ! fakesink" --set vol.volume=11; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run "audiotestsrc num-buffers=10 ! volume name=vol ! fakesink" --set vol.volume=11; echo "exit status $?"
 error: Invalid value for 'vol.volume': Input should be less than or equal to 10
 exit status 2
 ```
 
 A name that is ambiguous is refused too:
 
-```sh
-mixtape run --set q.max-size-buffers=5 \
+```console
+$ mixtape run --set q.max-size-buffers=5 \
     "bin.( name=a queue name=q ) bin.( name=b queue name=q )"; echo "exit status $?"
-```
-
-```
 error: 'q' is ambiguous: use a.q or b.q
 exit status 2
 ```
@@ -319,11 +268,8 @@ exit status 2
 `--http [HOST:]PORT` serves the player over HTTP in the same process and plays it, until you
 press Ctrl-C. It needs the `http` extra (`pip install 'mixtape[http]'`):
 
-```sh
-cd examples && mixtape run --http 8047 demo:Demo
-```
-
-```
+```console
+$ cd examples && mixtape run --http 8047 demo:Demo
 Serving on http://127.0.0.1:8047
 ```
 
@@ -344,11 +290,8 @@ repeated; its options are the `KEY=VALUE` pairs after the name, and a value may 
 only inside parentheses. `mixtape run --help` lists the features that are installed. A name that
 is not one fails before anything plays:
 
-```sh
-mixtape inspect --feature nope "videotestsrc ! fakesink"; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape inspect --feature nope "videotestsrc ! fakesink"; echo "exit status $?"
 error: Unknown feature 'nope'; available: leaks, perf, tracers
 exit status 2
 ```
@@ -363,11 +306,8 @@ ones are `leaks`, `tracers` and `perf`, and `gst:NAME` makes any GStreamer trace
 by type. A count that keeps growing in a steady pipeline is a leak. Its `interval` option is
 how often, in seconds, the count is published:
 
-```sh
-mixtape inspect --feature leaks,interval=0.5 "videotestsrc ! fakesink"
-```
-
-```
+```console
+$ mixtape inspect --feature leaks,interval=0.5 "videotestsrc ! fakesink"
 Player
 Features: leaks
 
@@ -401,25 +341,19 @@ included). They can be core tracers (`latency`, `rusage`, `stats`...) or those o
 gst-plugins-rs (`queue-levels`, `buffer-lateness`...). The `tracers.active` property lists the
 ones that run:
 
-```sh
-mixtape inspect --feature 'tracers,names=latency(flags=element+pipeline);rusage' \
+```console
+$ mixtape inspect --feature 'tracers,names=latency(flags=element+pipeline);rusage' \
     "videotestsrc ! fakesink" | grep tracers.active
-```
-
-```
   tracers.active  r-  list string                     = latency+rusage    The tracers GStreamer runs in this process
 ```
 
 The core tracers only write to GStreamer's debug log, so `log`, which is on by default, adds
 `GST_TRACER:7` to `GST_DEBUG`. Here are the lines that two of them wrote:
 
-```sh
-mixtape run "videotestsrc num-buffers=30 ! queue ! fakesink" \
+```console
+$ mixtape run "videotestsrc num-buffers=30 ! queue ! fakesink" \
     --feature 'tracers,names=latency(flags=element+pipeline);rusage' 2>&1 \
     | grep -o -E '(element-latency|proc-rusage),' | sort -u
-```
-
-```
 element-latency,
 proc-rusage,
 ```
@@ -445,11 +379,8 @@ The tracer's readable properties become read-only properties, `gst:NAME.property
 when the tracer notifies them (the `latency` tracer has its `flags` as a property since
 GStreamer 1.26):
 
-```sh
-mixtape inspect --feature gst:latency,flags=element "videotestsrc ! fakesink" | grep "gst:"
-```
-
-```
+```console
+$ mixtape inspect --feature gst:latency,flags=element "videotestsrc ! fakesink" | grep "gst:"
 Features: gst:latency
   gst:latency.params  r-  string                           = null       Extra configuration parameters
   gst:latency.flags   r-  flags pipeline|element|reported  = element    Flags to control what latency measurements to perform
@@ -459,11 +390,8 @@ Its action signals become commands, `gst:NAME.signal`, as the elements' do. Of t
 gst-plugins-rs tracers, `queue-levels`, `buffer-lateness` and `pad-push-timings` have a
 `write-log` command that writes their CSV to the file `arg1`:
 
-```sh
-mixtape inspect --feature gst:queue-levels "videotestsrc ! fakesink" | grep "write-log"
-```
-
-```
+```console
+$ mixtape inspect --feature gst:queue-levels "videotestsrc ! fakesink" | grep "write-log"
   gst:queue-levels.write-log(arg1: string | null)         Emit the action signal 'write-log' of GstQueueLevels
 ```
 
@@ -471,17 +399,14 @@ mixtape inspect --feature gst:queue-levels "videotestsrc ! fakesink" | grep "wri
 tracer's signal returns, such as the counters of a custom tracer, comes back as JSON. Commands
 are called with the control page or the [HTTP API](http.md), so here with `curl`:
 
-```sh
-mixtape run --http 8047 --feature gst:queue-levels \
+```console
+$ mixtape run --http 8047 --feature gst:queue-levels \
     "videotestsrc is-live=true ! queue name=q ! fakesink" 2>/dev/null &
-until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-curl -s -X POST 127.0.0.1:8047/api/commands/gst:queue-levels.write-log \
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s -X POST 127.0.0.1:8047/api/commands/gst:queue-levels.write-log \
     -d '{"arg1": "/tmp/q.csv"}'; echo
-cut -d, -f2 /tmp/q.csv | sort -u
-kill -INT $!
-```
-
-```
+$ cut -d, -f2 /tmp/q.csv | sort -u
+$ kill -INT $!
 {"result":null}
 q
 ```
@@ -490,11 +415,8 @@ Two tracers cannot be read by two features. A tracer that `perf` reads is refuse
 and `gst:leaks` is refused for good: use the `leaks` feature, as the signals of its tracer
 crash the process when they are called out of order:
 
-```sh
-mixtape run --feature gst:leaks "videotestsrc num-buffers=30 ! fakesink"; echo "exit status $?"
-```
-
-```
+```console
+$ mixtape run --feature gst:leaks "videotestsrc num-buffers=30 ! fakesink"; echo "exit status $?"
 error: The feature 'gst:leaks' is not supported: use the feature 'leaks': the tracer's signals crash the process or corrupt reference counts when called out of order (activity-get-checkpoint before activity-start-tracking, get-live-objects from Python)
 exit status 2
 ```

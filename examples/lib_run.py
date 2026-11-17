@@ -8,4 +8,5 @@ from mixtape import Player
 
 Player.run("videotestsrc num-buffers=100 ! fakesink", timeout=30)
 print("done")
+# > done
 # --8<-- [end:run]

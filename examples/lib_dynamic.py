@@ -29,9 +29,12 @@ def build() -> Gst.Pipeline:
 async def main() -> None:
     async with Player(build()) as player:
         print("elements:", ", ".join(player.describe().elements))
+        # > elements: dynamic, src, sink
         print("links:", [(link.source, link.sink) for link in player.graph().links])
+        # > links: [('src', 'sink')]
         await player.play_until_eos()
         print("played")
+        # > played
 
 
 asyncio.run(main())

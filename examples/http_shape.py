@@ -23,6 +23,7 @@ async def watch(url: str) -> None:
             if message["type"] == "graph":
                 nodes = message["graph"]["nodes"]
                 print("at first, wavparse0 is in the graph:", "wavparse0" in nodes)
+                # > at first, wavparse0 is in the graph: False
         await ws.send(json.dumps({"id": 1, "command": "play"}))
         # decodebin adds a wavparse while it prerolls: the graph and the model follow
         while not (graphs and models):
@@ -31,9 +32,11 @@ async def watch(url: str) -> None:
                 graphs += 1
                 parent = message["graph"]["nodes"]["wavparse0"]["parent"]
                 print("graph: wavparse0 is in the graph, inside", parent)
+                # > graph: wavparse0 is in the graph, inside dec
             elif message["type"] == "model" and "wavparse0" in message["model"]["elements"]:
                 models += 1
                 print("model: wavparse0 is exposed, with", message["values"])
+                # > model: wavparse0 is exposed, with {'wavparse0.ignore-length': False}
 
 
 # --8<-- [end:watch]

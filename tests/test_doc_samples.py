@@ -12,9 +12,11 @@ from tests.doc_samples import (
     Block,
     Sample,
     expected_statuses,
+    inline_output,
     matching,
     run_command,
     shown_block,
+    shown_code,
     skip_reason,
 )
 from tests.graphs import mermaid
@@ -29,6 +31,8 @@ def test_every_block_is_covered() -> None:
     own: dict[Block, list[Sample]] = {}  # block -> the samples that match it
     shown: dict[Block, list[Sample]] = {}  # output block -> the run samples that show it
     for sample in SAMPLES:
+        if sample.kind == "prints":  # its output is in the program, see test_sample
+            continue
         found = matching(sample)
         if len(found) != 1:
             problems.append(
@@ -69,13 +73,16 @@ def test_every_block_is_covered() -> None:
         # pytest-timeout arms its timer before the test runs: the marker has to be here
         pytest.param(s, id=s.id, marks=pytest.mark.timeout(s.timeout + 30))
         for s in SAMPLES
-        if s.kind in ("run", "output")
+        if s.kind in ("run", "output", "prints")
     ],
 )
 def test_sample(sample: Sample, tmp_path: Path) -> None:
     reason = skip_reason(sample)
     if reason:
         pytest.skip(reason)
+    if sample.kind == "prints":
+        check_inline_output(sample, tmp_path)
+        return
     shown = shown_block(sample)
     assert not (shown and shown.title.startswith(ILLUSTRATIVE)), (
         f"{shown and shown.where}: a checked output must not be titled illustrative"
@@ -97,6 +104,18 @@ def test_sample(sample: Sample, tmp_path: Path) -> None:
         if sample.check_shown:
             assert shown, f"{sample.id}: no output block to check"
             sample.check(shown.text)
+
+
+def check_inline_output(sample: Sample, tmp_path: Path) -> None:
+    """The program prints its `# >` lines, and they are in the sections the page shows."""
+    expected = inline_output(sample.contains)
+    assert expected, f"{sample.contains} has no `# >` comments"
+    shown = shown_code(sample.page, sample.contains)
+    hidden = [line for line in expected if f"# > {line}".rstrip() not in shown]
+    assert not hidden, f"{sample.page} does not include the sections with {hidden}"
+    out, status, timed_out = run_command(sample.command, tmp_path, sample.timeout)
+    assert not timed_out and status == 0, f"exit status {status}:\n{out}"
+    assert out.splitlines() == expected, f"{sample.contains} prints, not its `# >` lines:\n{out}"
 
 
 @pytest.mark.parametrize("sample", [s for s in SAMPLES if s.kind == "graph"], ids=lambda s: s.id)

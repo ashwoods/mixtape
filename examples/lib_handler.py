@@ -20,9 +20,11 @@ async def main() -> None:
             Gst.MessageType.STREAM_START, lambda message: print("a stream started")
         )
         await player.play_until_eos()
+        # > a stream started
         remove()  # a handler stays until it is removed
         await player.play_until_eos()  # no second line: it was removed
         print("done")
+        # > done
 
 
 asyncio.run(main())

@@ -75,16 +75,6 @@ second:
 --8<-- "examples/inter_restart.py:main"
 ```
 
-```sh
-python3 examples/inter_restart.py
-```
-
-```
-producer playing: the consumer rendered more than 10 frames: True
-producer stopped: the consumer rendered more than 10 frames: True
-producer restarted: the consumer rendered more than 10 frames: True
-```
-
 The consumer did not stop with the producer: `intervideosrc` makes a frame at the consumer's
 rate, and repeats the last one it got when no new one has come. When the producer stops it
 makes black frames, straight away, and so it does when the producer is paused for longer than
@@ -157,17 +147,6 @@ frame back until the consumer has been running as long as the producer had:
 --8<-- "examples/proxy_link.py:main"
 ```
 
-```sh
-python3 examples/proxy_link.py
-```
-
-```
-the consumer waits for the producer to play: True
-all 50 buffers and the EOS arrive: True
-shared base time: first frame before the producer's age: True
-own base time: first frame after the producer's age: True
-```
-
 ## Two processes: unixfd
 
 `unixfdsink` listens on a socket, and passes the buffers to the `unixfdsrc` that connects to
@@ -198,24 +177,21 @@ flowchart LR
   p0n1 -. "cam.sock" .-> p1n0
 ```
 
-```sh
-dir=$(mktemp -d)
-mixtape run --http 8101 --feature perf \
+```console
+$ dir=$(mktemp -d)
+$ mixtape run --http 8101 --feature perf \
     "videotestsrc is-live=true name=cam ! unixfdsink socket-path=$dir/cam.sock" &
-producer=$!
-until [ -S $dir/cam.sock ]; do sleep 0.1; done
-mixtape run --http 8102 --feature perf \
+$ producer=$!
+$ until [ -S $dir/cam.sock ]; do sleep 0.1; done
+$ mixtape run --http 8102 --feature perf \
     "unixfdsrc name=feed socket-path=$dir/cam.sock ! videoconvert name=conv ! fakesink" &
-consumer=$!
-sleep 3
-echo "producer, :8101:"; curl -s localhost:8101/api/properties | grep -o '"[a-z]*:src"' | sort -u
-echo "consumer, :8102:"; curl -s localhost:8102/api/properties | grep -o '"[a-z]*:src"' | sort -u
-kill $producer $consumer
-wait
-rm -r $dir
-```
-
-```
+$ consumer=$!
+$ sleep 3
+$ echo "producer, :8101:"; curl -s localhost:8101/api/properties | grep -o '"[a-z]*:src"' | sort -u
+$ echo "consumer, :8102:"; curl -s localhost:8102/api/properties | grep -o '"[a-z]*:src"' | sort -u
+$ kill $producer $consumer
+$ wait
+$ rm -r $dir
 Serving on http://127.0.0.1:8101
 Serving on http://127.0.0.1:8102
 producer, :8101:
@@ -277,18 +253,6 @@ flowchart LR
 
 ```python
 --8<-- "examples/two_players.py:main"
-```
-
-```sh
-python3 examples/two_players.py
-```
-
-```
-two ports: True
-cam's page lists: ['cam', 'q']
-mic's page lists: ['mic', 'q']
-cam's perf counted buffers of: ['cam:src', 'mic:src', 'q:src']
-mic's perf counted buffers of: ['cam:src', 'mic:src', 'q:src']
 ```
 
 Each page lists its own pipeline's elements, and each player's `perf` has counted buffers of the

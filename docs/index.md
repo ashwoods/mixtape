@@ -14,34 +14,31 @@ mixtape needs GStreamer and PyGObject (`gi`), which come from your system, not f
 
 === "macOS"
 
-    ```sh
-    brew install gstreamer
+    ```console
+    $ brew install gstreamer
     ```
 
 === "Ubuntu"
 
-    ```sh
-    sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
+    ```console
+    $ sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good
     ```
 
 Install mixtape into that Python, or into a venv created with `--system-site-packages` from
 it. The `http` extra adds the control page:
 
-```sh
-python3 -m venv --system-site-packages .venv && . .venv/bin/activate
-pip install 'mixtape[http]'
+```console
+$ python3 -m venv --system-site-packages .venv && . .venv/bin/activate
+$ pip install 'mixtape[http]'
 ```
 
 ## A first pipeline
 
 `mixtape run` plays a `gst-launch-1.0` description until it ends, and exits 0:
 
-```sh
-mixtape run "videotestsrc num-buffers=60 ! fakesink" && echo done
-```
-
-```
+```console
+$ mixtape run "videotestsrc num-buffers=60 ! fakesink" && echo done
 done
 ```
 
@@ -63,16 +60,9 @@ flowchart LR
 --8<-- "examples/hello.py:main"
 ```
 
-```sh
-python3 examples/hello.py
-```
-
-```
-null -> ready
-ready -> paused
-paused -> playing
-end of stream
-```
+The `# >` comments are what the program prints, and the tests check that it still does. Every
+program on these pages is in [`examples/`](https://github.com/ashwoods/mixtape/tree/main/examples)
+and runs from a checkout, here with `python3 examples/hello.py`.
 
 With `--http`, a player is served with a control page, generated from its pipeline, its
 properties and its commands ([HTTP API](http.md#the-control-page)):

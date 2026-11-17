@@ -21,6 +21,9 @@ async def talk(url: str) -> None:
         for _ in range(3):
             message = json.loads(await ws.recv())
             print("first:", message["type"])
+            # > first: model
+            # > first: values
+            # > first: graph
 
         await ws.send(json.dumps({"id": 1, "set": {"vol.volume": 0.5}}))
         await ws.send(json.dumps({"id": 2, "command": "no-such-command"}))
@@ -40,8 +43,13 @@ async def talk(url: str) -> None:
                     states.append(message["new"])
         for id_ in sorted(replies):
             print("reply", id_, replies[id_])
+            # > reply 1 {'vol.volume': 0.5}
+            # > reply 2 {'status': 404, 'detail': "Unknown command 'no-such-command'"}
+            # > reply 3 None
         print("property", changes)
+        # > property [('vol.volume', 0.5)]
         print("states", states)
+        # > states ['ready', 'paused', 'playing']
 
 
 # --8<-- [end:client]

@@ -1,6 +1,6 @@
 """The samples of http.md: see tests/doc_samples.py."""
 
-from tests.doc_samples import Sample, not_run, run
+from tests.doc_samples import Sample, not_run, prints, run
 
 PAGE = "http.md"
 
@@ -41,8 +41,16 @@ SAMPLES: list[Sample] = [
         ),
     ),
     run(PAGE, "pipeline-error", "missing.mp4", exact=True),
-    run(PAGE, "events-client", "^python3 examples/http_events.py", exact=True),
-    run(PAGE, "events-shape", "^python3 examples/http_shape.py", exact=True),
+    prints(
+        PAGE,
+        "events-client",
+        "examples/http_events.py",
+    ),
+    prints(
+        PAGE,
+        "events-shape",
+        "examples/http_shape.py",
+    ),
     run(PAGE, "bind-warning", "0.0.0.0:8047", exact=True),
     run(
         PAGE,
@@ -54,5 +62,9 @@ SAMPLES: list[Sample] = [
             '{"state":"playing","position":',
         ),
     ),
-    run(PAGE, "serve-in-code", "^python3 examples/http_serve.py", exact=True),
+    prints(
+        PAGE,
+        "serve-in-code",
+        "examples/http_serve.py",
+    ),
 ]

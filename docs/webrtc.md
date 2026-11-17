@@ -16,16 +16,16 @@ frames arrived are properties.
 
 === "macOS"
 
-    ```sh
-    brew install gstreamer libnice-gstreamer
+    ```console
+    $ brew install gstreamer libnice-gstreamer
     ```
 
     Homebrew's `gstreamer` includes the Rust plugins.
 
 === "Ubuntu"
 
-    ```sh
-    sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-nice \
+    ```console
+    $ sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-nice \
         libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev
     ```
 
@@ -33,18 +33,15 @@ frames arrived are properties.
     gst-plugins-rs 0.15.4 with cargo (Rust 1.92 or newer), the same way CI does, and
     `GST_PLUGIN_PATH` lets GStreamer find them:
 
-    ```sh
-    scripts/build-rs-plugins ~/.cache/gst-rs-plugins
-    export GST_PLUGIN_PATH=~/.cache/gst-rs-plugins
+    ```console
+    $ scripts/build-rs-plugins ~/.cache/gst-rs-plugins
+    $ export GST_PLUGIN_PATH=~/.cache/gst-rs-plugins
     ```
 
 Check that both elements are there:
 
-```sh
-gst-inspect-1.0 --exists webrtcsink && gst-inspect-1.0 --exists webrtcsrc && echo found
-```
-
-```
+```console
+$ gst-inspect-1.0 --exists webrtcsink && gst-inspect-1.0 --exists webrtcsrc && echo found
 found
 ```
 
@@ -53,26 +50,23 @@ found
 Run the signalling server and one client in a terminal. `--serve` makes the client run the
 server too, which `webrtcsink` can do itself:
 
-```sh
-python3 examples/webrtc_client.py --serve --name host
+```console
+$ python3 examples/webrtc_client.py --serve --name host
 ```
 
 It publishes a test pattern, and waits. In another terminal, start a second client, which calls
 the first by its name as soon as it publishes, and exits when it has seen 60 frames of its
 video:
 
-```sh
-python3 examples/webrtc_client.py --name guest --call host
+```console
+$ python3 examples/webrtc_client.py --name guest --call host
 ```
 
 To try it without a second terminal, `--demo` runs two clients in one process, alice with
 the server and bob, which call each other:
 
-```sh
-python3 examples/webrtc_client.py --demo
-```
-
-```
+```console
+$ python3 examples/webrtc_client.py --demo
 alice received 60 frames from bob
 bob received 60 frames from alice
 ```
@@ -80,8 +74,8 @@ bob received 60 frames from alice
 The test pattern is only the default. `--camera` publishes the camera instead, and
 `--sink autovideosink` shows the remote video in a window instead of dropping it:
 
-```sh
-python3 examples/webrtc_client.py --camera --sink autovideosink --call
+```console
+$ python3 examples/webrtc_client.py --camera --sink autovideosink --call
 ```
 
 Without an argument `--call` calls the first client that publishes. On a network, every
@@ -230,12 +224,9 @@ Because a client is a `Player`, `mixtape run` starts it with a control page. A h
 each with its page, make a call you can drive from the browser: open the client's page, and
 `call` the host from its commands.
 
-```sh
-mixtape run examples.webrtc_client:Host --http 8000 &
-mixtape run examples.webrtc_client:Client --http 8001
-```
-
-```
+```console
+$ mixtape run examples.webrtc_client:Host --http 8000 &
+$ mixtape run examples.webrtc_client:Client --http 8001
 Serving on http://127.0.0.1:8000
 Serving on http://127.0.0.1:8001
 ```
@@ -250,11 +241,8 @@ up.
 `--feature perf` measures a pipeline with GStreamer's tracers. The sending side exists from
 the start, and is measured as any pipeline is:
 
-```sh
-mixtape run examples.webrtc_client:Host --http 8000 --feature perf
-```
-
-```
+```console
+$ mixtape run examples.webrtc_client:Host --http 8000 --feature perf
 Serving on http://127.0.0.1:8000
 ```
 

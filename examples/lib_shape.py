@@ -22,6 +22,7 @@ async def main() -> None:
         events = player.events()
         await player.play()
         print("exposed:", ", ".join(player.describe().elements))
+        # > exposed: t, main
 
         # a second branch: this changes the graph, and the model with it, as `extra` is named
         branch = Gst.parse_bin_from_description("queue ! fakesink name=extra", True)
@@ -32,8 +33,10 @@ async def main() -> None:
         async for event in events:
             if isinstance(event, GraphChanged) and "extra" in event.graph.nodes:
                 print("links:", len(event.graph.links))
+                # > links: 5
             elif isinstance(event, ModelChanged):
                 print("exposed:", ", ".join(event.model.elements))
+                # > exposed: t, main, extra
                 break
 
 

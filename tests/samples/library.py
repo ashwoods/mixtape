@@ -1,6 +1,6 @@
 """The samples of library.md: see tests/doc_samples.py."""
 
-from tests.doc_samples import Sample, not_run, output, run
+from tests.doc_samples import Sample, not_run, output, prints, run
 
 PAGE = "library.md"
 
@@ -21,17 +21,57 @@ INSPECT_HEARTBEAT = (
 )
 
 SAMPLES: list[Sample] = [
-    run(PAGE, "lifecycle", "python3 examples/lib_lifecycle.py", exact=True),
-    run(PAGE, "until-eos", "python3 examples/lib_until_eos.py", exact=True),
-    run(PAGE, "run", "python3 examples/lib_run.py", exact=True),
-    run(PAGE, "dynamic", "python3 examples/lib_dynamic.py", exact=True),
-    run(PAGE, "errors", "python3 examples/lib_errors.py", exact=True),
-    run(PAGE, "events", "python3 examples/lib_events.py", exact=True),
-    run(PAGE, "handler", "python3 examples/lib_handler.py", exact=True),
-    run(PAGE, "shape", "python3 examples/lib_shape.py", exact=True),
-    run(PAGE, "testcard", "python3 examples/testcard.py", exact=True),
+    prints(
+        PAGE,
+        "lifecycle",
+        "examples/lib_lifecycle.py",
+    ),
+    prints(
+        PAGE,
+        "until-eos",
+        "examples/lib_until_eos.py",
+    ),
+    prints(
+        PAGE,
+        "run",
+        "examples/lib_run.py",
+    ),
+    prints(
+        PAGE,
+        "dynamic",
+        "examples/lib_dynamic.py",
+    ),
+    prints(
+        PAGE,
+        "errors",
+        "examples/lib_errors.py",
+    ),
+    prints(
+        PAGE,
+        "events",
+        "examples/lib_events.py",
+    ),
+    prints(
+        PAGE,
+        "handler",
+        "examples/lib_handler.py",
+    ),
+    prints(
+        PAGE,
+        "shape",
+        "examples/lib_shape.py",
+    ),
+    prints(
+        PAGE,
+        "testcard",
+        "examples/testcard.py",
+    ),
     run(PAGE, "inspect-testcard", "mixtape inspect testcard:Testcard", exact=True),
-    run(PAGE, "heartbeat", "python3 examples/heartbeat_plugin/heartbeat_demo.py", exact=True),
+    prints(
+        PAGE,
+        "heartbeat",
+        "examples/heartbeat_plugin/heartbeat_demo.py",
+    ),
     not_run(PAGE, "pip-heartbeat", "pip install ./examples/heartbeat_plugin", "installs a package"),
     not_run(
         PAGE,

@@ -1,0 +1,20 @@
+/* ```console blocks: a `$ ` command and its output, as in click's docs. The prompt and the output
+   are not selected with the command, and the copy button copies the commands only (Material sets
+   data-md-copying on the block while it reads its text). */
+.md-typeset .highlight .gp,
+.md-typeset .highlight .go {
+  user-select: none;
+}
+
+.md-typeset .highlight .gp {
+  color: var(--md-default-fg-color--lighter);
+}
+
+.md-typeset .highlight .go {
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset [data-md-copying] .gp,
+.md-typeset [data-md-copying] .go {
+  display: none;
+}

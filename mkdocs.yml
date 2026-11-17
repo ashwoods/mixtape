@@ -10,6 +10,7 @@ hooks:
 
 extra_css:
   - stylesheets/source-line.css
+  - stylesheets/console.css
 
 nav:
   - Overview: index.md

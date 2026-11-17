@@ -57,11 +57,16 @@ async def main() -> None:
     ):
         await asyncio.gather(cam.play(), mic.play())
         print("two ports:", cam_page.port != mic_page.port)
+        # > two ports: True
         print("cam's page lists:", await page_elements(cam_page.url))
+        # > cam's page lists: ['cam', 'q']
         print("mic's page lists:", await page_elements(mic_page.url))
+        # > mic's page lists: ['mic', 'q']
         await asyncio.wait_for(both_measured(cam, mic), 15)
         print("cam's perf counted buffers of:", pad_subjects(cam))
+        # > cam's perf counted buffers of: ['cam:src', 'mic:src', 'q:src']
         print("mic's perf counted buffers of:", pad_subjects(mic))
+        # > mic's perf counted buffers of: ['cam:src', 'mic:src', 'q:src']
 
 
 asyncio.run(main())

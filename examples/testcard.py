@@ -69,28 +69,35 @@ async def main() -> None:
     async with Testcard.from_description(Testcard.description) as card:
         spec = card.describe()
         print("commands:", ", ".join(sorted(spec.commands)))
+        # > commands: eos, pause, play, seek, show, stop
         print("properties:", ", ".join(sorted(spec.properties)))
+        # > properties: duration, frames, pattern, position, state
         print("pattern:", card.get("pattern"))
+        # > pattern: smpte
 
         events = card.events()
         await card.play()
         await card.set("pattern", "ball")
         print("show:", await card.invoke("show", pattern="snow"))
+        # > show: snow
 
         # from a thread of your own, run a coroutine on the player's loop
         def from_a_thread() -> str:
             return card.run_coroutine_threadsafe(card.invoke("show", pattern="smpte")).result()
 
         print("from a thread:", await asyncio.to_thread(from_a_thread))
+        # > from a thread: smpte
 
         try:
             await card.invoke("show", pattern="plaid")
         except InvalidValueError as exc:
             print("rejected:", exc)
+            # > rejected: Invalid arguments for 'show': pattern: Input should be 'smpte', 'ball' or 'snow'
 
         async for event in events:
             if isinstance(event, PropertyChanged) and event.path == "frames":
                 print("frames:", event.value)
+                # > frames: 10
                 break
 
 

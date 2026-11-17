@@ -35,33 +35,30 @@ and prototyping.
 
 `mixtape` needs GStreamer and PyGObject (`gi`), which come from your system, not from PyPI:
 
-```sh
-brew install gstreamer    # macOS
-sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
+```console
+$ brew install gstreamer    # macOS
+$ sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good    # Debian/Ubuntu
 ```
 
 Install `mixtape` into that Python, or into a venv created with `--system-site-packages` from
 it; the `http` extra adds the control page:
 
-```sh
-pip install 'mixtape[http]'
+```console
+$ pip install 'mixtape[http]'
 ```
 
 ## Quick start
 
 Play a pipeline, and control it from a browser at http://127.0.0.1:8080 with live metrics:
 
-```sh
-mixtape run "videotestsrc num-buffers=60 ! fakesink" && echo done
-```
-
-```
+```console
+$ mixtape run "videotestsrc num-buffers=60 ! fakesink" && echo done
 done
 ```
 
-```sh
-mixtape run --http 8080 --feature perf "videotestsrc is-live=true ! queue name=q ! autovideosink"
+```console
+$ mixtape run --http 8080 --feature perf "videotestsrc is-live=true ! queue name=q ! autovideosink"
 ```
 
 The [documentation](http://shashi.to/mixtape/) covers the command line, writing an application
@@ -73,9 +70,9 @@ each other. Every command and snippet in it runs in the test suite.
 You need [uv] and GStreamer with its Python bindings. The tests of the documentation's examples
 also use gst-plugins-bad, gst-plugins-ugly and libnice's GStreamer plugin:
 
-```sh
-brew install uv gstreamer libnice-gstreamer    # macOS (Homebrew)
-sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
+```console
+$ brew install uv gstreamer libnice-gstreamer    # macOS (Homebrew)
+$ sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-nice    # Debian/Ubuntu
 ```
@@ -83,8 +80,8 @@ sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
 Then run every check (ruff lint, ruff format, mypy, pytest, and the documentation's commands
 and build) with:
 
-```sh
-scripts/check
+```console
+$ scripts/check
 ```
 
 The first run creates `.venv` from the Python that has `gi` (Homebrew's `python3`, or
@@ -98,8 +95,8 @@ against that). To switch to another Python, `rm -rf .venv` and run `scripts/chec
 
 Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI does):
 
-```sh
-docker compose run --rm test
+```console
+$ docker compose run --rm test
 ```
 
 `tests/test_gst_c_crash.py` runs `mixtape run` against the failing elements of

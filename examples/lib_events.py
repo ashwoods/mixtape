@@ -19,12 +19,15 @@ async def main() -> None:
         moving = False
         async for event in events:
             match event:
-                case StateChanged(new=state) if state.value_nick == "playing":
-                    print("playing")
                 case PropertyChanged(path=path, value=value):
                     print(f"{path} = {value}")
+                    # > src.pattern = ball
+                case StateChanged(new=state) if state.value_nick == "playing":
+                    print("playing")
+                    # > playing
                 case Position(position=position) if position and not moving:
                     print("the position moves")
+                    # > the position moves
                     moving = True
                 case Warning(message=message):
                     print("warning:", message)
@@ -33,6 +36,7 @@ async def main() -> None:
                     break
                 case Eos():
                     print("end of stream")
+                    # > end of stream
                     break
 
 

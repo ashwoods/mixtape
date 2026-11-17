@@ -19,6 +19,7 @@ def typo() -> None:
         Player.from_description("videotestsrc ! nosuchelement ! fakesink")
     except PlayerDescriptionError as exc:
         print(exc)
+        # > Invalid pipeline 'videotestsrc ! nosuchelement ! fakesink': no element "nosuchelement"
 
 
 # --8<-- [end:description]
@@ -31,7 +32,9 @@ async def cannot_start() -> None:
             await player.play()
         except PlayerPipelineError as exc:
             print(f"{exc.source}: {exc.message}")
+            # > filesink0: Could not open file "/nonexistent/x" for writing.
             print("state:", player.state.value_nick)
+            # > state: null
 
 
 # --8<-- [end:start]
@@ -45,11 +48,14 @@ async def fails_while_playing() -> None:
             await player.play_until_eos()
         except PlayerPipelineError as exc:
             print(f"{exc.source}: {exc.message}")
+            # > flaky: Failed after iterations as requested.
             print("player.error is the exception:", player.error is exc)
+            # > player.error is the exception: True
 
         await player.set("flaky.error-after", -1)  # no more failures
         await player.play()
         print("error after playing again:", player.error)
+        # > error after playing again: None
 
 
 # --8<-- [end:playing]

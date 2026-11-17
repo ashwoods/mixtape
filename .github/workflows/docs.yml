@@ -1,9 +1,14 @@
 name: docs
 
+# The site describes the release on PyPI: it is built on every push and pull request, and
+# published when a release is published (or by hand, from the Actions tab).
 on:
   push:
     branches: [main]
   pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
 
 # one deployment at a time; a newer push replaces a waiting one
 concurrency:
@@ -12,7 +17,7 @@ concurrency:
 
 jobs:
   # The pages' commands and snippets run in CI's pytest (tests/test_doc_samples.py); this job
-  # only builds the site and publishes it from main.
+  # only builds the site.
   build:
     runs-on: ubuntu-24.04
     steps:
@@ -27,10 +32,11 @@ jobs:
         with:
           path: site
 
-  # Publishing needs Settings → Pages → Source: GitHub Actions. The account's Pages domain
-  # serves it at http://shashi.to/mixtape/.
+  # Publishing needs Settings → Pages → Source: GitHub Actions, and the github-pages
+  # environment to allow release tags (a deployment policy for tags `[0-9]*.[0-9]*.[0-9]*`).
+  # The account's Pages domain serves it at https://shashi.to/mixtape/.
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-24.04
     permissions:

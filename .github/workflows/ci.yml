@@ -11,7 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # gi and GStreamer come from apt, as in the Dockerfile.
+      # gi and GStreamer come from apt, as in the Dockerfile. The docs' examples need bad
+      # (webrtcbin, inter, proxy, unixfd), ugly (x264enc) and nice (webrtcbin's ICE).
       - name: Install GStreamer
         run: |
           sudo apt-get update -yq
@@ -20,6 +21,9 @@ jobs:
             python3-gst-1.0 \
             gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-nice \
             gstreamer1.0-tools \
             libgstreamer1.0-dev
 

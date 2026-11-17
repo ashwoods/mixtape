@@ -1,0 +1,39 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # The pages' commands and snippets run in CI's pytest (tests/test_doc_samples.py); this job
+  # only builds the site and publishes it from main.
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.7"
+      - run: uv run --locked --only-group docs mkdocs build --strict
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # Publishing needs Settings → Pages → Source: GitHub Actions. The account's Pages domain
+  # serves it at http://shashi.to/mixtape/.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

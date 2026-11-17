@@ -61,6 +61,7 @@ dev = [
     "colorlog",
     "httpx",
     "mixtape[http]",
+    { include-group = "docs" },
     "mypy",
     "pytest",
     "pytest-asyncio",
@@ -68,6 +69,9 @@ dev = [
     "pytest-timeout",
     "ruff",
 ]
+
+# The site in docs/ (mkdocs.yml); .github/workflows/docs.yml builds it with only this group.
+docs = ["mkdocs-material==9.8.1"]
 
 [build-system]
 requires = ["hatchling"]
@@ -103,7 +107,7 @@ ignore = [
 "tests/*" = ["N803"] # the `Gst` fixture mirrors the module name
 
 [tool.mypy]
-files = ["mixtape", "tests"]
+files = ["mixtape", "tests", "examples"]
 python_version = "3.12"
 strict_optional = true
 strict_equality = true

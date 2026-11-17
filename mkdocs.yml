@@ -1,0 +1,53 @@
+site_name: mixtape
+site_description: A Python GStreamer application framework, with a command line, a control page and pipeline metrics
+site_url: https://shashi.to/mixtape/
+repo_url: https://github.com/ashwoods/mixtape
+edit_uri: edit/main/docs/
+
+# adds a "Source: … · tested by …" line under each snippet from examples/
+hooks:
+  - hooks/source_lines.py
+
+extra_css:
+  - stylesheets/source-line.css
+
+nav:
+  - Overview: index.md
+  - Command line: cli.md
+  - Writing an application: library.md
+  - HTTP API: http.md
+  - Measuring performance: perf.md
+  - A WebRTC client: webrtc.md
+  - Two pipelines: two-pipelines.md
+
+theme:
+  name: material
+  features:
+    # picking a tab in one tab group picks it everywhere
+    - content.tabs.link
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      # the examples live outside docs/
+      base_path: [.]
+      check_paths: true
+      dedent_subsections: true

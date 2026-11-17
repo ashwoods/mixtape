@@ -1,0 +1,16 @@
+/* "Source: … · tested by …" under a snippet; see hooks/source_lines.py */
+.md-typeset p.source-line {
+  margin: 0.5em 0 1.2em;
+  font-size: 0.64rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset p.source-line a {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+.md-typeset p.source-line a:hover {
+  color: var(--md-accent-fg-color);
+}

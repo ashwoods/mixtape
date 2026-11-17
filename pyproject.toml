@@ -71,7 +71,7 @@ dev = [
 ]
 
 # The site in docs/ (mkdocs.yml); .github/workflows/docs.yml builds it with only this group.
-docs = ["mkdocs-material==9.8.1"]
+docs = ["mkdocs-material==9.8.1", "mkdocstrings[python]"]
 
 [build-system]
 requires = ["hatchling"]

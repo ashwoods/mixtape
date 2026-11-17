@@ -17,9 +17,30 @@ nav:
   - Command line: cli.md
   - Writing an application: library.md
   - HTTP API: http.md
+  - API reference: reference.md
   - Measuring performance: perf.md
   - A WebRTC client: webrtc.md
   - Two pipelines: two-pipelines.md
+
+# the API reference (docs/reference.md): griffe reads mixtape/ statically, so the build
+# needs neither GStreamer nor `gi`
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: null
+            show_source: false
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            filters: ["!^_"]
+            heading_level: 3
+            show_root_heading: true
+            show_root_full_path: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
 
 theme:
   name: material

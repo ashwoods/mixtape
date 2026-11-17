@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - The property changes of an exposed element come under its new key when a namesake added
   later renames it (`q` becomes `a.q`); they kept the old one.
+- A pipeline that links a sometimes pad with `!` (`decodebin ! queue`, also `decodebin3`,
+  `uridecodebin`, `uridecodebin3`) plays again after a stop: the player links the new pad
+  to the same peer. GStreamer's parser links the first pad only, so the second play
+  stopped with "not-linked".
 
 ## 0.7.0 (2026-11-17)
 

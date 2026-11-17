@@ -78,6 +78,15 @@ def _retrying[T](iterate: Callable[[], Iterable[T]]) -> list[T]:
             continue
 
 
+def _description_elements(bin: Gst.Bin) -> Iterator[Gst.Element]:
+    """The elements of `bin` and, deep, of its plain bins: those a description can make."""
+    plain = (Gst.Bin.__gtype__, Gst.Pipeline.__gtype__)
+    for element in _retrying(bin.iterate_elements):
+        yield element
+        if isinstance(element, Gst.Bin) and element.__gtype__ in plain:
+            yield from _description_elements(element)
+
+
 def _real_peer(pad: Gst.Pad) -> Gst.Pad | None:
     """The pad of an element that is not a bin that `pad` feeds, through ghost pads."""
     peer = pad.get_peer()
@@ -221,6 +230,8 @@ class Player:
         self._graph_seen: GraphSpec | None = None  # as last published
         self._exposed_seen: list[str] = []  # the keys of the exposed elements, likewise
         self._bin_ids: list[int] = []  # the pipeline's deep-element-added/removed handlers
+        self._relink_ids: list[tuple[Gst.Element, int]] = []  # pad-added, to link again
+        self._relinks: dict[Gst.Element, list[Gst.Pad]] = {}  # the peers its new pads had
         self._attached: list[Feature] = []  # in the order they attached
         for alias in self._declarations().props.values():
             self._locate(alias.target, exposed=False)  # a typo fails here
@@ -349,6 +360,7 @@ class Player:
         loop.add_reader(fd, self._drain)
         self._loop, self._fd = loop, fd
         self._connect_notify()
+        self._connect_relinks()
         for feature in self._features.values():
             feature.player = self
             try:
@@ -380,6 +392,7 @@ class Player:
 
     def _teardown(self, *, null: bool) -> None:
         self._disconnect_notify()
+        self._disconnect_relinks()
         if null:
             try:
                 self._raise_if_stuck()
@@ -1059,6 +1072,42 @@ class Player:
         for entry in [entry for entry in self._notify_ids if entry[0] == element]:
             element.disconnect(entry[1])
             self._notify_ids.remove(entry)
+
+    # -- links to sometimes pads: again on every play -- #
+
+    def _connect_relinks(self) -> None:
+        """From `setup` to `teardown`: link a sometimes pad that comes unlinked to the peer a
+        pad of its element had when it came before. `gst_parse` links `decodebin ! queue` on
+        the first pad-added only, so without this a pipeline cannot play again after a stop.
+
+        Only the elements the description made: those at the top and in plain bins. Other
+        bins (decodebin, playbin) link their children's pads themselves."""
+        for element in _description_elements(self.pipeline):
+            if any(
+                t.direction == Gst.PadDirection.SRC and t.presence == Gst.PadPresence.SOMETIMES
+                for t in element.get_pad_template_list()
+            ):
+                self._relink_ids.append((element, element.connect("pad-added", self._relink)))
+
+    def _disconnect_relinks(self) -> None:
+        for element, handler in self._relink_ids:
+            element.disconnect(handler)
+        self._relink_ids.clear()
+
+    def _relink(self, element: Gst.Element, pad: Gst.Pad) -> None:
+        """On the thread that added the pad, before data flows, and after `gst_parse`'s own
+        handler, connected first: learn the peer it linked, or link a pad it no longer does."""
+        if pad.get_direction() != Gst.PadDirection.SRC:
+            return
+        peers = self._relinks.setdefault(element, [])
+        peer = pad.get_peer()
+        if peer is not None:
+            if peer not in peers:
+                peers.append(peer)
+            return
+        for peer in peers:  # a peer gone from the pipeline fails the link
+            if not peer.is_linked() and pad.link(peer) == Gst.PadLinkReturn.OK:
+                return
 
     # -- the pipeline's shape: GraphChanged and ModelChanged -- #
 

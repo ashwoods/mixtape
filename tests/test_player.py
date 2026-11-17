@@ -317,6 +317,20 @@ async def test_play_until_eos_again_after_stop():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decoder", ["decodebin", "decodebin3"])
+async def test_a_description_links_a_decoders_pad_again_on_every_play(decoder: str):
+    # gst_parse links the first pad-added only: the next play would stop with not-linked
+    description = f"audiotestsrc num-buffers=10 ! wavenc ! {decoder} ! queue ! fakesink"
+    player = Player.from_description(description)
+    async with player:
+        await bounded(player.play_until_eos())
+        await bounded(player.stop())
+        await bounded(player.play_until_eos())
+    async with player:  # attached again
+        await bounded(player.play_until_eos())
+
+
+@pytest.mark.asyncio
 async def test_play_until_eos_back_to_back():
     async with Player.from_description("videotestsrc num-buffers=10 ! fakesink") as player:
         await bounded(player.play_until_eos())

@@ -112,6 +112,8 @@ GStreamer's own tracers, in a player or in a pytest suite. This release breaks t
   `py.typed` and uPlot 1.6.32 (MIT) in `mixtape/vendor/uplot`.
 - Checks are ruff, mypy and pytest, run by `scripts/check`. CI moved from Travis to GitHub
   Actions (Ubuntu 24.04, Python 3.12, PyGObject 3.48), and a Docker image runs the same.
+- A GitHub release gets the wheel and sdist, with build provenance attestations
+  (`gh attestation verify <file> --repo ashwoods/mixtape`).
 
 ## 0.5.1 (2020-07-18)
 - Remove pygobject-stubs as test dependency

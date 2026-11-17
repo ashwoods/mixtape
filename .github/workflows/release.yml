@@ -1,0 +1,41 @@
+name: Release
+
+# Publishing a GitHub release builds the wheel and sdist from its tag, attests their
+# provenance (`gh attestation verify <file> --repo ashwoods/mixtape`) and attaches them.
+on:
+  release:
+    types: [published]
+
+jobs:
+  dist:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # attach the files to the release
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.7"
+          enable-cache: false
+
+      - name: Check the tag is the version
+        run: test "$(uv version --short)" = "$GITHUB_REF_NAME"
+
+      # No GStreamer needed: hatchling only packs the files.
+      - name: Build
+        run: uv build
+
+      - uses: actions/attest@v4
+        with:
+          subject-path: dist/*
+
+      - name: Attach to the release
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

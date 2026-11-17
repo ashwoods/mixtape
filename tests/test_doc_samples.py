@@ -8,7 +8,6 @@ import pytest
 
 from tests.doc_samples import (
     BLOCKS,
-    ILLUSTRATIVE,
     AUTO,
     Block,
     Sample,
@@ -94,9 +93,6 @@ def test_sample(sample: Sample, tmp_path: Path) -> None:
     if reason:
         pytest.skip(reason)
     shown = shown_block(sample)
-    assert not (shown and shown.title.startswith(ILLUSTRATIVE)), (
-        f"{shown and shown.where}: a checked output must not be titled illustrative"
-    )
     command = sample.command or matching(sample)[0].text
     out, status, timed_out = run_command(command, tmp_path, sample.timeout)
     assert timed_out == sample.hangs, f"timed_out={timed_out}:\n{out}"
@@ -150,15 +146,5 @@ def test_graph(sample: Sample) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "sample", [s for s in SAMPLES if s.kind == "illustrative"], ids=lambda s: s.id
-)
-def test_illustrative_block_says_so(sample: Sample) -> None:
-    block = matching(sample)[0]
-    assert block.title.startswith(ILLUSTRATIVE), (
-        f'{block.where}: add title="{ILLUSTRATIVE}: {sample.why}" to the fence'
-    )
-
-
 def test_samples_say_why_they_are_not_run() -> None:
-    assert [s.id for s in SAMPLES if s.kind in ("not-run", "illustrative") and not s.why] == []
+    assert [s.id for s in SAMPLES if s.kind == "not-run" and not s.why] == []

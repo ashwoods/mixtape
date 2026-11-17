@@ -15,7 +15,6 @@ every one needs a sample:
   shows it, in `# >` comments under its prints (ruff format writes `#>` as `# >`). It must
   print those lines, in order, and the page must include the sections that have them.
 - `not_run`: a command that is setup, needs a camera, or runs until Ctrl-C, with the reason.
-- `illustrative`: an output that cannot be checked. The page must say so in the block's title.
 - `graph`: a ```mermaid graph of pipelines, which must be what tests/graphs.py makes of
   their descriptions (`python -m tests.graphs` writes it).
 
@@ -41,7 +40,6 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGES = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
-ILLUSTRATIVE = "Illustrative output"
 AUTO = "auto"
 
 
@@ -141,7 +139,7 @@ class Sample:
     page: str
     name: str
     contains: str  # a unique substring of the block; `^` starts it with it
-    kind: str  # run, output, prints, not-run, illustrative, graph
+    kind: str  # run, output, prints, not-run, graph
     why: str = ""
     command: str = ""  # output: the command that produces the block
     shows: str | None = AUTO  # run: contains of the output block (AUTO: the next block)
@@ -186,10 +184,6 @@ def prints(page: str, name: str, program: str, **kw: Any) -> Sample:
 
 def not_run(page: str, name: str, contains: str, why: str) -> Sample:
     return Sample(page, name, contains, "not-run", why=why)
-
-
-def illustrative(page: str, name: str, contains: str, why: str) -> Sample:
-    return Sample(page, name, contains, "illustrative", why=why)
 
 
 def graph(page: str, name: str, *pipelines: str | tuple[str, str], **kw: Any) -> Sample:
@@ -296,8 +290,9 @@ SCRUBBED = ("GST_DEBUG", "GST_DEBUG_FILE", "GST_DEBUG_DUMP_DOT_DIR", "GST_TRACER
 
 
 # The ports the pages serve on: a command gets free ones instead, and its output the page's back,
-# so that a server running on the machine (`mkdocs serve` on 8000) does not fail it.
-PORTS = ("8000", "8001", "8047", "8101", "8102")
+# so that a server running on the machine does not fail it. 8000 is `mkdocs serve`'s: the pages
+# do not use it.
+PORTS = ("8047", "8048", "8101", "8102")
 
 
 def free_port() -> str:
@@ -316,6 +311,7 @@ def run_command(command: str, tmp_path: Path, timeout: int) -> tuple[str, int, b
     env["PATH"] = os.pathsep.join([str(Path(sys.executable).parent), env["PATH"]])
     env["LC_ALL"] = "C"
     env["NO_COLOR"] = "1"
+    env["COLUMNS"] = "80"  # `--help` wraps its text to the width of the terminal
     proc = subprocess.Popen(
         ["bash", "-c", command.replace("/tmp/", f"{tmp_path}/")],
         cwd=ROOT,

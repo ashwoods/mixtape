@@ -87,7 +87,7 @@ $ curl -s 127.0.0.1:8047/api/graph; echo
 $ curl -s 127.0.0.1:8047/api/elements/vol; echo
 $ curl -s 127.0.0.1:8047/api/properties; echo
 $ kill -INT $!
-{"name":"Player","commands":{"pause":{"name":"pause","description":"Pause the pipeline.","param
+{"name":"Player","features":[],"commands":{"pause":{"name":"pause","description":"Pause the pipeline.","param
 {"pipeline":"pipeline0","nodes":{"audiotestsrc0":{"name":"audiotestsrc0","factory":"audiotestsrc","parent":null,"bin":false,"exposed":false},"vol":{"name":"vol","factory":"volume","parent":null,"bin":false,"exposed":true},"sink":{"name":"sink","factory":"fakesink","parent":null,"bin":false,"exposed":true}},"links":[{"source":"audiotestsrc0","source_pad":"src","sink":"vol","sink_pad":"sink","caps":"audio/x-raw, format=(string)S16LE, layout=(string)interleaved, rate=(int)44100, channels=(int)1"},{"source":"vol","source_pad":"src","sink":"sink","sink_pad":"sink","caps":"audio/x-raw, format=(string)S16LE, layout=(string)interleaved, rate=(int)44100, channels=(int)1"}]}
 {"qos":false,"mute":false,"volume":0.25,"volume-full-range":0.25}
 {"state":"playing","position":0.52,"duration":null}

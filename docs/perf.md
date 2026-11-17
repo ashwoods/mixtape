@@ -332,7 +332,8 @@ budget, but `index.html` shows what happened to it:
 A budget bounds what you chose to bound. The other check compares the whole session with an
 earlier one: `--mixtape-perf-baseline BASE` takes the `--mixtape-perf` folder of that session
 (CI keeps the one of the main branch), compares at the end as `mixtape perf compare` does,
-writes `compare.json` next to the index, prints the result in its own section and fails the
+writes `compare.json` next to the index (the same JSON as `mixtape perf compare --json`; from
+0.8, fields are only added, never renamed or removed), prints the result in its own section and fails the
 session, exit status 1, on a regression. Here the baseline is a session with the fast encoder,
 and the new one runs only the 360p test with the slow one:
 

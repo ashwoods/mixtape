@@ -339,7 +339,7 @@ class Measure:
         )
         if self.baseline is not None:
             result = compare.compare_folders(self.baseline, self.out, compare.THRESHOLD)
-            self._comparison = {"base": str(self.baseline), "new": str(self.out), **result}
+            self._comparison = result
             self._comparison_text = compare.format_text(result)
             (self.out / "compare.json").write_text(
                 json.dumps(self._comparison, indent=2) + "\n", encoding="utf-8"

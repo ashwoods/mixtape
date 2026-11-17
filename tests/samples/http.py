@@ -19,7 +19,7 @@ SAMPLES: list[Sample] = [
         "reads",
         "--set vol.volume=0.25",
         expect=(
-            '{"name":"Player","commands":{"pause":{"name":"pause","description"',
+            '{"name":"Player","features":[],"commands":{"pause":{"name":"pause","description"',
             '"links":[{"source":"audiotestsrc0","source_pad":"src","sink":"vol"',
             '{"qos":false,"mute":false,"volume":0.25,"volume-full-range":0.25}',
             '{"state":"playing","position":',

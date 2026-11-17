@@ -329,7 +329,8 @@ def test_a_session_is_compared_with_its_baseline(
     result, out = measure(pytester, f"--mixtape-perf-baseline={base}")
     comparison = load(out / "compare.json")
     assert comparison["base"] == str(base) and comparison["new"] == str(out)
-    assert comparison["removed"] == ["test_suite.py::test_old"]
+    assert comparison["removed"] == [{"test": "test_suite.py::test_old"}]
+    assert comparison["threshold_percent"] == 50
     if regressed:
         assert result.ret == pytest.ExitCode.TESTS_FAILED
         result.assert_outcomes(passed=1)  # the tests did not fail, the session did

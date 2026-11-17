@@ -83,6 +83,8 @@ class ElementSpec(_Spec):
 
 class PlayerSpec(_Spec):
     name: str
+    features: list[str] = Field(default_factory=list)
+    """The names of the features the player has enabled, as `mixtape inspect` lists them"""
     commands: dict[str, CommandSpec]
     properties: dict[str, PropSpec]
     """The built-ins, the declared aliases and the computed properties"""

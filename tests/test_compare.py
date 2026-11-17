@@ -86,7 +86,7 @@ def test_a_session_has_regressions_improvements_and_what_is_added() -> None:
         ("fast", "p95"),
         ("fast", "max"),
     ]
-    assert result["added"] == ["fresh"] and result["removed"] == ["gone"]
+    assert result["added"] == [{"test": "fresh"}] and result["removed"] == [{"test": "gone"}]
     text = compare.format_text(result)
     assert "slow  pipeline.latency  p95" in text and "10 ms → 16 ms  +60%" in text
     assert text.splitlines()[-1].startswith("1 regressions, 2 improvements, 1 added, 1 removed")
@@ -97,7 +97,9 @@ def test_a_metric_one_side_lacks_is_added_not_a_regression() -> None:
     base = index(a={"pipeline_latency": (1 * MS, 1 * MS)})
     new = index(a={"pipeline_latency": (1 * MS, 1 * MS), "process_cpu": (90, 90)})
     result = compare.compare(base, new, "session")
-    assert result["regressions"] == [] and result["added"] == ["a  process.cpu"]
+    assert result["regressions"] == [] and result["added"] == [
+        {"test": "a", "metric": "process.cpu"}
+    ]
 
 
 def test_a_run_compares_each_subject() -> None:
@@ -105,7 +107,8 @@ def test_a_run_compares_each_subject() -> None:
     new = summary("element.latency", "ns", q=(2 * MS, 2 * MS), w=(1, 1), v=(1, 1))
     result = compare.compare(base, new, "run")
     assert [(c["subject"], c["stat"]) for c in result["regressions"]] == [("q", "p95")]
-    assert result["added"] == ["element.latency  w"] and result["removed"] == ["element.latency  u"]
+    assert result["added"] == [{"metric": "element.latency", "subject": "w"}]
+    assert result["removed"] == [{"metric": "element.latency", "subject": "u"}]
     assert result["compared"] == 4  # q and v, p95 and max
     # a metric of a newer version is not compared, nor does it fail
     assert compare.compare(

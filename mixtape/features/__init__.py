@@ -73,10 +73,22 @@ class Feature:
         try:
             options = cls._options.model_validate(raw)
         except ValidationError as exc:
+            for error in exc.errors(include_url=False, include_context=False):
+                if error["type"] == "extra_forbidden":
+                    raise FeatureError(
+                        f"Feature {cls.name!r} has no option {error['loc'][0]!r}; "
+                        f"its options: {cls._option_list() or 'none'}"
+                    ) from exc
             raise FeatureError(
                 f"Invalid options for feature {cls.name!r}: {validation_reasons(exc)}"
             ) from exc
         return cls(**{key: getattr(options, key) for key in type(options).model_fields})
+
+    @classmethod
+    def _option_list(cls) -> str:
+        """The options with a short type, as `out (path), interval (number > 0)`."""
+        properties = cls._options.model_json_schema()["properties"]
+        return ", ".join(f"{name} ({_option_type(schema)})" for name, schema in properties.items())
 
     def prepare(self) -> None:
         """Called before GStreamer is initialised, when the player builds the pipeline from a
@@ -119,6 +131,20 @@ class Feature:
         if not self._initialised:
             self._initialised = True
             self.initialised()
+
+
+def _option_type(schema: dict[str, Any]) -> str:
+    """A short type of an option from its JSON Schema: `path`, `number > 0`, `integer >= 1`."""
+    if "anyOf" in schema:  # an optional value: its type, without the null
+        return " or ".join(_option_type(s) for s in schema["anyOf"] if s.get("type") != "null")
+    if schema.get("format") == "path":
+        return "path"
+    if "enum" in schema:
+        return "|".join(map(str, schema["enum"]))
+    kind = str(schema.get("type", "any"))
+    limits = {"exclusiveMinimum": ">", "minimum": ">=", "exclusiveMaximum": "<", "maximum": "<="}
+    bounds = [f"{sign} {schema[key]:g}" for key, sign in limits.items() if key in schema]
+    return " ".join([kind, *bounds])
 
 
 type FeatureSpec = str | type[Feature] | Feature

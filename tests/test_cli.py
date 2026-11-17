@@ -59,6 +59,24 @@ def test_inspect_player_class(capsys: pytest.CaptureFixture[str]) -> None:
     assert "shout(word: string, times: integer = 2)" in out
 
 
+def test_inspect_arrays_are_flags_only_when_their_items_are_a_choice(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # GStreamer flags are arrays of a choice
+    assert main(["inspect", "playbin name=pb"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any(line.split()[:3] == ["flags", "rw", "flags"] for line in lines)
+    # the tracers' names are a plain list; a process of its own, as the tracers need GStreamer
+    # not to be initialised yet
+    argv = [sys.executable, "-m", "mixtape", "inspect", "fakesrc ! fakesink"]
+    done = subprocess.run(
+        [*argv, "--feature", "tracers,names=latency"], capture_output=True, text=True, timeout=20
+    )
+    assert done.returncode == 0, done.stderr
+    rows = [line.split()[:3] for line in done.stdout.splitlines()]
+    assert ["tracers.active", "r-", "list"] in rows
+
+
 @pytest.mark.parametrize("position", ["before", "after"])
 def test_run_set(position: str) -> None:
     description = ["videotestsrc", "name=src", "num-buffers=5", "!", "fakesink"]

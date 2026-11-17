@@ -293,20 +293,17 @@ with `--feature` on the command line, which can be repeated:
 
 ```python
 class Camera(Player):
-    features = ("stats,interval=2",)  # names and classes, never instances
+    features = ("leaks,interval=2",)  # names and classes, never instances
 
 
-player = Player.from_description(description, features=["stats", "leaks,interval=5"])
+player = Player.from_description(description, features=["perf", "leaks,interval=5"])
 ```
 
-    mixtape run "videotestsrc name=src ! queue name=q ! fakesink" --feature stats --http 8000
+    mixtape run "videotestsrc name=src ! queue name=q ! fakesink" --feature perf --http 8000
     mixtape inspect --feature leaks,interval=0.5 "videotestsrc ! fakesink"
 
 The built-in ones:
 
-* `stats` publishes `stats.rates`: the buffers and kilobits per second leaving each exposed
-  element, over the last `interval` seconds (default 1). It counts with a pad probe on the source
-  pads an element has when the player is set up, so a sink has no rate.
 * `leaks` publishes `leaks.alive`: the GStreamer objects created and not yet freed since it
   attached, by type, from GStreamer's `leaks` tracer; a count that keeps growing in a steady
   pipeline is a leak. `leaks.checkpoint` returns what changed since its last call and

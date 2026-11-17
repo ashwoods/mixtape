@@ -27,7 +27,7 @@ jobs:
       # not packaged for Ubuntu: build them once and cache the plugin.
       - name: Cache GStreamer Rust tracers
         id: tracers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/gst-rs-tracers
           key: gst-rs-tracers-${{ runner.os }}-0.15.4-${{ hashFiles('scripts/build-rs-tracers') }}
@@ -44,7 +44,8 @@ jobs:
       - name: Check the tracers load
         run: gst-inspect-1.0 queue-levels
 
-      - uses: astral-sh/setup-uv@v6
+      # setup-uv stopped publishing major tags at v8: pin the release.
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.7"
 

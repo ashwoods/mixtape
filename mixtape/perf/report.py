@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .metrics import units_script
+
 UPLOT_BANNER = "/*! https://github.com/leeoniya/uPlot (v1.6.32) */"
 
 POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'"
@@ -47,6 +49,7 @@ def render(summary: dict[str, Any], windows: list[dict[str, Any]]) -> str:
     scripts = (
         _read("interfaces/http/graph.js"),
         uplot,
+        units_script(),
         _read("interfaces/http/perf.js"),
         _read("interfaces/http/report.js"),
     )

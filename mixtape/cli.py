@@ -116,7 +116,7 @@ def _add_target(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="NAME[,KEY=VALUE…]",
-        help="enable a feature with its options, e.g. stats,interval=1; repeatable; a value "
+        help="enable a feature with its options, e.g. leaks,interval=1; repeatable; a value "
         "has commas only inside parentheses. "
         f"Available: {installed}",
     )
@@ -286,7 +286,7 @@ def _prop_row(player: Player, prop: PropSpec, name: str) -> list[str]:
 
 
 def _type(schema: dict[str, Any], *, keep_null: bool = False) -> str:
-    """A compact type from a JSON Schema: `integer 1..8`, `a|b|c`, `flags a|b`."""
+    """A compact type from a JSON Schema: `integer 1..8`, `a|b|c`, `flags a|b`, `list string`."""
     if str(schema.get("format", "")).startswith("gst-"):
         return str(schema["format"]).removeprefix("gst-")  # caps, structure
     if "anyOf" in schema:
@@ -298,7 +298,8 @@ def _type(schema: dict[str, Any], *, keep_null: bool = False) -> str:
         return str(schema["const"])
     kind = str(schema.get("type", "any"))
     if kind == "array" and "items" in schema:
-        return f"flags {_type(schema['items'])}"
+        # only a choice of values makes flags, as on the page; other arrays are lists
+        return f"{'flags' if 'enum' in schema['items'] else 'list'} {_type(schema['items'])}"
     if "minimum" in schema and "maximum" in schema:
         low, high = schema["minimum"], schema["maximum"]
         if kind == "integer":

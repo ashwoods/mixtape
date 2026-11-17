@@ -1,7 +1,8 @@
 "use strict";
 // What the `perf` feature measures, on the pipeline graph and in uPlot charts. Shared by the
 // control page (live: a window every interval) and a run's report.html (inlined, the whole run),
-// after graph.js and uPlot.
+// after graph.js, uPlot and metrics.js (METRIC_UNITS, the unit of each metric, generated from
+// mixtape/perf/metrics.py).
 //
 // The graph answers "where does the time go, what backs up" at a glance: each element's mean
 // latency on its node, the slowest one in bold, and a level bar under each queue at its fullest.
@@ -9,14 +10,6 @@
 // how all of it changes over time.
 
 const PERF_SUMMARY = "perf.summary";
-
-/** The unit of each metric, as mixtape/perf/metrics.py has them. */
-const METRIC_UNITS = {
-  "element.latency": "ns", "pipeline.latency": "ns",
-  "pad.buffers": "buffers/s", "pad.bitrate": "bit/s", "pad.interval": "ns", "pad.lateness": "ns", "pad.push": "ns",
-  "queue.bytes": "bytes", "queue.buffers": "buffers", "queue.time": "ns", "queue.fill": "ratio",
-  "process.cpu": "%",
-};
 
 /** The charts, in order: the first ones always, the others with "All metrics". `stat` is the
  * statistic of each window plotted: the mean, or the peak where a short one matters. */
@@ -93,7 +86,7 @@ const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyV
 // ---- the view ----------------------------------------------------------------------------
 
 /** The perf view: `section` (the charts), `measures` (for graph.measures), `add(window)` for
- * each live window, `setGraph(graph)` for the flow order. A report passes `run`: its summary,
+ * each live window, `setGraph(graph)` for the flow order, `dispose()` when it is dropped. A report passes `run`: its summary,
  * windows and first time, and has no live windows. */
 function createPerf({ live, run = null }) {
   const state = {
@@ -260,7 +253,14 @@ function createPerf({ live, run = null }) {
     });
   }
 
-  darkScheme.addEventListener("change", () => { for (const c of charts) if (c.el) destroy(c); draw(); });
+  const onScheme = () => { for (const c of charts) if (c.el) destroy(c); draw(); };
+  darkScheme.addEventListener("change", onScheme);
+
+  /** Let go of what outlives the view: the colour scheme listener and the charts' observers. */
+  function dispose() {
+    darkScheme.removeEventListener("change", onScheme);
+    for (const c of charts) if (c.el) { destroy(c); c.resize.disconnect(); c.el.remove(); c.el = null; }
+  }
 
   // -- on the graph --
   let slots = [];
@@ -357,5 +357,5 @@ function createPerf({ live, run = null }) {
       span: (Number(w.end) - Number(w.start)) / 1e9, metrics: w.metrics }));
     state.latest = run.stats;
   }
-  return { section, measures, add, setGraph, draw };
+  return { section, measures, add, setGraph, draw, dispose };
 }

@@ -34,7 +34,6 @@ mixtape = "mixtape.cli:main"
 [project.entry-points."mixtape.features"]
 leaks = "mixtape.features.leaks:Leaks"
 perf = "mixtape.features.perf:Perf"
-stats = "mixtape.features.stats:Stats"
 tracers = "mixtape.features.tracers:Tracers"
 
 [project.urls]

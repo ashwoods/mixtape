@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from ...exceptions import InvalidValueError, MixTapeError, UnknownNameError
 from ...model import ElementSpec
+from ...perf.metrics import units_script
 from ...player import Player
 from .errors import describe_error
 from .security import check_headers, is_loopback
@@ -29,7 +30,8 @@ STATIC = {
     "uPlot.min.css": ("vendor/uplot/uPlot.min.css", "text/css"),
 }
 """The files the page loads besides itself, by name: where they are in the package, and their
-type. The perf report inlines the same files."""
+type. The perf report inlines the same files. `metrics.js` is the exception: it is generated,
+from the metrics `perf` measures."""
 
 
 async def _json_object(request: Request) -> dict[str, Any]:
@@ -73,6 +75,8 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
 
     @app.get("/static/{name}", include_in_schema=False)
     async def static(name: str) -> Response:
+        if name == "metrics.js":
+            return Response(units_script(), media_type="text/javascript")
         if name not in STATIC:
             return PlainTextResponse("Not Found", status_code=404)
         path, media_type = STATIC[name]

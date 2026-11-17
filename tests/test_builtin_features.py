@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import subprocess
@@ -9,50 +8,14 @@ from typing import Any
 import pytest
 
 from mixtape import Player
-from mixtape.events import EventStream, PropertyChanged
 from mixtape.exceptions import FeatureError
 from mixtape.features import available, resolve
 from mixtape.features.leaks import Leaks
 from mixtape.features.tracers import Tracers
 
-STREAMING = (
-    "fakesrc name=src sizetype=fixed sizemax=1000 ! identity name=id sleep-time=1000 "
-    "! fakesink name=sink"
-)
-
 
 def test_the_builtin_features_are_registered() -> None:
-    assert {"leaks", "perf", "stats", "tracers"} <= available().keys()
-
-
-# -- stats -- #
-
-
-async def flowing_rates(stream: EventStream) -> Any:
-    """The first published `stats.rates` in which `src` has buffers."""
-    async for event in stream:
-        if isinstance(event, PropertyChanged) and event.path == "stats.rates":
-            if event.value.get("src", {}).get("buffers_per_s", 0) > 0:
-                return event.value
-    raise AssertionError("the event stream ended")
-
-
-@pytest.mark.asyncio
-async def test_stats_publishes_the_rates_of_the_exposed_elements(Gst: Any) -> None:
-    player = Player.from_description(STREAMING, features=["stats,interval=0.1"])
-    description = player.describe().properties["stats.rates"].description
-    assert description is not None and description.startswith("Buffers and kilobits")
-    assert player.get("stats.rates") == {}  # not attached
-    for _ in range(2):  # and again after a teardown
-        async with player:
-            events = player.events()
-            await player.play()
-            published = await asyncio.wait_for(flowing_rates(events), 5)
-            assert set(published) == {"src", "id"}  # the sink has no source pad
-            assert set(published["src"]) == {"buffers_per_s", "kbit_per_s"}
-            assert published["src"]["kbit_per_s"] > 0
-            assert player.get("stats.rates").keys() == published.keys()
-        assert player.get("stats.rates") == {}
+    assert {"leaks", "perf", "tracers"} <= available().keys()
 
 
 # -- leaks -- #

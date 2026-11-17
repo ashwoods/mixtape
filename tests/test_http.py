@@ -77,6 +77,7 @@ async def test_the_page_loads_its_shared_code(served: Served) -> None:
     page = (await served.client.get("/")).text
     for name, media_type, has in [
         ("graph.js", "text/javascript", "function renderGraph("),
+        ("metrics.js", "text/javascript", '"process.cpu": "%"'),
         ("perf.js", "text/javascript", "function createPerf("),
         ("uPlot.iife.min.js", "text/javascript", "uPlot"),
         ("mixtape.css", "text/css", "--accent"),

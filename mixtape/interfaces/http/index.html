@@ -274,6 +274,7 @@ input[type=checkbox] { accent-color: var(--accent); margin: 0; }
 <main id="main"></main>
 <script src="/static/graph.js"></script>
 <script src="/static/uPlot.iife.min.js"></script>
+<script src="/static/metrics.js"></script>
 <script src="/static/perf.js"></script>
 <script>
 "use strict";
@@ -1062,6 +1063,7 @@ function build(m) {
 
   // perf has a section of its own and its measures on the graph, rather than a row of JSON
   const measured = Object.hasOwn(m.properties, PERF_SUMMARY);
+  if (!measured && perfView) perfView.dispose();
   perfView = measured ? perfView || createPerf({ live: true }) : null;
   graph.measures = perfView && perfView.measures;
   if (perfView && graph.data) perfView.setGraph(graph.data);

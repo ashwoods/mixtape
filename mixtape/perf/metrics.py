@@ -1,5 +1,6 @@
 """What `perf` measures: the samples and the fixed table of metrics they belong to."""
 
+import json
 from typing import NamedTuple
 
 
@@ -52,3 +53,10 @@ METRICS: dict[str, Metric] = {
     "process.cpu": Metric("%", "CPU time of the process over wall time; 100 is one core"),
 }
 """Every metric by name, with its unit: the live page and the report key on these names"""
+
+
+def units_script() -> str:
+    """`metrics.js`: the script that defines `METRIC_UNITS`, the unit of each metric, for
+    `perf.js`, which the control page and the report both load after it."""
+    units = {name: metric.unit for name, metric in METRICS.items()}
+    return f"const METRIC_UNITS = {json.dumps(units, indent=2)};\n"

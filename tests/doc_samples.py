@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-PAGES = sorted((ROOT / "docs").glob("*.md"))
+PAGES = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
 ILLUSTRATIVE = "Illustrative output"
 AUTO = "auto"
 

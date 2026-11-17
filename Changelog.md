@@ -23,8 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with structure results as JSON. It refuses `leaks` and the tracers `perf` reads beside it.
 - The action signals of exposed elements are commands, `element.signal` (`mux.split-now`),
   with the parameters `arg1`, `arg2`... when the model supports their types.
+- A documentation site, http://shashi.to/mixtape/, built with MkDocs from `docs/`: the command
+  line, writing an application, the HTTP API, measuring performance with a real-world recorder,
+  a WebRTC client and two pipelines that talk to each other. Its code comes from runnable
+  programs in `examples/`, and every command and snippet on it runs in the test suite.
 
 ### Changed
+- The README is an overview with a quick start; the reference moved to the documentation site.
 - `WS /api/events` opens with a `model` message, then `values` and `graph`: a client that
   expects `values` first must skip the `model` one.
 - `Feature.name` is an instance attribute (a `gst:` feature has its own), and

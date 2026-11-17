@@ -96,6 +96,11 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.format]
+# ruff formats the Python blocks of Markdown, and reads a page's `--8<-- "examples/x.py:main"`
+# include as Python; the code they include is formatted in examples/.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "N"]
 ignore = [

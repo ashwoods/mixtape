@@ -13,7 +13,7 @@ import pytest
 from mixtape import Player
 from mixtape.exceptions import FeatureError
 from mixtape.perf import RUST, Artifacts, Sample, Totals, TracerLog, percentile, rates, window
-from mixtape.perf.reader import LogTail
+from mixtape.perf.reader import RingTail
 
 FIXTURES = Path(__file__).parent / "fixtures" / "perf"
 """Recorded from `videotestsrc num-buffers=3 ! video/x-raw,width=64,height=48 ! queue name=q
@@ -173,24 +173,113 @@ def test_the_artifacts_have_every_sample_window_and_the_run(tmp_path: Path) -> N
 # -- the log reader -- #
 
 
-def test_the_reader_parses_the_tracer_lines_and_echoes_the_others(tmp_path: Path) -> None:
-    path = tmp_path / "debug.log"
-    lines = (FIXTURES / "gst-debug.txt").read_text().splitlines(keepends=True)
-    other = "0:00:00.1 1 0x1 WARN videotestsrc gstvideotestsrc.c:1:f: hello\n"
-    path.write_text("".join(lines[:40]) + other + lines[40][:30])  # GStreamer is mid-line
-    echo = io.StringIO()
-    tail = LogTail(path, echo)
+class Rings:
+    """The rings of the ring buffer logger, as `get_logs` gives them: a string for each thread
+    of at most `size` bytes, from whose start whole lines are dropped as it fills."""
+
+    def __init__(self, size: int = 1 << 20) -> None:
+        self.size = size
+        self.threads: dict[str, str] = {}
+
+    def log(self, thread: str, line: str) -> None:
+        text = self.threads.get(thread, "") + line + "\n"
+        while len(text) > self.size:
+            text = text[text.index("\n") + 1 :]
+        self.threads[thread] = text
+
+    def __call__(self) -> list[str]:
+        return list(self.threads.values())
+
+
+def other(ts: int, thread: str, text: str) -> str:
+    """A line of a category that is not the tracers'."""
+    return f"0:00:00.{ts:09d} 1 {thread} WARN cat file.c:1:func:<obj> {text}"
+
+
+def ring_tail(rings: Rings, echo: io.StringIO | None) -> RingTail:
+    return RingTail(echo, rings, size=rings.size, poll=3600)  # reads when asked
+
+
+def test_the_reader_parses_the_tracer_lines_and_echoes_the_others() -> None:
+    lines = (FIXTURES / "gst-debug.txt").read_text().splitlines()
+    rings, echo = Rings(), io.StringIO()
+    stray = other(1, "0x1", "hello")
+    for line in lines[:40]:
+        rings.log(line.split()[2], line)
+    rings.log("0x1", stray)
+    tail = ring_tail(rings, echo)
     try:
         tail.collect(True)
-        with open(path, "a") as log:
-            log.write(lines[40][30:] + "".join(lines[41:]))
+        for line in lines[40:]:
+            rings.log(line.split()[2], line)
         samples, counts = tail.take()
     finally:
         tail.close()
-    assert echo.getvalue() == other
-    assert tail.lines == len(lines) + 1
+    assert echo.getvalue() == stray + "\n"
     assert counts == dict.fromkeys(PADS, (3, 3 * FRAME))
     assert len([s for s in samples if s.metric == "element.latency"]) == 9
+    assert tail.lost == 0
+
+
+def test_the_reader_takes_only_the_new_lines_in_time_order() -> None:
+    rings, echo = Rings(), io.StringIO()
+    tail = ring_tail(rings, echo)
+    try:
+        rings.log("0xa", other(3, "0xa", "a3"))
+        rings.log("0xb", other(2, "0xb", "b2"))
+        rings.log("0xa", other(5, "0xa", "a5"))
+        rings.log("0xb", other(4, "0xb", "b4"))
+        tail.catch_up()
+        tail.catch_up()  # the rings are as they were
+        assert [line.split()[-1] for line in echo.getvalue().splitlines()] == [
+            "b2",
+            "a3",
+            "b4",
+            "a5",
+        ]
+        rings.log("0xb", other(6, "0xb", "b6"))
+        rings.log("0xb", other(7, "0xb", "b7"))
+        echo.seek(0)
+        echo.truncate()
+        tail.catch_up()
+    finally:
+        tail.close()
+    assert [line.split()[-1] for line in echo.getvalue().splitlines()] == ["b6", "b7"]
+    assert tail.lost == 0
+
+
+def test_the_reader_counts_a_ring_that_wrapped_past_the_last_line_it_read(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rings = Rings(size=1000)
+    tail = ring_tail(rings, io.StringIO())
+    try:
+        rings.log("0xa", other(1, "0xa", "first"))
+        tail.catch_up()
+        for round in range(2):  # the ring is full of lines it has not seen, twice
+            for i in range(20):
+                rings.log("0xa", other(10 + round * 100 + i, "0xa", f"line {i:<30}"))
+            assert len(rings.threads["0xa"]) > 900
+            tail.catch_up()
+    finally:
+        tail.close()
+    assert tail.lost == 2
+    assert len([r for r in caplog.records if "lost" in r.getMessage()]) == 1  # warned once
+
+
+def test_the_reader_counts_no_loss_for_a_new_thread_that_reuses_a_pointer() -> None:
+    rings, echo = Rings(size=1000), io.StringIO()
+    tail = ring_tail(rings, echo)
+    try:
+        rings.log("0xa", other(1, "0xa", "old thread"))
+        tail.catch_up()
+        rings.threads["0xa"] = ""  # its ring timed out
+        rings.log("0xa", other(2, "0xa", "new thread"))  # the same pointer, other lines
+        tail.catch_up()
+    finally:
+        tail.close()
+    assert tail.lost == 0
+    assert echo.getvalue().count("new thread") == 1
 
 
 # -- the feature -- #

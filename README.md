@@ -331,9 +331,11 @@ The built-in ones:
   and `queue.bytes`, `queue.buffers`, `queue.time` and `queue.fill` (0 to 1) from the
   gst-plugins-rs `buffer-lateness`, `pad-push-timings` and `queue-levels`, left out with a
   warning when they are not installed; and `process.cpu`. No Python runs on a streaming
-  thread: the core tracers write to `GST_DEBUG_FILE`, which a thread reads (it sets one of its
-  own unless the environment has one, and echoes its other lines to stderr), and the
-  gst-plugins-rs ones write their logs when asked, once per window. With `out`, a folder gets
+  thread: the core tracers write to the debug log, which a thread reads from GStreamer's ring
+  buffer logger, in memory (it replaces the default logger and echoes the lines that are not
+  the tracers' to stderr; with a `GST_DEBUG_FILE` in the environment the default logger stays,
+  writing there, and it echoes nothing), and the gst-plugins-rs ones write their logs when
+  asked, once per window. With `out`, a folder gets
   `samples.jsonl` (every sample), `<metric>.csv` (`t_ns,subject,value`), `windows.jsonl` and,
   when the player is torn down, `summary.json`: n, mean, p50, p95, p99 and max of the whole
   run, the pipeline, its graph and the tracers; and `report.html`, all of it on one page that

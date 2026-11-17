@@ -46,6 +46,7 @@ class Feature:
     _options: ClassVar[type[BaseModel]]
     _declared: ClassVar[Declarations]
     _prepared = False
+    _initialised = False
 
     def __init__(self) -> None:
         pass
@@ -77,6 +78,11 @@ class Feature:
         """Called before GStreamer is initialised, when the player builds the pipeline from a
         description: the place to set environment variables such as `GST_TRACERS`."""
 
+    def initialised(self) -> None:
+        """Called once GStreamer is initialised (by the player or before), and before the player
+        builds its pipeline from a description: the place for what has to be in place before an
+        element is made, such as a logger. Raise `FeatureError` if the feature cannot work."""
+
     def check(self, player: "Player") -> None:
         """Called when the player is built, after GStreamer is initialised and `requires` is
         met, before it is set up: raise `FeatureError` if the feature cannot work here, so the
@@ -100,6 +106,11 @@ class Feature:
         if not self._prepared:
             self._prepared = True
             self.prepare()
+
+    def _initialised_once(self) -> None:
+        if not self._initialised:
+            self._initialised = True
+            self.initialised()
 
 
 type FeatureSpec = str | type[Feature] | Feature

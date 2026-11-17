@@ -188,6 +188,8 @@ class Player:
         for feature in self._features.values():
             feature._prepare_once()  # no-op when `from_description` did
         ensure_init()
+        for feature in self._features.values():
+            feature._initialised_once()  # no-op when `from_description` did
         self._description: str | None = None  # the one `from_description` built it from
         if not isinstance(pipeline, Gst.Pipeline):
             raise TypeError(f"pipeline must be a Gst.Pipeline, not {type(pipeline).__name__}")
@@ -229,6 +231,8 @@ class Player:
         for feature in resolved:
             feature._prepare_once()
         ensure_init()
+        for feature in resolved:
+            feature._initialised_once()
         try:
             element = Gst.parse_launch(description)
         except GLib.Error as exc:

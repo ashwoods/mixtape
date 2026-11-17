@@ -353,7 +353,7 @@ def test_a_baseline_needs_the_option_and_a_session(pytester: pytest.Pytester) ->
     result.stderr.fnmatch_lines(["*--mixtape-perf-baseline needs --mixtape-perf*"])
     result, _ = measure(pytester, "--mixtape-perf-baseline=nowhere")
     assert result.ret == pytest.ExitCode.USAGE_ERROR
-    result.stderr.fnmatch_lines(["*--mixtape-perf-baseline: *nowhere has neither an index.json*"])
+    result.stderr.fnmatch_lines(["*--mixtape-perf-baseline: *nowhere does not exist*"])
     # the folder of this session is no baseline: it is replaced as the session goes
     result, out = measure(pytester, f"--mixtape-perf-baseline={pytester.path / 'perf' / '.'}")
     assert result.ret == pytest.ExitCode.USAGE_ERROR

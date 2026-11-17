@@ -36,7 +36,12 @@ def kind(folder: Path) -> str:
     for name, found in (("index.json", "session"), ("summary.json", "run")):
         if (folder / name).is_file():
             return found
-    raise CompareError(f"{folder} has neither an index.json nor a summary.json")
+    if not folder.exists():
+        raise CompareError(f"{folder} does not exist")
+    raise CompareError(
+        f"{folder} has neither an index.json nor a summary.json: `mixtape run --feature "
+        "perf,out=DIR` writes a summary.json, `pytest --mixtape-perf DIR` an index.json"
+    )
 
 
 def _values(document: dict[str, Any], what: str) -> dict[tuple[str, ...], dict[str, Any]]:
@@ -153,8 +158,10 @@ def _change(change: dict[str, Any]) -> list[str]:
     was, now = change["base"], change["new"]
     shown = f"{measure(was, unit)} → {measure(now, unit)}"
     percent = f"{(now - was) / abs(was) * 100:+.0f}%" if was else "new"
-    where = change["test"] + "  " if "test" in change else ""
-    return [f"{where}{change['metric']}  {change['stat']}", change["subject"], shown, percent]
+    if percent == "-100%" and now:  # -100% is for a value that fell to 0
+        percent = "-99%"
+    where = [change["test"]] if "test" in change else []
+    return [*where, change["metric"], change["stat"], change["subject"], shown, percent]
 
 
 def _table(rows: list[list[str]]) -> list[str]:

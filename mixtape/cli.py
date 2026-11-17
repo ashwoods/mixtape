@@ -1,8 +1,11 @@
 """The `mixtape` command line."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import contextlib
+import errno
 import importlib
 import importlib.metadata
 import json
@@ -11,26 +14,18 @@ import os
 import re
 import signal
 import sys
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import gi
-
-gi.require_version("Gst", "1.0")
-from gi.repository import Gst
-
-from . import features
-from .events import Error, EventStream
-from .exceptions import (
-    ModelError,
-    PlayerDescriptionError,
-    PlayerPipelineError,
-    PlayerSetStateError,
-)
-from .model import CommandSpec, PropSpec
 from .perf import compare as perf_compare
-from .player import Player
+
+# PyGObject and GStreamer come from the system and may be missing: `--help`, `--version` and
+# `perf compare` work without them, so only the commands that need them import them.
+if TYPE_CHECKING:
+    from .events import EventStream
+    from .model import CommandSpec, PropSpec
+    from .player import Player
 
 logger = logging.getLogger("mixtape")
 _uvicorn_logger = logging.getLogger("uvicorn")
@@ -41,30 +36,61 @@ EXIT_ERROR = 1
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
 HTTP_HOST = "127.0.0.1"
+NO_GST = (
+    "error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: "
+    "see https://shashi.to/mixtape/troubleshooting/"
+)
+VERBOSE_HELP = "log more: -v info, -vv debug"
+
+
+class _Formatter(argparse.HelpFormatter):
+    """Wraps each line of a description or epilog on its own, so that an epilog can list
+    examples, one to a line."""
+
+    def _fill_text(self, text: str, width: int, indent: str) -> str:
+        lines = []
+        for line in text.split("\n"):
+            deeper = indent + line[: len(line) - len(line.lstrip())]
+            lines.append(super()._fill_text(line, width, deeper))
+        return "\n".join(lines)
+
+
+def _command(commands: Any, name: str, **kwargs: Any) -> argparse.ArgumentParser:
+    return commands.add_parser(name, allow_abbrev=False, formatter_class=_Formatter, **kwargs)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mixtape", description="Run GStreamer pipelines.")
+    parser = argparse.ArgumentParser(
+        prog="mixtape",
+        description="Run GStreamer pipelines.",
+        allow_abbrev=False,
+        formatter_class=_Formatter,
+    )
     parser.add_argument(
         "--version", action="version", version=f"mixtape {importlib.metadata.version('mixtape')}"
     )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="log more: -v for info, -vv for debug",
+    parser.add_argument("-v", "--verbose", action="count", default=0, help=VERBOSE_HELP)
+    parser.set_defaults(needs_gst=True)
+    # `-v` of a command adds to the `-v` before it: it has a count of its own
+    verbose = argparse.ArgumentParser(add_help=False)
+    verbose.add_argument(
+        "-v", "--verbose", dest="more_verbose", action="count", default=0, help=VERBOSE_HELP
     )
     commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    run = commands.add_parser(
+    run = _command(
+        commands,
         "run",
+        parents=[verbose],
         help="run a pipeline until EOS or an error, like gst-launch-1.0 -e",
         description="Run a gst-launch style pipeline description until EOS or an error, "
         "or with --http until interrupted.",
-    )
-    run.add_argument(  # also after the command; SUPPRESS keeps a count given before it
-        "-v", "--verbose", action="count", default=argparse.SUPPRESS, help="log more"
+        epilog="Examples:\n"
+        '  mixtape run "videotestsrc ! autovideosink"\n'
+        "  mixtape run --http 8047 demo:Demo\n"
+        "\n"
+        "Exit status: 0 at EOS or after a first Ctrl-C, 1 on a pipeline error or when --http "
+        "cannot listen, 2 on bad usage, 130 on a second Ctrl-C.",
     )
     _add_target(run)
     run.add_argument(
@@ -85,27 +111,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.set_defaults(handler=_run)
 
-    inspect = commands.add_parser(
+    inspect = _command(
+        commands,
         "inspect",
+        parents=[verbose],
         help="show the commands, properties and elements a player exposes",
         description="Show what a player exposes: its commands, properties and the properties "
         "of its elements, with their types, ranges and current values.",
-    )
-    inspect.add_argument(
-        "-v", "--verbose", action="count", default=argparse.SUPPRESS, help="log more"
+        epilog="Exit status: 0 on success, 2 on bad usage or a target that cannot be loaded, "
+        "130 on Ctrl-C.",
     )
     _add_target(inspect)
     inspect.add_argument("--json", action="store_true", help="print the model as JSON")
     inspect.set_defaults(handler=_inspect)
 
-    perf = commands.add_parser(
+    perf = _command(
+        commands,
         "perf",
         help="work with what the perf feature measured",
         description="Work with the folders the perf feature and `pytest --mixtape-perf` write.",
     )
     perf_commands = perf.add_subparsers(dest="perf_command", required=True, metavar="COMMAND")
-    compare = perf_commands.add_parser(
+    compare = _command(
+        perf_commands,
         "compare",
+        parents=[verbose],
         help="find what got slower between two sessions or two runs",
         description="Compare two sessions of `pytest --mixtape-perf` (folders with an "
         "index.json) or two single runs (folders with a summary.json, as `mixtape run "
@@ -113,9 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
         "worse. A value is a regression when it grew by more than the threshold and by more "
         "than a floor of its unit (100 µs, 5 points of CPU, 5% of a queue). Exits 1 on a "
         "regression.",
-    )
-    compare.add_argument(
-        "-v", "--verbose", action="count", default=argparse.SUPPRESS, help="log more"
+        epilog="Exit status: 0 when nothing got slower, 1 on a regression, 2 on a folder that "
+        "cannot be compared or bad usage, 130 on Ctrl-C.",
     )
     compare.add_argument("base", type=Path, metavar="BASE", help="the folder to compare with")
     compare.add_argument("new", type=Path, metavar="NEW", help="the folder to check")
@@ -127,7 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="how much a value may grow over the base, in percent (default: %(default).0f)",
     )
     compare.add_argument("--json", action="store_true", help="print the comparison as JSON")
-    compare.set_defaults(handler=_perf_compare)
+    compare.set_defaults(handler=_perf_compare, needs_gst=False)
     return parser
 
 
@@ -143,7 +172,7 @@ def _add_target(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="expose every element, not only the named ones",
     )
-    installed = ", ".join(sorted(features.available())) or "none installed"
+    installed = ", ".join(sorted(_installed_features())) or "none installed"
     parser.add_argument(
         "--feature",
         action="append",
@@ -151,8 +180,16 @@ def _add_target(parser: argparse.ArgumentParser) -> None:
         metavar="NAME[,KEY=VALUE…]",
         help="enable a feature with its options, e.g. leaks,interval=1; repeatable; a value "
         "has commas only inside parentheses. "
-        f"Available: {installed}",
+        f"Available: {installed}, or gst:NAME for any GStreamer tracer",
     )
+
+
+def _installed_features() -> Iterable[str]:
+    try:
+        from . import features
+    except (ImportError, ValueError):  # no GStreamer: `--help` still lists the names
+        return [ep.name for ep in importlib.metadata.entry_points(group="mixtape.features")]
+    return features.available()
 
 
 def _assignment(text: str) -> tuple[str, str]:
@@ -186,9 +223,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:  # argparse exits for usage errors and --version
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
+    args.verbose += args.more_verbose
     _setup_logging(args.verbose)
     handler: Callable[[argparse.Namespace], int] = args.handler
-    return handler(args)
+    try:
+        if args.needs_gst and not _gst_available():
+            print(NO_GST, file=sys.stderr)
+            return EXIT_ERROR
+        return handler(args)
+    except KeyboardInterrupt:  # outside the play loop, which handles Ctrl-C itself
+        return EXIT_INTERRUPTED
+
+
+def _gst_available() -> bool:
+    try:
+        importlib.import_module("mixtape.player")  # imports gi and GStreamer
+    except (ImportError, ValueError):  # gi.require_version raises ValueError
+        return False
+    return True
+
+
+_CAPITALISED = re.compile(r"[A-Z](?=[a-z]+\b)")
+
+
+def _error(message: object) -> None:
+    """Print `error: message`, its first word in lower case if it is a capitalised word (the
+    texts of the library are sentences; a name such as `Player` stays)."""
+    text = str(message)
+    if _CAPITALISED.match(text):
+        text = text[0].lower() + text[1:]
+    print(f"error: {text}", file=sys.stderr)
 
 
 def _setup_logging(verbose: int) -> None:
@@ -214,6 +278,9 @@ _IMPORT_PATH = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_][\w.]*")
 def _load_player(args: argparse.Namespace) -> Player | None:
     """Build the player of the target: a description, or `module:Class` and its own.
     Prints the error and returns None when that fails."""
+    from .exceptions import ModelError, PlayerDescriptionError
+    from .player import Player
+
     target = " ".join(args.description)
     try:
         if _IMPORT_PATH.fullmatch(target) is None:
@@ -227,12 +294,14 @@ def _load_player(args: argparse.Namespace) -> Player | None:
             cls.description, expose_all=args.expose_all, features=args.feature
         )
     except (ValueError, PlayerDescriptionError, ModelError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _error(exc)
         return None
 
 
 def _import_player_class(target: str) -> type[Player]:
     """Import `module:Class` (dotted attributes allowed); a ValueError says what is wrong."""
+    from .player import Player
+
     module_name, _, attribute = target.partition(":")
     if os.getcwd() not in sys.path:
         sys.path.insert(0, os.getcwd())  # like uvicorn, to import what is next to the user
@@ -255,9 +324,7 @@ def _run(args: argparse.Namespace) -> int:
         try:
             importlib.import_module("mixtape.interfaces.http")  # needs the extra
         except ImportError:
-            print(
-                "error: --http needs the http extra: pip install 'mixtape[http]'", file=sys.stderr
-            )
+            _error("--http needs the http extra: pip install 'mixtape[http]'")
             return EXIT_USAGE
     player = _load_player(args)
     if player is None:
@@ -272,7 +339,7 @@ def _perf_compare(args: argparse.Namespace) -> int:
     try:
         result = perf_compare.compare_folders(args.base, args.new, args.threshold / 100)
     except perf_compare.CompareError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _error(exc)
         return EXIT_USAGE
     print(json.dumps(result, indent=2) if args.json else perf_compare.format_text(result))
     return EXIT_ERROR if result["regressions"] else 0
@@ -386,6 +453,15 @@ async def _play(
 
     With `http` (host, port) it serves the player instead, and neither an EOS nor an
     error ends it: only the first interrupt does, once the player has stopped."""
+    from gi.repository import Gst
+
+    from .exceptions import (
+        ModelError,
+        PlayerPipelineError,
+        PlayerSetStateError,
+        UnknownNameError,
+    )
+
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()
     interrupts = 0
@@ -431,22 +507,30 @@ async def _play(
             raise
         return EXIT_INTERRUPTED
     except ModelError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        if isinstance(exc, UnknownNameError) and str(exc).startswith("Unknown property"):
+            exc = UnknownNameError(f"{exc}: mixtape inspect TARGET lists them")
+        _error(exc)
         return EXIT_USAGE
     except PlayerPipelineError as exc:
         print(f"error: {exc.source}: {exc.message}", file=sys.stderr)
         if verbose and exc.debug:
             print(exc.debug, file=sys.stderr)
         return EXIT_ERROR
-    except OSError as exc:  # the address of --http is taken
+    except OSError as exc:  # --http cannot listen
         if http is None:
             raise
-        print(f"error: {exc}", file=sys.stderr)
+        if exc.errno == errno.EADDRINUSE:
+            _error(
+                f"{http[0]}:{http[1]} is in use (is another mixtape run --http running?): "
+                "choose another port with --http PORT"
+            )
+        else:
+            _error(exc)
         return EXIT_ERROR
     except PlayerSetStateError as exc:
         if interrupts and player.state == Gst.State.NULL:  # the stop ended a wait, as asked
             return 0
-        print(f"error: {exc}", file=sys.stderr)
+        _error(exc)
         return EXIT_ERROR
     finally:
         for sig in signals:
@@ -466,6 +550,7 @@ async def _serving(
     """Serve the player over HTTP and play it, until the block ends. Errors of the pipeline
     are printed and leave the server up, so a page can play again. `stopping` is set once
     the user interrupts."""
+    from .exceptions import PlayerPipelineError, PlayerSetStateError
     from .interfaces.http import serve  # needs the http extra, which `_run` has checked
     from .interfaces.http.security import is_loopback
 
@@ -487,7 +572,7 @@ async def _serving(
                 pass  # the reporter prints it
             except PlayerSetStateError as exc:
                 if not stopping.is_set():  # a Ctrl-C during the preroll interrupts it
-                    print(f"error: {exc}", file=sys.stderr)
+                    _error(exc)
             yield
         finally:
             stream.close()
@@ -496,6 +581,8 @@ async def _serving(
 
 async def _report_errors(stream: EventStream, verbose: int) -> None:
     """Print the pipeline errors."""
+    from .events import Error
+
     async for event in stream:
         if isinstance(event, Error):
             print(f"error: {event.error.source}: {event.error.message}", file=sys.stderr)

@@ -176,7 +176,9 @@ def resolve(spec: FeatureSpec) -> Feature:
     installed = available()
     if name not in installed:
         names = ", ".join(sorted(installed)) or "none installed"
-        raise FeatureError(f"Unknown feature {name!r}; available: {names}")
+        raise FeatureError(
+            f"Unknown feature {name!r}; available: {names}, or {GST}NAME for any GStreamer tracer"
+        )
     cls: Any = installed[name].load()
     if not (isinstance(cls, type) and issubclass(cls, Feature)) or cls.name != name:
         raise FeatureError(f"The entry point {name!r} is not a Feature subclass named {name!r}")

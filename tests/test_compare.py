@@ -1,6 +1,7 @@
 """`mixtape perf compare` and the budgets of `@pytest.mark.perf`, on documents made by hand."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -180,7 +181,13 @@ def test_the_command_compares_single_runs_and_refuses_what_it_cannot(
     assert main(["perf", "compare", str(base), str(session)]) == 2
     assert "compare two sessions or two runs" in capsys.readouterr().err
     assert main(["perf", "compare", str(base), str(tmp_path / "missing")]) == 2
-    assert "neither an index.json nor a summary.json" in capsys.readouterr().err
+    assert capsys.readouterr().err == f"error: {tmp_path / 'missing'} does not exist\n"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert main(["perf", "compare", str(base), str(empty)]) == 2
+    err = capsys.readouterr().err
+    assert "neither an index.json nor a summary.json" in err
+    assert "perf,out=DIR" in err and "pytest --mixtape-perf DIR" in err
 
 
 # -- budgets -- #
@@ -251,3 +258,20 @@ def test_a_breach_says_what_is_over_what() -> None:
         "perf budget: queue.fill p95 is 95% on q, over 90%",
         "perf budget: pad.push max was not measured, it has no samples",
     ]
+
+
+def test_the_text_aligns_test_metric_and_stat_and_never_claims_100_percent() -> None:
+    base = index(
+        short={"pipeline_latency": (7.05e9, 7.05e9)},
+        a_longer_test_id={"element_latency": (3e9, 3e9)},
+    )
+    new = index(
+        short={"pipeline_latency": (29.1 * MS, 29.1 * MS)},
+        a_longer_test_id={"element_latency": (0, 0)},
+    )
+    text = compare.format_text(compare.compare(base, new, "session"))
+    rows = [re.match(r"  (\S+) +(\S+) +(p95|max) +", line) for line in text.splitlines()[1:5]]
+    assert all(rows)
+    starts = [(m.start(2), m.start(3)) for m in rows if m]
+    assert len(set(starts)) == 1, text  # metric and stat each start at one column
+    assert "-99%" in text and "-100%" in text  # 7.05 s → 29.1 ms is -99%; → 0 is -100%

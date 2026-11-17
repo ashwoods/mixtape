@@ -25,7 +25,7 @@ description that GStreamer cannot parse never starts:
 
 ```console
 $ mixtape run "videotestsrc ! nosuchelement ! fakesink"; echo "exit status $?"
-error: Invalid pipeline 'videotestsrc ! nosuchelement ! fakesink': no element "nosuchelement"
+error: invalid pipeline 'videotestsrc ! nosuchelement ! fakesink': no element "nosuchelement"
 exit status 2
 ```
 
@@ -73,7 +73,7 @@ $ sleep 2
 $ kill -INT $!
 $ wait $!; echo "exit status $?"
 Interrupt: stopping (EOS)…
-error: Could not set the pipeline to null within 5 s: identity0 still changing
+error: could not set the pipeline to null within 5 s: identity0 still changing
 exit status 1
 ```
 
@@ -250,7 +250,7 @@ property that does not exist is refused before anything plays, with `error: ` an
 
 ```console
 $ mixtape run "audiotestsrc num-buffers=10 ! volume name=vol ! fakesink" --set vol.volume=11; echo "exit status $?"
-error: Invalid value for 'vol.volume': Input should be less than or equal to 10
+error: invalid value for 'vol.volume': Input should be less than or equal to 10
 exit status 2
 ```
 
@@ -292,7 +292,7 @@ is not one fails before anything plays:
 
 ```console
 $ mixtape inspect --feature nope "videotestsrc ! fakesink"; echo "exit status $?"
-error: Unknown feature 'nope'; available: leaks, perf, tracers
+error: unknown feature 'nope'; available: leaks, perf, tracers, or gst:NAME for any GStreamer tracer
 exit status 2
 ```
 
@@ -417,7 +417,7 @@ crash the process when they are called out of order:
 
 ```console
 $ mixtape run --feature gst:leaks "videotestsrc num-buffers=30 ! fakesink"; echo "exit status $?"
-error: The feature 'gst:leaks' is not supported: use the feature 'leaks': the tracer's signals crash the process or corrupt reference counts when called out of order (activity-get-checkpoint before activity-start-tracking, get-live-objects from Python)
+error: the feature 'gst:leaks' is not supported: use the feature 'leaks': the tracer's signals crash the process or corrupt reference counts when called out of order (activity-get-checkpoint before activity-start-tracking, get-live-objects from Python)
 exit status 2
 ```
 

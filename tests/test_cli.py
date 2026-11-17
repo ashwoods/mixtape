@@ -1,4 +1,6 @@
+import argparse
 import json
+import logging
 import queue
 import re
 import signal
@@ -7,10 +9,12 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
-from mixtape.cli import main
+from mixtape import cli
+from mixtape.cli import build_parser, main
 from tests.players import Feat, register
 
 
@@ -220,4 +224,115 @@ def test_http_port_in_use(capsys: pytest.CaptureFixture[str]) -> None:
     with socket.create_server(("127.0.0.1", 0)) as taken:
         port = taken.getsockname()[1]
         assert main(["run", "--http", f"127.0.0.1:{port}", "fakesink"]) == 1
-    assert capsys.readouterr().err.startswith("error: ")
+    assert capsys.readouterr().err == (
+        f"error: 127.0.0.1:{port} is in use (is another mixtape run --http running?): "
+        "choose another port with --http PORT\n"
+    )
+
+
+def test_an_abbreviated_option_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["inspect", "--js", PIPELINE]) == 2
+    assert "unrecognized arguments: --js" in capsys.readouterr().err
+    assert main(["run", "--exp", PIPELINE]) == 2
+    assert main(["perf", "compare", "--thr", "10", "a", "b"]) == 2
+
+
+def test_verbose_counts_before_and_after_the_command() -> None:
+    parser = build_parser()
+    assert parser.parse_args(["-vv", "run", "x"]).verbose == 2
+    args = parser.parse_args(["-v", "run", "-v", "x"])
+    assert args.verbose + args.more_verbose == 2
+
+
+def test_verbose_before_and_after_the_command_adds_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    logger = logging.getLogger("mixtape")
+    monkeypatch.setattr(logger, "level", logger.level)  # restored afterwards
+    assert main(["-v", "run", "-v", "fakesrc num-buffers=1 ! fakesink"]) == 0
+    assert logger.level == logging.DEBUG
+    assert main(["-v", "run", "fakesrc num-buffers=1 ! fakesink"]) == 0
+    assert logger.level == logging.INFO
+
+
+def test_help_ends_with_examples_and_exit_statuses(capsys: pytest.CaptureFixture[str]) -> None:
+    for command, statuses in [
+        (["run"], "Exit status: 0 at EOS"),
+        (["inspect"], "Exit status: 0 on success, 2 "),
+        (["perf", "compare"], "Exit status: 0 when nothing got slower, 1 on a regression"),
+    ]:
+        assert main([*command, "--help"]) == 0
+        out = " ".join(capsys.readouterr().out.split())
+        assert statuses in out and "-v info, -vv debug" in out
+    assert main(["run", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert '  mixtape run "videotestsrc ! autovideosink"\n' in out
+    assert "  mixtape run --http 8047 demo:Demo\n" in out
+    assert "or gst:NAME for any GStreamer tracer" in " ".join(out.split())
+
+
+def test_errors_start_in_lower_case(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", "videotestsrc ! nosuchelement"]) == 2
+    assert capsys.readouterr().err.startswith("error: invalid pipeline")
+    assert main(["run", "--set", "src.nope=1", "videotestsrc name=src ! fakesink"]) == 2
+    assert capsys.readouterr().err == (
+        "error: unknown property 'src.nope': mixtape inspect TARGET lists them\n"
+    )
+    assert main(["run", "fakesink", "--feature", "nope"]) == 2
+    assert capsys.readouterr().err.endswith("or gst:NAME for any GStreamer tracer\n")
+
+
+def test_ctrl_c_outside_the_play_loop_exits_130_quietly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def interrupted(args: argparse.Namespace) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_load_player", interrupted)
+    assert main(["inspect", PIPELINE]) == 130
+    assert capsys.readouterr().err == ""
+
+
+NO_GI = (
+    "import sys, types\n"
+    "if sys.argv[1] == 'missing':\n"
+    "    sys.modules['gi'] = None\n"  # `import gi` raises ImportError
+    "else:\n"
+    "    gi = types.ModuleType('gi')\n"  # GStreamer 1.0 is not installed
+    "    def require_version(name, version):\n"
+    "        raise ValueError('Namespace Gst not available')\n"
+    "    gi.require_version = require_version\n"
+    "    sys.modules['gi'] = gi\n"
+    "from mixtape.cli import main\n"
+    "sys.exit(main(sys.argv[2:]))\n"
+)
+
+
+def without_gi(how: str, *argv: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-c", NO_GI, how, *argv], capture_output=True, text=True, timeout=30
+    )
+
+
+@pytest.mark.parametrize("how", ["missing", "no-gst"])
+def test_without_pygobject_help_and_version_work(how: str) -> None:
+    done = without_gi(how, "--version")
+    assert done.returncode == 0 and done.stdout.startswith("mixtape ")
+    done = without_gi(how, "run", "--help")
+    assert done.returncode == 0 and "Available: " in " ".join(done.stdout.split())
+
+
+@pytest.mark.parametrize("how", ["missing", "no-gst"])
+@pytest.mark.parametrize("command", ["run", "inspect"])
+def test_without_pygobject_a_command_that_needs_it_says_so(how: str, command: str) -> None:
+    done = without_gi(how, command, "fakesrc ! fakesink")
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr == (
+        "error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: "
+        "see https://shashi.to/mixtape/troubleshooting/\n"
+    )
+
+
+def test_without_pygobject_perf_compare_works(tmp_path: Path) -> None:
+    done = without_gi("missing", "perf", "compare", str(tmp_path / "a"), str(tmp_path / "b"))
+    assert done.returncode == 2
+    assert done.stderr == f"error: {tmp_path / 'a'} does not exist\n"

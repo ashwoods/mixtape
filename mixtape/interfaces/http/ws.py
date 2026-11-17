@@ -34,6 +34,7 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from ... import events
 from ...exceptions import InvalidValueError, MixTapeError
+from ...exceptions import UnknownNameError
 from ...model import PlayerSpec
 from ...player import Player
 from .errors import describe_error
@@ -95,8 +96,14 @@ def _finite(values: dict[str, Any]) -> dict[str, Any]:
 
 def _element_values(player: Player, model: PlayerSpec, keys: set[str]) -> dict[str, Any]:
     """`{path: value}` of the readable properties of the elements `keys` of `model`."""
-    paths = [p.path for key in keys for p in model.elements[key].properties.values() if p.readable]
-    return _finite(read_values(player, {path: path for path in paths}))
+    values: dict[str, Any] = {}
+    for key in keys:
+        paths = [p.path for p in model.elements[key].properties.values() if p.readable]
+        try:
+            values |= read_values(player, {path: path for path in paths})
+        except UnknownNameError:
+            continue  # gone again since the model, or renamed by a namesake: a later one says
+    return _finite(values)
 
 
 def _encode(message: dict[str, Any]) -> str:

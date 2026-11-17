@@ -611,7 +611,7 @@ def to_json(value: Any) -> Any:
     if isinstance(value, Gst.Caps):
         return value.to_string()
     if isinstance(value, Gst.Fraction):
-        return f"{value.num}/{value.denom}"
+        return f"{int(value.num)}/{int(value.denom)}"  # floats on PyGObject 3.48
     if isinstance(value, Gst.ValueList | Gst.ValueArray | list | tuple):
         return [to_json(item) for item in value]
     if hasattr(value, "value_nicks"):  # flags

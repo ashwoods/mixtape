@@ -46,12 +46,13 @@ def worst(out: str) -> None:
 def compared(out: str) -> None:
     """The comparison of the slow recorder with the fast one: the latency is far lower, and
     the exit status says whether anything got slower."""
-    for metric in ("pipeline.latency", "element.latency"):
-        found = re.search(rf"{re.escape(metric)}\s+p95\s+\S+\s+(\S+ \S+) → (\S+ \S+)", out)
-        assert found, f"no {metric} p95 in the improvements:\n{out}"
+    improvements = out.partition("Improvements:")[2]
+    for metric, subject in (("pipeline.latency", "src→sink"), ("element.latency", "enc")):
+        line = rf"{re.escape(metric)}\s+p95\s+{subject}\s+(\S+ \S+) → (\S+ \S+)"
+        found = re.search(line, improvements)
+        assert found, f"no {metric} p95 of {subject} in the improvements:\n{out}"
         slow, fast = ms(found[1]), ms(found[2])
         assert slow > 1000 and fast < slow / 3, out
-    assert "Improvements:" in out, out
     regressions = re.search(r"(\d+) regressions", out)
     status = re.search(r"exit status (\d+)", out)
     assert regressions and status, out

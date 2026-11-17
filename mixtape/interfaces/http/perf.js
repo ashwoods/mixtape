@@ -66,6 +66,8 @@ function tickLabels(ticks, unit) {
   return ticks.map((t) => parseFloat((t / scale[0]).toPrecision(4)) + scale[1]);
 }
 
+/** Steps of the time axis: whole seconds, so no two ticks read the same */
+const SECONDS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 43200, 86400];
 const fmtClock = (s) => new Date(s * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 function fmtElapsed(s) {
   const t = Math.round(Math.max(0, s));
@@ -205,7 +207,8 @@ function createPerf({ live, run = null }) {
       cursor: { drag: { x: !live, y: false }, points: { size: 5 }, focus: { prox: 16 }, sync: { key: "perf" } },
       focus: { alpha: 0.25 },
       scales: {
-        x: { time: false },
+        // one window is a point: a second each side, not uPlot's span of hours
+        x: { time: false, range: (u, min, max) => min == null ? [0, 1] : min === max ? [min - 1, max + 1] : [min, max] },
         y: { range: (u, min, max) => {
           if (fixed) return [0, Math.max(1, Math.ceil((max || 0) * 10) / 10)];
           if (min == null || max == null) return [0, 1];
@@ -214,7 +217,7 @@ function createPerf({ live, run = null }) {
         } },
       },
       axes: [
-        { ...axis, size: 22, space: 64, grid: { show: false }, values: (u, ticks) => ticks.map(live ? fmtClock : fmtElapsed) },
+        { ...axis, size: 22, space: 64, grid: { show: false }, incrs: SECONDS, values: (u, ticks) => ticks.map(live ? fmtClock : fmtElapsed) },
         { ...axis, space: 28, values: (u, ticks) => tickLabels(ticks, unit),
           size: (u, values) => 12 + Math.max(24, ...(values || []).map((v) => textWidth(v, "11px"))) },
       ],

@@ -299,7 +299,8 @@ function renderGraph() {
         h("button", { class: "ggo", "aria-expanded": "false", title: `${title}\nUnfold`, onclick: unfold },
           h("span", { class: "gfold", "aria-hidden": "true" }), label, more));
     } else {
-      node = h("div", { class: "gn" + (n.exposed ? " exposed" : ""), "data-key": b.key, title, style }, label);
+      const why = graph.reveal && !n.exposed ? "\nNot exposed: give it a name= or run with --expose-all" : "";
+      node = h("div", { class: "gn" + (n.exposed ? " exposed" : ""), "data-key": b.key, title: title + why, style }, label);
     }
     if (graph.measures) graph.measures.node(node, sub, b.count ? within(b.key) : [b.key]);
     return node;

@@ -62,6 +62,10 @@ def test_a_session_has_regressions_improvements_and_what_is_added() -> None:
         fast={"pipeline_latency": (20 * MS, 20 * MS), "process_cpu": (50, 50)},
         steady={"pipeline_latency": (10 * MS, 10 * MS), "pad_buffers": (30, 30)},
         gone={"pipeline_latency": (1 * MS, 1 * MS)},
+        # a metric of a newer version is not compared, nor does it fail
+        future={"pipeline_latency": (1 * MS, 1 * MS), "future_metric": (1, 100 * MS)},
+        # the push time of a short test swings by tens of ms: its floor is 50 ms
+        push={"pad_push": (10 * MS, 10 * MS)},
     )
     new = index(
         slow={"pipeline_latency": (16 * MS, 12 * MS)},  # +60% and +6 ms: p95 regresses
@@ -69,6 +73,8 @@ def test_a_session_has_regressions_improvements_and_what_is_added() -> None:
         fast={"pipeline_latency": (10 * MS, 10 * MS), "process_cpu": (50, 52)},
         steady={"pipeline_latency": (11 * MS, 10 * MS), "pad_buffers": (3, 3)},  # +10%
         fresh={"pipeline_latency": (1 * MS, 1 * MS)},
+        future={"pipeline_latency": (1 * MS, 1 * MS), "future_metric": (100 * MS, 1)},
+        push={"pad_push": (40 * MS, 40 * MS)},  # +300%, but 30 ms
     )
     result = compare.compare(base, new, "session")
     assert [
@@ -100,6 +106,12 @@ def test_a_run_compares_each_subject() -> None:
     assert [(c["subject"], c["stat"]) for c in result["regressions"]] == [("q", "p95")]
     assert result["added"] == ["element.latency  w"] and result["removed"] == ["element.latency  u"]
     assert result["compared"] == 4  # q and v, p95 and max
+    # a metric of a newer version is not compared, nor does it fail
+    assert compare.compare(
+        summary("future.metric", "ns", a=(1, 1)),
+        summary("future.metric", "ns", a=(9e9, 9e9)),
+        "run",
+    ) == compare.compare({"metrics": {}}, {"metrics": {}}, "run")
     # a metric where higher is no worse is not compared
     assert (
         compare.compare(

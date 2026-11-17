@@ -37,6 +37,18 @@ class _ThreadInfo(ctypes.Structure):
     ]
 
 
+def parse_stat(stat: bytes, ticks: int) -> tuple[str, int]:
+    """The name and the CPU time in ns of a thread from its `/proc/<pid>/task/<tid>/stat`, with
+    `ticks` to the second. The kernel cuts the name to 15 bytes, in the middle of a character
+    if it has to, so it is decoded with replacements."""
+    # the name sits in parentheses and may hold spaces and parentheses itself: the first
+    # opens it, the last closes it; the fields after are numbered from the third
+    name = stat[stat.index(b"(") + 1 : stat.rindex(b")")].decode(errors="replace")
+    fields = stat[stat.rindex(b")") + 2 :].split()
+    used = int(fields[11]) + int(fields[12])  # utime, stime
+    return name, used * 1_000_000_000 // ticks
+
+
 class ThreadCpu:
     """Samples `thread.cpu`: the CPU time each thread used since the last `sample`, over the
     wall time since then, in percent of one core, summed by thread name. Without a way to
@@ -70,7 +82,8 @@ class ThreadCpu:
         percents: dict[str, float] = {}
         for tid, (name, ns) in threads.items():
             subject = name if name and name != self._main else OTHER
-            used = ns - last[1].get(tid, 0)
+            before = last[1].get(tid, 0)
+            used = ns - before if ns >= before else ns  # an id reused by a new thread
             percents[subject] = percents.get(subject, 0.0) + used / 1e9 / (wall - last[0]) * 100
         return [Sample(t_ns, "thread.cpu", subject, value) for subject, value in percents.items()]
 
@@ -80,16 +93,11 @@ class ThreadCpu:
         threads: dict[int, tuple[str, int]] = {}
         for entry in os.listdir("/proc/self/task"):
             try:
-                with open(f"/proc/self/task/{entry}/stat") as f:
+                with open(f"/proc/self/task/{entry}/stat", "rb") as f:
                     stat = f.read()
             except OSError:  # the thread ended
                 continue
-            # the name sits in parentheses and may hold spaces and parentheses itself: the first
-            # opens it, the last closes it; the fields after are numbered from the third
-            name = stat[stat.index("(") + 1 : stat.rindex(")")]
-            fields = stat[stat.rindex(")") + 2 :].split()
-            used = int(fields[11]) + int(fields[12])  # utime, stime
-            threads[int(entry)] = (name, used * 1_000_000_000 // ticks)
+            threads[int(entry)] = parse_stat(stat, ticks)
         return threads
 
     def _macos(self) -> dict[int, tuple[str, int]]:

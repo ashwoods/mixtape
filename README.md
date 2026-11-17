@@ -95,7 +95,8 @@ the metrics where higher is worse (latencies, lateness, push time, CPU, queue le
 buffers/s, bitrate or the interval): for each test the worst of its subjects in a session, for
 each subject in a run. A value is a regression when it grew by more than `--threshold` percent
 (default 50) of the base *and* by more than a floor of its unit (100 µs, 5 points of CPU, 5% of
-a queue, one buffer, 4 KiB; `FLOORS` in `mixtape/perf/compare.py`). It prints the regressions,
+a queue, one buffer, 4 KiB; 50 ms for `pad.push` and `pad.lateness`, which swing by tens of
+ms between runs of short tests; `FLOORS` and `METRIC_FLOORS` in `mixtape/perf/compare.py`). It prints the regressions,
 the improvements beyond the same bounds, what only one side has (added or removed, never a
 regression) and a line of counts, and exits 1 on a regression, 2 when a folder is not one of
 those. `--json` prints the comparison as JSON instead.

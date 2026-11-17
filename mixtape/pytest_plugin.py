@@ -132,10 +132,10 @@ def _folder_name(nodeid: str, taken: set[str]) -> str:
     if len(name) > 120:
         name = f"{name[:100]}-{hashlib.sha1(nodeid.encode()).hexdigest()[:10]}"
     unique, count = name, 1
-    while unique in taken:
+    while unique.casefold() in taken:  # a folder of another case is the same on macOS
         count += 1
         unique = f"{name}-{count}"
-    taken.add(unique)
+    taken.add(unique.casefold())
     return unique
 
 
@@ -155,6 +155,7 @@ def _worst(summary: dict[str, Any]) -> dict[str, dict[str, Any]]:
 class _Run:
     """The measuring of the test that runs"""
 
+    item: pytest.Item
     recorder: "Recorder"
     stop: threading.Event = field(default_factory=threading.Event)
     thread: threading.Thread | None = None
@@ -174,6 +175,11 @@ class Measure:
         if self.baseline is not None:
             from .perf import compare
 
+            if self.baseline.resolve() == self.out.resolve():
+                raise pytest.UsageError(
+                    "--mixtape-perf-baseline is the folder of --mixtape-perf, which this "
+                    "session replaces: give it a copy of an earlier session"
+                )
             try:
                 if compare.kind(self.baseline) != "session":
                     raise compare.CompareError(f"{self.baseline} has no index.json")
@@ -211,7 +217,7 @@ class Measure:
         from .perf.record import Recorder
 
         folder = _folder_name(item.nodeid, self._folders)
-        run = self._runs[item.nodeid] = _Run(Recorder(self.out / folder, self.samples))
+        run = self._runs[item.nodeid] = _Run(item, Recorder(self.out / folder, self.samples))
         self._tests[item.nodeid] = {
             "id": item.nodeid,
             "outcome": "passed",
@@ -255,9 +261,10 @@ class Measure:
             return (yield)
         finally:  # before pytest reports the teardown, which has the properties for JUnit
             if (run := self._runs.pop(item.nodeid, None)) is not None:
-                self._finish(item, run)
+                self._finish(run)
 
-    def _finish(self, item: pytest.Item, run: _Run) -> None:
+    def _finish(self, run: _Run) -> None:
+        item = run.item
         run.stop.set()
         if run.thread is not None:
             run.thread.join()
@@ -300,11 +307,12 @@ class Measure:
         if entry is None:
             return
         entry["duration"] = round(entry["duration"] + report.duration, 6)
-        if report.when == "call":
-            if report.skipped and hasattr(report, "wasxfail"):
-                entry["outcome"] = "xfailed"
-            else:
-                entry["outcome"] = report.outcome
+        xfail = hasattr(report, "wasxfail")
+        if report.skipped and xfail:  # in the setup too: `pytest.xfail()` in a fixture
+            entry["outcome"] = "xfailed"
+        elif report.when == "call":
+            # a test that passes though it is marked xfail, and not strictly
+            entry["outcome"] = "xpassed" if report.passed and xfail else report.outcome
         elif report.failed and entry["outcome"] == "passed":
             entry["outcome"] = "error"
         elif report.skipped and report.when == "setup":
@@ -313,6 +321,14 @@ class Measure:
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         from .perf import compare, index
 
+        # a test that was interrupted has no teardown: finish what it measured, as far as it got
+        for run in self._runs.values():
+            self._tests[run.item.nodeid]["outcome"] = "interrupted"
+            try:
+                self._finish(run)
+            except Exception:
+                logger.exception("perf could not finish %s", run.item.nodeid)
+        self._runs.clear()
         index.write(
             self.out,
             {

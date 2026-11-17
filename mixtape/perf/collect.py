@@ -48,7 +48,13 @@ def prepare() -> None:
     """Set the environment of the tracers, before GStreamer is initialised: `GST_TRACERS`, and
     no colours in the log. Not `GST_DEBUG`, which would have GStreamer's default logger write
     the tracers' lines to stderr while it initialises, before the collector can take over:
-    `Collector.get` turns the category on. `GST_DEBUG_FILE` is the user's to set."""
+    `Collector.get` turns the category on. `GST_DEBUG_FILE` is the user's to set.
+
+    Once the collector exists, GStreamer has been initialised, and its tracers are what they
+    were: it changes nothing, so that a player of a process that is measured already (a pytest
+    run with `--mixtape-perf`, which gave the environment back) does not set it again."""
+    if Collector._instance is not None:
+        return
     for asked, kept in add_tracers([*CORE, *RUST]).items():
         logger.warning("GST_TRACERS already has %r: keeping it rather than %r", kept, asked)
     os.environ.setdefault("GST_DEBUG_NO_COLOR", "1")

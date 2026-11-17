@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from mixtape.pytest_plugin import _folder_name
+
 pytestmark = pytest.mark.timeout(90)  # each starts a pytest, and GStreamer, of its own
 
 PLAIN = '''
@@ -352,3 +354,46 @@ def test_a_baseline_needs_the_option_and_a_session(pytester: pytest.Pytester) ->
     result, _ = measure(pytester, "--mixtape-perf-baseline=nowhere")
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     result.stderr.fnmatch_lines(["*--mixtape-perf-baseline: *nowhere has neither an index.json*"])
+    # the folder of this session is no baseline: it is replaced as the session goes
+    result, out = measure(pytester, f"--mixtape-perf-baseline={pytester.path / 'perf' / '.'}")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*--mixtape-perf-baseline is the folder of --mixtape-perf*"])
+
+
+def test_folders_differ_even_where_the_file_system_ignores_case() -> None:
+    taken: set[str] = set()
+    names = [_folder_name(f"t.py::test_x[{param}]", taken) for param in ("A", "a", "a")]
+    assert names[0] == "t.py__test_x[A]"
+    assert len({name.casefold() for name in names}) == 3
+
+
+def test_an_interrupted_test_is_listed_as_interrupted_with_what_it_measured(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makepyfile(
+        test_suite=PLAIN
+        + """
+import pytest
+
+
+def test_first():
+    run(10)
+
+
+def test_stops():
+    run(10)
+    pytest.exit("enough")
+
+
+def test_never():
+    run(10)
+"""
+    )
+    result, out = measure(pytester)
+    assert result.ret == pytest.ExitCode.INTERRUPTED
+    tests = {test["id"]: test for test in load(out / "index.json")["tests"]}
+    assert list(tests) == ["test_suite.py::test_first", "test_suite.py::test_stops"]
+    assert [test["outcome"] for test in tests.values()] == ["passed", "interrupted"]
+    stops = tests["test_suite.py::test_stops"]
+    assert (out / stops["folder"] / "report.html").is_file()  # no link to what is not there
+    assert stops["metrics"]["element.latency"]["p95"]["value"] > 0

@@ -1,6 +1,6 @@
 # mixtape: awesome mix vol. 1 🎵📼 
 
-![Pypi page] ![Pypi license] ![Pypi version] ![Build Status]
+![Pypi version] ![Pypi license] ![Python versions] ![Build Status]
 
 |[●▪▪●]| A python based `gstreamer` **player**-mini-framework.
 
@@ -81,6 +81,7 @@ class Demo(Player):
 ```
 
 ```python
+# in a coroutine: see Usage below
 player = Demo.from_description(Demo.description)
 spec = player.describe()  # a pydantic model: spec.model_dump_json() is JSON with JSON Schema types
 player.get("bitrate")  # 2048, the same as player.get("enc.bitrate")
@@ -173,7 +174,8 @@ Player.run("videotestsrc num-buffers=100 ! fakesink", timeout=30)
 ```
 
 Errors reach the code that awaits: `await player.play()` raises `PlayerPipelineError` with the
-element's message when the pipeline fails, and `player.error` keeps the last one.
+element's message when the pipeline fails, and `player.error` keeps the first one,
+the cause, until the pipeline starts again.
 `await player.play_until_eos()` returns on the next EOS. Calling it again plays the stream
 again, from READY when the pipeline is still at the earlier EOS.
 
@@ -495,8 +497,8 @@ We are Groot.
 [uv]: https://docs.astral.sh/uv/
 [GObject]: https://docs.gtk.org/gobject/
 [GStreamer tutorials]: https://gstreamer.freedesktop.org/documentation/tutorials/index.html
-[Pypi page]: https://img.shields.io/pypi/v/mixtape.svg
+[Pypi version]: https://img.shields.io/pypi/v/mixtape.svg
 [Pypi license]: https://img.shields.io/pypi/l/mixtape.svg
-[Pypi version]: https://img.shields.io/pypi/pyversions/mixtape.svg
+[Python versions]: https://img.shields.io/pypi/pyversions/mixtape.svg
 [Build Status]: https://github.com/ashwoods/mixtape/actions/workflows/ci.yml/badge.svg?branch=main
 

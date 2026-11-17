@@ -17,9 +17,10 @@ GStreamer's own tracers, in a player or in a pytest suite. This release breaks t
 - `AsyncPlayer`, `BasePlayer` (`mixtape.base`) and `mixtape.players` are removed: use
   `mixtape.Player`, a plain class (no longer an `attrs` one). `from_description` is a sync
   classmethod that needs no running loop; `create` is removed.
-- `ready`, `pause` and `play` return a `Gst.StateChangeReturn`, not a tuple.
-  `stop(eos=False, timeout=5.0)` replaces `stop(send_eos, teardown)`: clean up with
-  `teardown()` or `async with player`. `send_eos(timeout=None)` waits for the EOS message and
+- `set_state` is a coroutine, like `ready`, `pause` and `play`: a call without `await` does
+  nothing. `stop(eos=False, timeout=5.0)` replaces `stop(send_eos=True, teardown=False)`, so a
+  bare `stop()` no longer sends an EOS first (pass `eos=True`); clean up with `teardown()` or
+  `async with player`. `send_eos(timeout=None)` waits for the EOS message and
   returns nothing. `__del__` is removed.
 - `Player.events` is a method returning an async iterator of the `mixtape.events` dataclasses
   (`StateChanged`, `Eos`, `Error`, `Warning`, `PropertyChanged`, `Position`, `Message`).
@@ -36,8 +37,12 @@ GStreamer's own tracers, in a player or in a pytest suite. This release breaks t
 - **Player.** `setup()` attaches to the running loop, and every async method attaches lazily.
   `teardown()` is idempotent, safe after the loop closed, and the player can be used again.
   New: `play_until_eos`, `eos`, `seek`, `add_handler`, `call_soon_threadsafe`,
-  `run_coroutine_threadsafe`, `mixtape.player.ensure_init`, and the `pending`, `loop` and
-  `error` properties.
+  `run_coroutine_threadsafe`, `mixtape.player.ensure_init`, the `pending`, `loop`, `error`,
+  `sources`, `sinks`, `elements` and `enabled_features` properties, `get_elements_by_gtype`
+  and `exposed_elements`, and the `description`, `state_timeout` and `position_interval`
+  class attributes.
+- **Errors.** `ModelError` and its subclasses `UnknownNameError`, `InvalidValueError`,
+  `NotReadableError`, `NotWritableError`, `FeatureError` and `CommandError`.
 - **Bus policy.** An error is stored in `error` (the first since the pipeline left NULL),
   logged and published, sets the pipeline to NULL and reaches the awaiting caller as
   `PlayerPipelineError`; a failed start ends in NULL too. Warnings are logged; clock loss,
@@ -52,13 +57,15 @@ GStreamer's own tracers, in a player or in a pytest suite. This release breaks t
   commands and properties and those of its named elements (all of them with
   `expose_all=True`): types, ranges and current values. Declare your own with `prop()` (an
   alias of an element property), `@prop` (a computed one) and `@command`; use them with
-  `get`, `set` (validated and converted), `invoke` and `notify`. `graph()` returns the
-  elements, the links between them and their caps.
-- **Command line.** `mixtape run TARGET` (also `python -m mixtape`) plays a pipeline
+  `get`, `set` (validated and converted), `invoke` and `notify`. A changed property is
+  published as `PropertyChanged`, and `events(position=True)` adds `Position` events.
+  `graph()` returns the elements, the links between them and their caps.
+- **Command line.** `mixtape run TARGET` (also `python -m mixtape run`) plays a pipeline
   description or a `module:Class` until EOS or an error, like `gst-launch-1.0 -e`, with
   `--set PATH=VALUE`, `--feature` and `--expose-all`. Ctrl-C sends EOS, a second one stops, a
-  third kills. It exits 0 on EOS, 1 on an error or a pipeline that cannot stop, and 2 on bad
-  usage. On macOS, video windows appear. `mixtape inspect TARGET [--json]` prints the model
+  third kills. It exits 0 on EOS, 1 on an error or a pipeline that cannot stop, 2 on bad
+  usage and 130 after a second Ctrl-C. On macOS, video windows appear. `-v` and `-vv` log
+  more, and `--version` prints the version. `mixtape inspect TARGET [--json]` prints the model
   without playing.
 - **HTTP.** With the `http` extra (FastAPI and uvicorn, on the player's own loop),
   `mixtape run --http [HOST:]PORT` serves a control page generated from the model (transport
@@ -66,9 +73,10 @@ GStreamer's own tracers, in a player or in a pytest suite. This release breaks t
   API (`/api/model`, `/api/graph`, `/api/commands/<name>`, `/api/elements/<element>`,
   `/api/properties`), `WS /api/events` and the OpenAPI at `/docs`. It binds to 127.0.0.1 and
   checks `Host` and `Origin`; there is no authentication. In code:
-  `mixtape.interfaces.http.serve(player, host, port)`.
+  `async with mixtape.interfaces.http.serve(player, host, port)`.
 - **Feature plugins.** Subclass `mixtape.Feature` to add commands and live properties
-  (`name.x`) to a player, with options validated from `__init__` and the hooks `prepare`
+  (`name.x`) to a player, with the GStreamer elements or tracers it `requires`, options
+  validated from `__init__`, and the hooks `prepare`
   (before `Gst.init`), `initialised`, `check`, `attach` and `detach`. Enable one with the
   `features` class attribute, `features=` or `--feature name,key=value`; packages register
   their own under the `mixtape.features` entry point. Three are built in:
@@ -97,7 +105,6 @@ GStreamer's own tracers, in a player or in a pytest suite. This release breaks t
 ### Fixed
 - A state wait could be satisfied by a stale state (play, stop, play).
 - Pipeline errors went to the loop's exception handler and never reached callers.
-- Teardown from `__del__` failed outside a running loop.
 - Building a player raised on Python 3.14+ outside a running loop.
 
 ### Project

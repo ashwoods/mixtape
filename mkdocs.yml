@@ -1,6 +1,6 @@
 site_name: mixtape
 site_description: A Python GStreamer application framework, with a command line, a control page and pipeline metrics
-site_url: http://shashi.to/mixtape/
+site_url: https://shashi.to/mixtape/
 repo_url: https://github.com/ashwoods/mixtape
 edit_uri: edit/main/docs/
 
@@ -14,13 +14,18 @@ extra_css:
 
 nav:
   - Overview: index.md
-  - Command line: cli.md
-  - Writing an application: library.md
-  - HTTP API: http.md
-  - API reference: reference.md
-  - Measuring performance: perf.md
-  - A WebRTC client: webrtc.md
-  - Two pipelines: two-pipelines.md
+  - Guides:
+      - Writing an application: library.md
+      - Measuring performance: perf.md
+  - Reference:
+      - Command line: cli.md
+      - HTTP API: http.md
+      - API reference: reference.md
+  - Examples:
+      - A WebRTC client: webrtc.md
+      - Two pipelines: two-pipelines.md
+  - Troubleshooting: troubleshooting.md
+  - Changelog: changelog.md
 
 # the API reference (docs/reference.md): griffe reads mixtape/ statically, so the build
 # needs neither GStreamer nor `gi`

@@ -135,6 +135,7 @@ class Perf(Feature):
         self._cpu = (0.0, 0.0)  # process time and monotonic time at the window's start
         self._summary: Window | None = None
         self._graph: dict[str, Any] | None = None  # for the report: the latest snapshot
+        self._snapshot_failed = False
         self._task: asyncio.Task[None] | None = None
 
     def prepare(self) -> None:
@@ -187,6 +188,7 @@ class Perf(Feature):
         self._start = self._first = _now()
         self._cpu = (time.process_time(), time.monotonic())
         self._artifacts = Artifacts(self.out) if self.out is not None else None
+        self._snapshot_failed = False
         self._snapshot(player)
         self._task = asyncio.get_running_loop().create_task(self._poll(player))
 
@@ -236,7 +238,9 @@ class Perf(Feature):
         try:
             self._graph = player.graph().model_dump()
         except Exception:
-            logger.exception("perf could not snapshot the pipeline's graph for its report")
+            if not self._snapshot_failed:  # once a run, not every window
+                logger.exception("perf could not snapshot the pipeline's graph for its report")
+            self._snapshot_failed = True
 
     def _cpu_sample(self) -> Sample | None:
         """`process.cpu` since the last call, taken on the loop."""

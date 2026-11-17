@@ -146,7 +146,7 @@ function createPerf({ live, run = null }) {
     moreBtn.querySelector(".n").textContent = String(extra);
     waiting.hidden = state.windows.length > 0;
     const shown = present.filter((c) => !c.def.more || state.more);
-    for (const c of charts) if (!shown.includes(c) && c.el) { destroy(c); c.el.remove(); c.el = null; }
+    for (const c of charts) if (!shown.includes(c) && c.el) { destroy(c); c.resize.disconnect(); c.el.remove(); c.el = null; }
     shown.forEach((c, i) => {
       if (!c.el) c.el = chartCard(c);
       if (grid.children[i] !== c.el) grid.insertBefore(c.el, grid.children[i] || null);
@@ -166,7 +166,8 @@ function createPerf({ live, run = null }) {
     c.when = h("span", { class: "pwhen" });
     c.legend = h("div", { class: "plg" });
     c.plotEl = plotEl;
-    new ResizeObserver(() => { if (c.plot && plotEl.clientWidth) c.plot.setSize({ width: plotEl.clientWidth, height: 140 }); }).observe(plotEl);
+    c.resize = new ResizeObserver(() => { if (c.plot && plotEl.clientWidth) c.plot.setSize({ width: plotEl.clientWidth, height: 140 }); });
+    c.resize.observe(plotEl);
     return h("figure", { class: "pchart", "data-metric": c.def.metric },
       h("figcaption", { class: "pch" }, h("span", { class: "pt", text: c.def.title }),
         h("span", { class: "ps", text: c.def.stat === "max" ? "peak" : "mean" }), c.when),

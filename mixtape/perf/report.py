@@ -39,7 +39,10 @@ def render(summary: dict[str, Any], windows: list[dict[str, Any]]) -> str:
     """The page of a run."""
     # uPlot's banner names its home: keep the credit, without a URL on the page
     uplot = _read("vendor/uplot/uPlot.iife.min.js").replace(UPLOT_BANNER, "/*! uPlot v1.6.32 */")
+    # every `<` escaped, not just `</`: a `<!--<script` in a name would keep the data's script
+    # element open past its end tag, swallowing the code after it
     data = json.dumps({"summary": summary, "windows": windows}, separators=(",", ":"))
+    data = data.replace("<", "\\u003c")
     styles = (_read("vendor/uplot/uPlot.min.css"), _read("interfaces/http/mixtape.css"))
     scripts = (
         _read("interfaces/http/graph.js"),
@@ -63,7 +66,7 @@ def render(summary: dict[str, Any], windows: list[dict[str, Any]]) -> str:
             '<main class="report-main" id="main"><noscript><p class="noscript">This report '
             "draws with JavaScript. Its numbers are in summary.json and windows.jsonl."
             "</p></noscript></main>",
-            f'<script type="application/json" id="run">{_inline(data)}</script>',
+            f'<script type="application/json" id="run">{data}</script>',
             *(f"<script>\n{_inline(code)}\n</script>" for code in scripts),
             "</body>",
             "</html>",

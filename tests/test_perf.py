@@ -250,6 +250,18 @@ def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
     assert not re.search(r"https?://|\b(src|href)\s*=|@import|url\(", report)
 
 
+@pytest.mark.parametrize("name", ["</script><b>", "<!--<script>"])
+def test_the_report_keeps_markup_in_names_as_data(name: str) -> None:
+    from mixtape.perf.report import render
+
+    summary: dict[str, Any] = {"pipeline": f'textoverlay text="{name}" ! fakesink', "metrics": {}}
+    windows = [{"start": 0, "end": 1, "metrics": {"element.latency": {name: {"n": 1}}}}]
+    page = render(summary, windows)
+    data = page.split('<script type="application/json" id="run">', 1)[1].split("</script>", 1)[0]
+    assert "<" not in data  # nothing in it can end or reopen its script element
+    assert json.loads(data) == {"summary": summary, "windows": windows}
+
+
 SUMMARY_SCRIPT = textwrap.dedent("""
     import asyncio, json
     from mixtape import Player

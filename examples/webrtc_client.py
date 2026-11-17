@@ -157,17 +157,18 @@ class Client(Player):
         self._remote = found[0]
         src = "webrtcsrc name=in stun-server=NULL"
         src += f" signaller::uri={self._signaller.props.uri} signaller::producer-peer-id={found[0]}"
-        self._call = Gst.parse_bin_from_description(
+        call = self._call = Gst.parse_bin_from_description(
             f"{src} ! videoconvert name=convert ! {self.sink} name=display", False
         )
-        self._call.get_by_name("in").get_property("signaller").connect(
-            "webrtcbin-ready", self._on_webrtcbin
+        # both come on GStreamer threads: hand them to the loop, with the call they belong to
+        call.get_by_name("in").get_property("signaller").connect(
+            "webrtcbin-ready", lambda _, __, webrtcbin: self._on_loop(self._ready, call, webrtcbin)
         )
-        self._call.get_by_name("convert").get_static_pad("sink").add_probe(
-            Gst.PadProbeType.BUFFER, self._on_frame
+        call.get_by_name("convert").get_static_pad("sink").add_probe(
+            Gst.PadProbeType.BUFFER, lambda *_: self._on_frame(call)
         )
-        self.pipeline.add(self._call)
-        self._call.sync_state_with_parent()
+        self.pipeline.add(call)
+        call.sync_state_with_parent()
         self.notify("remote")
         return found[0]
 
@@ -183,17 +184,24 @@ class Client(Player):
         for path in ("remote", "connection", "frames"):
             self.notify(path)
 
-    def _on_webrtcbin(self, _: object, peer: str, webrtcbin: Gst.Element) -> None:
+    def _ready(self, call: Gst.Bin, webrtcbin: Gst.Element) -> None:
+        if call is not self._call:  # a call that ended meanwhile
+            return
         self._webrtcbin = webrtcbin
         webrtcbin.connect(
             "notify::connection-state", lambda *_: self._on_loop(self.notify, "connection")
         )
 
-    def _on_frame(self, pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
-        self._frames += 1  # on a streaming thread
-        if self._frames % 30 == 1:  # often enough for a control page
-            self._on_loop(self.notify, "frames")
+    def _on_frame(self, call: Gst.Bin) -> Gst.PadProbeReturn:
+        self._on_loop(self._count, call)
         return Gst.PadProbeReturn.OK
+
+    def _count(self, call: Gst.Bin) -> None:
+        if call is not self._call:
+            return
+        self._frames += 1
+        if self._frames % 30 == 1:  # often enough for a control page
+            self.notify("frames")
 
     # --8<-- [end:call]
 

@@ -1,6 +1,6 @@
 site_name: mixtape
 site_description: A Python GStreamer application framework, with a command line, a control page and pipeline metrics
-site_url: https://shashi.to/mixtape/
+site_url: http://shashi.to/mixtape/
 repo_url: https://github.com/ashwoods/mixtape
 edit_uri: edit/main/docs/
 

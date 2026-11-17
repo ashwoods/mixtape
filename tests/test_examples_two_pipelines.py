@@ -48,6 +48,7 @@ def test_proxy_link_shares_the_base_time_and_starts_in_order() -> None:
     ]
 
 
+@pytest.mark.timeout(90)
 @pytest.mark.covers("two_players:serve", "two_players:perf", "two_players:main")
 def test_two_players_in_one_process_share_the_tracers() -> None:
     out = run_example("two_players.py", timeout=60)

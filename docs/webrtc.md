@@ -134,7 +134,9 @@ when one changes with `notify`.
 
 `call` finds the peer in the list, by id or name, and plays it: it adds a `webrtcsrc`, a
 converter and the sink to the running pipeline as a bin. Frames are counted with a probe on
-the converter's sink pad. `hangup` removes the bin again, and a client can call someone else
+the converter's sink pad. The probe and the signaller's `webrtcbin-ready` run on GStreamer's
+threads, so they too go to the loop, with the bin they belong to: a frame or a late signal
+of a call that has been hung up is ignored. `hangup` removes the bin again, and a client can call someone else
 afterwards. Both are commands, so the control page has them as buttons, and a failed call is a
 `CommandError`: the page shows its message.
 

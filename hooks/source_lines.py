@@ -27,7 +27,10 @@ from typing import Any
 
 log = logging.getLogger("mkdocs.hooks.source_lines")
 
-OPEN = re.compile(r"^(\s*)(`{3,}|~{3,})")
+OPEN = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([\w-]*)")
+# a fence in another language must include its code from examples/: no code is written on a page
+WRITTEN = ("sh", "console", "text", "")
+ANY_INCLUDE = re.compile(r'^\s*--8<--\s+"examples/')
 INCLUDE = re.compile(r'^\s*--8<--\s+"(examples/[^":]+):([^"]+)"\s*$')
 START = re.compile(r"--8<--\s*\[start:([^\]]+)\]")
 END = re.compile(r"--8<--\s*\[end:([^\]]+)\]")
@@ -135,17 +138,29 @@ def on_page_markdown(markdown: str, page: Any, config: Any, files: Any) -> str:
     out: list[str] = []
     fence: tuple[str, str, int] | None = None
     used: dict[str, list[str]] = {}
-    for line in markdown.split("\n"):
+    language, included, opened = "", False, 0
+    for number, line in enumerate(markdown.split("\n"), start=1):
         out.append(line)
         if fence is None:
             if m := OPEN.match(line):
                 fence, used = (m[1], m[2][0], len(m[2])), {}
+                language, included, opened = m[3], False, number
             continue
         indent, char, size = fence
+        if ANY_INCLUDE.match(line):
+            included = True
         if m := INCLUDE.match(line):
             used.setdefault(m[1], []).append(m[2])
         elif re.match(rf"^\s*{re.escape(char)}{{{size},}}\s*$", line):
             fence = None
+            if language not in WRITTEN and not included:
+                log.warning(
+                    "%s:%d: a %s block written on the page: include it from a program in "
+                    'examples/ with --8<-- "examples/<file>:<section>"',
+                    page.file.src_path,
+                    opened,
+                    language,
+                )
             for path, names in used.items():
                 out += ["", indent + source_line(path, names, indent)]
             if used:

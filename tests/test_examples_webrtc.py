@@ -5,6 +5,7 @@ import signal
 import socket
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -23,7 +24,12 @@ def _missing() -> str | None:
     return None
 
 
-pytestmark = pytest.mark.skipif(_missing() is not None, reason=_missing() or "")
+MISSING = _missing()
+# a call has 30 s to get going (examples/webrtc_client.py TIMEOUT)
+pytestmark = [
+    pytest.mark.skipif(MISSING is not None, reason=MISSING or ""),
+    pytest.mark.timeout(90),
+]
 
 
 def _free_port() -> int:
@@ -41,7 +47,8 @@ def _free_port() -> int:
     "webrtc_client:main",
 )
 def test_two_clients_in_one_process_each_receive_the_other() -> None:
-    out = run_example("webrtc_client.py", "--demo", "--server", f"ws://127.0.0.1:{_free_port()}")
+    server = f"ws://127.0.0.1:{_free_port()}"
+    out = run_example("webrtc_client.py", "--demo", "--server", server, timeout=60)
     assert out.returncode == 0, out.stdout
     assert sorted(out.stdout.splitlines()) == [
         "alice received 60 frames from bob",
@@ -49,8 +56,21 @@ def test_two_clients_in_one_process_each_receive_the_other() -> None:
     ]
 
 
+def _wait_for_port(port: int, host: subprocess.Popen[str]) -> None:
+    """Wait for the host's signalling server: the guest's signaller connects only once."""
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and host.poll() is None:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            return
+        except OSError:
+            time.sleep(0.1)
+    raise AssertionError(f"the host's signalling server did not listen on {port}")
+
+
 def test_a_client_calls_the_host_in_another_process() -> None:
-    server = f"ws://127.0.0.1:{_free_port()}"
+    port = _free_port()
+    server = f"ws://127.0.0.1:{port}"
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     host = subprocess.Popen(
         [sys.executable, str(EXAMPLES / "webrtc_client.py"), "--serve", "--name", "host"]
@@ -62,11 +82,16 @@ def test_a_client_calls_the_host_in_another_process() -> None:
         env=env,
     )
     try:
+        _wait_for_port(port, host)
         out = run_example(
-            "webrtc_client.py", "--name", "guest", "--server", server, "--call", "host"
+            "webrtc_client.py", "--name", "guest", "--server", server, "--call", "host", timeout=60
         )  # it waits for the host to publish
         assert out.returncode == 0, out.stdout
         assert out.stdout.splitlines() == ["guest received 60 frames from host"]
     finally:
         host.send_signal(signal.SIGINT)
-        host.communicate(timeout=20)
+        try:
+            host.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            host.kill()
+            host.communicate()

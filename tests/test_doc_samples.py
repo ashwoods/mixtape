@@ -36,6 +36,7 @@ def test_every_block_is_covered() -> None:
             )
             continue
         if sample.kind == "run":
+            own.setdefault(found[0], []).append(sample)
             block = shown_block(sample)
             if block:
                 shown.setdefault(block, []).append(sample)
@@ -44,8 +45,6 @@ def test_every_block_is_covered() -> None:
                     f"{sample.id}: shows={sample.shows!r} matches no single output block"
                 )
         else:
-            own.setdefault(found[0], []).append(sample)
-        if sample.kind == "run" and not sample.command:
             own.setdefault(found[0], []).append(sample)
     for block in BLOCKS:
         if block.category == "example":
@@ -64,13 +63,18 @@ def test_every_block_is_covered() -> None:
 
 
 @pytest.mark.parametrize(
-    "sample", [s for s in SAMPLES if s.kind in ("run", "output")], ids=lambda s: s.id
+    "sample",
+    [
+        # pytest-timeout arms its timer before the test runs: the marker has to be here
+        pytest.param(s, id=s.id, marks=pytest.mark.timeout(s.timeout + 30))
+        for s in SAMPLES
+        if s.kind in ("run", "output")
+    ],
 )
-def test_sample(sample: Sample, tmp_path: Path, request: pytest.FixtureRequest) -> None:
+def test_sample(sample: Sample, tmp_path: Path) -> None:
     reason = skip_reason(sample)
     if reason:
         pytest.skip(reason)
-    request.node.add_marker(pytest.mark.timeout(sample.timeout + 30))
     shown = shown_block(sample)
     assert not (shown and shown.title.startswith(ILLUSTRATIVE)), (
         f"{shown and shown.where}: a checked output must not be titled illustrative"

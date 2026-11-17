@@ -36,13 +36,13 @@ def pytest_run(*args: str, encoder: str | None = None) -> subprocess.CompletedPr
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        timeout=100,
+        timeout=60,
         env=env,
     )
 
 
 @needs_recorder
-@pytest.mark.timeout(100)
+@pytest.mark.timeout(120)
 @pytest.mark.covers("perf_worst:worst")
 def test_perf_worst_names_the_slow_encoder(tmp_path: Path) -> None:
     recording = subprocess.run(
@@ -89,7 +89,7 @@ def test_perf_after_gstreamer_is_initialised_is_refused() -> None:
 
 
 @needs_recorder
-@pytest.mark.timeout(100)
+@pytest.mark.timeout(150)  # two pytest_run
 @pytest.mark.covers("test_recorder:recorder", "test_recorder:budgets")
 def test_recorder_suite_passes_its_budgets_and_a_slow_encoder_breaks_them(tmp_path: Path) -> None:
     fast = pytest_run("--mixtape-perf", str(tmp_path / "fast"))

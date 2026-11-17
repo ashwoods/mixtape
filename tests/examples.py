@@ -11,10 +11,11 @@ EXAMPLES = ROOT / "examples"
 
 
 def run_example(
-    path: str, *args: str, timeout: float = 30, env: dict[str, str] | None = None, cwd: Path = ROOT
+    path: str, *args: str, timeout: float = 15, env: dict[str, str] | None = None, cwd: Path = ROOT
 ) -> subprocess.CompletedProcess[str]:
     """Run `examples/<path>` with this Python and `args`, without the caller's GStreamer debug
-    settings: its output (stdout and stderr together) and status."""
+    settings: its output (stdout and stderr together) and status. The default timeout is below
+    pytest's (20 s in pyproject.toml): a test that passes a longer one needs a timeout marker."""
     clean = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     return subprocess.run(
         [sys.executable, str(EXAMPLES / path), *args],

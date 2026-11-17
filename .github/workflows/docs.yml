@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# one deployment at a time; a newer push replaces a waiting one
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # The pages' commands and snippets run in CI's pytest (tests/test_doc_samples.py); this job
   # only builds the site and publishes it from main.

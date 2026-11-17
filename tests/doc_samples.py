@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 from collections.abc import Callable
@@ -210,8 +211,22 @@ def skip_reason(sample: Sample) -> str | None:
 SCRUBBED = ("GST_DEBUG", "GST_DEBUG_FILE", "GST_DEBUG_DUMP_DOT_DIR", "GST_TRACERS", "G_DEBUG")
 
 
+# The ports the pages serve on: a command gets free ones instead, and its output the page's back,
+# so that a server running on the machine (`mkdocs serve` on 8000) does not fail it.
+PORTS = ("8000", "8001", "8047", "8101", "8102")
+
+
+def free_port() -> str:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return str(sock.getsockname()[1])
+
+
 def run_command(command: str, tmp_path: Path, timeout: int) -> tuple[str, int, bool]:
     """Run a command of the docs: its output, its status, and whether it timed out."""
+    ports = {port: free_port() for port in PORTS if re.search(rf"\b{port}\b", command)}
+    for page, free in ports.items():
+        command = re.sub(rf"\b{page}\b", free, command)
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     # `python3`, `mixtape` and `pytest` in the docs are the venv's, which has mixtape
     env["PATH"] = os.pathsep.join([str(Path(sys.executable).parent), env["PATH"]])
@@ -234,6 +249,8 @@ def run_command(command: str, tmp_path: Path, timeout: int) -> tuple[str, int, b
         os.killpg(proc.pid, signal.SIGKILL)
         out, _ = proc.communicate()
         timed_out = True
+    for page, free in ports.items():
+        out = re.sub(rf"\b{free}\b", page, out)
     status = proc.returncode
     return out, 128 - status if status < 0 else status, timed_out
 

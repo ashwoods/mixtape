@@ -619,6 +619,8 @@ def to_json(value: Any) -> Any:
         return [nick for nick in value.value_nicks if nick not in zero]
     if hasattr(value, "value_nick"):  # an enum
         return str(value.value_nick)
+    if hasattr(value, "__gtype__"):  # an object, a buffer... in a list: only its type
+        return value.__gtype__.name
     return value
 
 
@@ -633,17 +635,20 @@ def _signal_type(gtype: Any, *, result: bool) -> Any:
         return float
     if gtype == GObject.TYPE_STRING:
         return str | None
-    if GObject.type_is_a(gtype, GObject.TYPE_ENUM) and (enum_class := gtype.pytype) is not None:
+    if GObject.type_is_a(gtype, GObject.TYPE_ENUM):
+        GObject.Value().init(gtype)  # makes its Python class, which a plugin's enum lacks
+        if (enum_class := gtype.pytype) is None:
+            return None
         members = {m.value_nick: m for m in _members(enum_class, "__enum_values__")}
         return Annotated[_literal(tuple(members)), AfterValidator(members.__getitem__)]
     if gtype == Gst.Caps.__gtype__:
         schema = Field(json_schema_extra={"format": "gst-caps"})
-        if result:
-            return Annotated[str, schema]
+        if result:  # may be NULL, as may the structures
+            return Annotated[str | None, schema]
         return Annotated[str, schema, AfterValidator(_parse_caps)]
     if gtype == Gst.Structure.__gtype__ or (result and gtype == Gst.TagList.__gtype__):
         if result:
-            return dict[str, Any]
+            return dict[str, Any] | None
         schema = Field(json_schema_extra={"format": "gst-structure"})
         return Annotated[str, schema, AfterValidator(_parse_structure)]
     return None

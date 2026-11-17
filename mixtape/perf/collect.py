@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -24,7 +25,15 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
 from ..exceptions import FeatureError
-from ..features.tracers import LOG, _name, active_tracers, add_tracers, installed, require
+from ..features.tracers import (
+    LOG,
+    _entries,
+    _name,
+    active_tracers,
+    add_tracers,
+    installed,
+    require,
+)
 from .metrics import Sample
 from .parse import RUST
 from .reader import RingTail
@@ -45,10 +54,38 @@ def prepare() -> None:
     os.environ.setdefault("GST_DEBUG_NO_COLOR", "1")
 
 
+class Subscription:
+    """What one consumer of the `Collector` sees: everything measured since its own last `take`,
+    whatever the other consumers took in between."""
+
+    def __init__(self, collector: "Collector") -> None:
+        self._collector = collector
+        self._samples: list[Sample] = []
+        self._counts: dict[str, list[int]] = {}
+        self._lost = collector.tail.lost
+
+    def take(self) -> tuple[list[Sample], dict[str, tuple[int, int]]]:
+        """The samples since the last call (or `start`), with every record written before it,
+        and the buffers and bytes per `element:pad` (see `TracerLog.take`)."""
+        return self._collector._take(self)
+
+    def stop(self) -> None:
+        """Stop taking, forgetting what was not taken. Once the last one has stopped, the
+        collector keeps nothing."""
+        self._collector._stop(self)
+
+    @property
+    def lost(self) -> int:
+        """Times a ring of the debug log dropped lines before they were read, since `start`: the
+        samples of those lines are missing"""
+        return self._collector.tail.lost - self._lost
+
+
 class Collector:
-    """What the tracers measured since the last `take`, once `start`ed. Get the one of the
-    process with `Collector.get`: it raises `FeatureError` when the tracers are not running or
-    their records are not in the log."""
+    """What the tracers measured, for any number of consumers: each `start`s a `Subscription`
+    and `take`s what was measured since its own last take, as when a player measures while a
+    test suite does. Get the one of the process with `Collector.get`: it raises `FeatureError`
+    when the tracers are not running or their records are not in the log."""
 
     _instance: "Collector | None" = None
     _failure: FeatureError | None = None
@@ -76,6 +113,8 @@ class Collector:
         active = active_tracers()
         self._rust: dict[str, Any] = {name: active[name] for name in rust}
         self._folder = Path(tempfile.mkdtemp(prefix="mixtape-perf-"))  # the `write-log` files
+        self._lock = threading.Lock()  # the subscriptions, and reading for them
+        self._subscriptions: list[Subscription] = []
         # a `GST_DEBUG_FILE` is the user's: GStreamer writes it, the tail only reads
         self.tail = RingTail(None if os.environ.get("GST_DEBUG_FILE") else sys.stderr)
         entries = os.environ.get("GST_DEBUG", "").split(",")
@@ -84,6 +123,12 @@ class Collector:
             Gst.debug_set_threshold_for_name("GST_TRACER", Gst.DebugLevel.TRACE)
         elif ours != [LOG]:
             logger.warning("GST_DEBUG already has %r: keeping it", ",".join(ours))
+        self.tracer_entries = [
+            entry
+            for entry in _entries(os.environ.get("GST_TRACERS", ""))
+            if _name(entry) in self.tracers
+        ]
+        """The `GST_TRACERS` entries of the tracers it reads, as GStreamer got them"""
         atexit.register(self._close)
         # `time.monotonic_ns()` as GStreamer initialised, the start of its tracers' clock (that
         # clock is `gst_util_get_timestamp`, the monotonic clock Python reads too)
@@ -124,22 +169,48 @@ class Collector:
         """Nanoseconds since GStreamer initialised."""
         return time.monotonic_ns() - self._init_ns
 
-    def start(self) -> None:
-        """Keep what is measured from now on, forgetting what was before."""
-        self._flush_rust()
-        self.tail.collect(True)
+    def start(self) -> Subscription:
+        """A consumer of what is measured from now on, not of what was before."""
+        with self._lock:
+            if self._subscriptions:
+                self._pull()  # what the others have to get, not the newcomer
+            else:
+                self._flush_rust()
+                self.tail.collect(True)
+            subscription = Subscription(self)
+            self._subscriptions.append(subscription)
+            return subscription
 
-    def stop(self) -> None:
-        """Stop keeping what is measured."""
-        self.tail.collect(False)
-        self._flush_rust()
+    def _stop(self, subscription: Subscription) -> None:
+        with self._lock:
+            if subscription not in self._subscriptions:
+                return
+            self._subscriptions.remove(subscription)
+            if not self._subscriptions:
+                self.tail.collect(False)
+                self._flush_rust()
 
-    def take(self) -> tuple[list[Sample], dict[str, tuple[int, int]]]:
-        """The samples since the last call, with every record written before it, and the
-        buffers and bytes per `element:pad` (see `TracerLog.take`)."""
+    def _take(self, subscription: Subscription) -> tuple[list[Sample], dict[str, tuple[int, int]]]:
+        with self._lock:
+            if subscription in self._subscriptions:
+                self._pull()
+            samples, subscription._samples = subscription._samples, []
+            counts = {pad: (c[0], c[1]) for pad, c in subscription._counts.items()}
+            for c in subscription._counts.values():
+                c[0] = c[1] = 0
+            return samples, counts
+
+    def _pull(self) -> None:
+        """Read what was measured since the last read, once, and hand it to every consumer."""
         samples = self._flush_rust()
         logged, counts = self.tail.take()
-        return samples + logged, counts
+        samples += logged
+        for subscription in self._subscriptions:
+            subscription._samples += samples
+            for pad, (buffers, size) in counts.items():
+                total = subscription._counts.setdefault(pad, [0, 0])
+                total[0] += buffers
+                total[1] += size
 
     def _flush_rust(self) -> list[Sample]:
         """What the gst-plugins-rs tracers measured since the last call: `write-log` writes

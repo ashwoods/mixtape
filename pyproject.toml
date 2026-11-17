@@ -36,6 +36,9 @@ leaks = "mixtape.features.leaks:Leaks"
 perf = "mixtape.features.perf:Perf"
 tracers = "mixtape.features.tracers:Tracers"
 
+[project.entry-points.pytest11]
+mixtape = "mixtape.pytest_plugin"
+
 [project.urls]
 Homepage = "https://github.com/ashwoods/mixtape"
 

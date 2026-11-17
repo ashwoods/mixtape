@@ -3,6 +3,7 @@ import logging
 import colorlog
 import pytest
 
+pytest_plugins = ["pytester"]
 
 logger = logging.getLogger(__name__)
 handler = colorlog.StreamHandler()

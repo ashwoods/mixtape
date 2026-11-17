@@ -347,6 +347,27 @@ The built-in ones:
 
       mixtape run "videotestsrc num-buffers=300 ! queue ! fakesink" --feature perf,out=perf
 
+### Perf in a test suite
+Installing mixtape adds a pytest plugin that measures every test of any GStreamer suite with
+the same tracers, whether it uses a `Player` or calls `Gst.parse_launch` itself:
+
+    pytest --mixtape-perf perf-out --junitxml=junit.xml
+
+Each test that ran a pipeline gets `perf-out/<test id>/` with `windows.jsonl`, `summary.json`
+and `report.html` (its window is from the start of its setup to the end of its teardown; with
+`--mixtape-perf-samples` also `samples.jsonl` and the CSVs, and `--mixtape-perf-interval
+SECONDS` sets the window, default 1). `perf-out/index.json` has every test's outcome, duration,
+folder, lost log lines and the worst p95, max and mean of each metric with the subject that had
+it, and `perf-out/index.html` is the same as a page that links to the reports. The JUnit XML
+gets `perf.<metric>.p95` and `perf.<metric>.max` properties on each test, such as
+`perf.element.latency.p95` (nanoseconds). Without the option the plugin does nothing and
+imports nothing of GStreamer.
+
+Tracers only exist when `Gst.init` creates them, so the plugin initialises GStreamer before the
+first conftest is read, and stops with a usage error when something did so earlier. It gives
+`GST_TRACERS` back to the environment, so child processes start no tracers. It is not aware of
+`pytest-xdist`: each worker would write its own index.
+
 ### Writing a feature
 Subclass `Feature` with a `name`, the options as `__init__` keyword parameters (validated, so
 `--feature heartbeat,interval=2` gives a float), and `@command` methods and `@prop` getters as a

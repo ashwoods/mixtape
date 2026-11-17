@@ -14,7 +14,7 @@ from pydantic import PositiveFloat
 from ..exceptions import FeatureError
 from ..model import command, prop
 from . import Feature
-from .tracers import add_tracers
+from .tracers import active_tracers, add_tracers
 
 if TYPE_CHECKING:
     from ..player import Player
@@ -28,9 +28,8 @@ SINGLETONS = frozenset({"GstSystemClock", "GstTaskPool"})  # live for the whole 
 def _active_tracer() -> Any:
     """The leaks tracer GStreamer instantiated, or `FeatureError`: tracers are created by
     `Gst.init` from `GST_TRACERS` and never later."""
-    for tracer in Gst.tracing_get_active_tracers():
-        if tracer.__gtype__.name == "GstLeaksTracer":
-            return tracer
+    if (tracer := active_tracers().get(TRACER)) is not None:
+        return tracer
     raise FeatureError(
         "The feature 'leaks' needs the leaks tracer, but GStreamer was initialised before it "
         "could set GST_TRACERS: build the player with Player.from_description(..., "
@@ -61,6 +60,7 @@ class Leaks(Feature):
 
     name = "leaks"
     requires = (TRACER,)
+    own_tracers = (TRACER,)
 
     def __init__(self, interval: PositiveFloat = 1.0) -> None:
         self.interval = interval

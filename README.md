@@ -29,7 +29,8 @@ and prototyping.
 * Auto-generated `cmdline` (`mixtape run`, `mixtape inspect`) and `http` (a control page and
   a REST and WebSocket API) interfaces, started from a pipeline description. `console` and
   `dbus` ones are still to come.
-* Pluggable features: `leaks`, `tracers` and `perf` are built in.
+* Pluggable features: `leaks`, `tracers` and `perf` are built in, and `gst:NAME` makes any
+  GStreamer tracer one.
 * Pipeline metrics from GStreamer's own tracers, live, in a report, or for every test of a
   pytest suite, with budgets and baselines.
 
@@ -98,7 +99,11 @@ await player.invoke("shout", word="hi")  # "hihi"
     mixtape run demo:Demo --set bitrate=4000 --set src.pattern=ball
 
 Only the named elements (`name=src`) are exposed, `--expose-all` (or `expose_all=True`) exposes
-every element. Elements inside playbin or decodebin are never user-named. When two elements
+every element. An exposed element's action signals are commands, `element.signal`, with the
+parameters `arg1`, `arg2`... (GObject keeps no names of them), when the model supports their
+types: booleans, numbers, strings, enums, caps and structures, and those results plus tag
+lists, which come back as JSON (`mux.split-now`, `src.end-of-stream` of an `appsrc name=src`).
+Elements inside playbin or decodebin are never user-named. When two elements
 share a name, each is keyed by its dotted path (`a.q`, `b.q`) and a bare `q` is ambiguous.
 A value is validated against the property's type and range, and one that is out of
 range or unknown is rejected: `run` prints `error: ...` and exits 2. The "mutable: playing"
@@ -323,6 +328,22 @@ The built-in ones:
   nanoseconds since GStreamer initialised. Like `tracers`, it needs to be first in the process.
 
       mixtape run "videotestsrc num-buffers=300 ! queue ! fakesink" --feature perf,out=perf
+
+* `gst:NAME` makes any GStreamer tracer a feature, a core one or one of a plugin on
+  `GST_PLUGIN_PATH` in any language (C, Rust, Python), with no Python of its own. Its options
+  are the tracer's parameters (`gst:queue-levels,file=x.csv` is `queue-levels(file=x.csv)` in
+  `GST_TRACERS`). Its readable properties are read-only properties, `gst:NAME.property`,
+  published when the tracer notifies them, and its action signals are commands,
+  `gst:NAME.signal`, as for elements above: a structure it returns, such as a custom tracer's
+  counters, comes back as JSON. Of the gst-plugins-rs tracers, `queue-levels`,
+  `buffer-lateness` and `pad-push-timings` have one command, `write-log`, which writes their
+  CSV to the file `arg1`; `pipeline-snapshot` has `snapshot`, which writes the pipelines'
+  dot files. A tracer that `perf` reads is refused beside it (both would read the one tracer),
+  and so is `leaks` (use the `leaks` feature: its tracer's signals crash the process when
+  called out of order). Like `tracers`, it needs to be first in the process.
+
+      mixtape run "videotestsrc ! queue name=q ! fakesink" --feature gst:queue-levels --http 8000
+      curl -X POST localhost:8000/api/commands/gst:queue-levels.write-log -d '{"arg1": "q.csv"}'
 
 ### Perf in a test suite
 Installing mixtape adds a pytest plugin that measures every test of any GStreamer suite with

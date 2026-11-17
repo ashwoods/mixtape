@@ -140,16 +140,17 @@ _MUTABLE: tuple[tuple[Literal["playing", "paused", "ready"], int], ...] = (
     ("paused", Gst.PARAM_MUTABLE_PAUSED),
     ("ready", Gst.PARAM_MUTABLE_READY),
 )
-_INTS = {
-    GObject.TYPE_INT,
-    GObject.TYPE_UINT,
-    GObject.TYPE_LONG,
-    GObject.TYPE_ULONG,
-    GObject.TYPE_INT64,
-    GObject.TYPE_UINT64,
-    GObject.TYPE_CHAR,
-    GObject.TYPE_UCHAR,
+_INT_RANGES = {
+    GObject.TYPE_INT: (-(2**31), 2**31 - 1),
+    GObject.TYPE_UINT: (0, 2**32 - 1),
+    GObject.TYPE_LONG: (-(2**63), 2**63 - 1),  # 64 bits on Linux and macOS
+    GObject.TYPE_ULONG: (0, 2**64 - 1),
+    GObject.TYPE_INT64: (-(2**63), 2**63 - 1),
+    GObject.TYPE_UINT64: (0, 2**64 - 1),
+    GObject.TYPE_CHAR: (-(2**7), 2**7 - 1),
+    GObject.TYPE_UCHAR: (0, 2**8 - 1),
 }
+_INTS = set(_INT_RANGES)
 _FLOATS = {GObject.TYPE_FLOAT, GObject.TYPE_DOUBLE}
 
 
@@ -553,6 +554,141 @@ def collect(cls: type, root: type) -> Declarations:
             elif getattr(attr, _COMMAND, False):
                 commands[name] = _build_command(attr, name, klass is root)
     return Declarations(props, commands, computed)
+
+
+# -- other GObjects: properties and action signals -- #
+
+
+class GObjectProp(Computed[Any]):
+    """A read-only property of a GObject outside the pipeline (a tracer) as a computed one,
+    read each time from the object."""
+
+    def __init__(self, obj: Any, ps: Any, codec: Codec) -> None:
+        super().__init__(lambda _owner: codec.read(obj.get_property(ps.name)))
+        self.name = ps.name
+        self.description = ps.blurb or None
+        schema = codec.adapter.json_schema()
+        if codec.default is not None:
+            schema["default"] = codec.default
+        self._built = codec.adapter, schema
+
+
+_JSON_FIELDS = frozenset(
+    {"GstStructure", "GstCaps", "GstTagList", "GstValueList", "GstValueArray", "GstFraction"}
+)
+"""The GStreamer types of structure fields `to_json` reads, beside the fundamental ones"""
+_JSON_FUNDAMENTALS = frozenset(
+    {
+        *_INT_RANGES,
+        *_FLOATS,
+        GObject.TYPE_BOOLEAN,
+        GObject.TYPE_STRING,
+        GObject.TYPE_ENUM,
+        GObject.TYPE_FLAGS,
+    }
+)
+
+
+def _field(structure: Any, name: str) -> Any:
+    """A field of a structure as JSON, or the name of its type for objects, pointers and the
+    boxed types `to_json` does not know: those are never read, as PyGObject may free what
+    it wraps (the leaks tracer's `get-live-objects`)."""
+    gtype = structure.get_field_type(name)
+    if gtype.fundamental not in _JSON_FUNDAMENTALS and gtype.name not in _JSON_FIELDS:
+        return gtype.name
+    return to_json(structure.get_value(name))
+
+
+def to_json(value: Any) -> Any:
+    """A GObject value as JSON-friendly data: a structure (or tag list) is an object of its
+    fields, without its name; lists and arrays are arrays; caps a string, a fraction
+    `"30/1"`, an enum its nick and flags a list of nicks."""
+    if isinstance(value, Gst.Structure):
+        names = (value.nth_field_name(i) for i in range(value.n_fields()))
+        return {name: _field(value, name) for name in names}
+    if isinstance(value, Gst.TagList):  # written as a structure named taglist
+        return to_json(_parse_structure(value.to_string()))
+    if isinstance(value, Gst.Caps):
+        return value.to_string()
+    if isinstance(value, Gst.Fraction):
+        return f"{value.num}/{value.denom}"
+    if isinstance(value, Gst.ValueList | Gst.ValueArray | list | tuple):
+        return [to_json(item) for item in value]
+    if hasattr(value, "value_nicks"):  # flags
+        zero = type(value)(0).value_nicks
+        return [nick for nick in value.value_nicks if nick not in zero]
+    if hasattr(value, "value_nick"):  # an enum
+        return str(value.value_nick)
+    return value
+
+
+def _signal_type(gtype: Any, *, result: bool) -> Any:
+    """The type of the JSON value of a signal's parameter (`result` False) or result of
+    `gtype`, None when the model leaves it out."""
+    if gtype == GObject.TYPE_BOOLEAN:
+        return bool
+    if (bounds := _INT_RANGES.get(gtype)) is not None:
+        return Annotated[int, Field(ge=bounds[0], le=bounds[1])]
+    if gtype in _FLOATS:
+        return float
+    if gtype == GObject.TYPE_STRING:
+        return str | None
+    if GObject.type_is_a(gtype, GObject.TYPE_ENUM) and (enum_class := gtype.pytype) is not None:
+        members = {m.value_nick: m for m in _members(enum_class, "__enum_values__")}
+        return Annotated[_literal(tuple(members)), AfterValidator(members.__getitem__)]
+    if gtype == Gst.Caps.__gtype__:
+        schema = Field(json_schema_extra={"format": "gst-caps"})
+        if result:
+            return Annotated[str, schema]
+        return Annotated[str, schema, AfterValidator(_parse_caps)]
+    if gtype == Gst.Structure.__gtype__ or (result and gtype == Gst.TagList.__gtype__):
+        if result:
+            return dict[str, Any]
+        schema = Field(json_schema_extra={"format": "gst-structure"})
+        return Annotated[str, schema, AfterValidator(_parse_structure)]
+    return None
+
+
+def action_signals(obj: Any) -> dict[str, tuple[Command, Callable[..., Any]]]:
+    """The action signals of `obj` as commands, by signal name, each with the call that emits
+    it and returns its result as `to_json` makes it: those whose parameters (booleans,
+    numbers, strings, enums, caps and structures) and result the model supports. GObject
+    keeps no names of the parameters: they are `arg1`, `arg2`... in order."""
+    found: dict[str, tuple[Command, Callable[..., Any]]] = {}
+    gtype = obj.__gtype__
+    while gtype is not None and gtype != GObject.TYPE_OBJECT:
+        for signal_id in GObject.signal_list_ids(gtype):
+            query = GObject.signal_query(signal_id)
+            name = query.signal_name
+            if not query.signal_flags & GObject.SignalFlags.ACTION or name in found:
+                continue
+            params = [_signal_type(t, result=False) for t in query.param_types]
+            result = None
+            if query.return_type != GObject.TYPE_NONE:
+                if (returns := _signal_type(query.return_type, result=True)) is None:
+                    continue
+                result = TypeAdapter(returns).json_schema()
+            if any(p is None for p in params):
+                continue
+            fields: dict[str, Any] = {
+                f"arg{i}": (Annotated[p, Field(description=t.name)], ...)
+                for i, (p, t) in enumerate(zip(params, query.param_types, strict=True), 1)
+            }
+            args = create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
+            what = f"{gtype.name}::{name}"
+            spec = CommandSpec(
+                name=name,
+                description=f"Emit the action signal {name!r} of {gtype.name}",
+                parameters=_inline_defs(args.model_json_schema(), f"{what} parameters"),
+                result=None if result is None else _inline_defs(result, f"{what} result"),
+            )
+
+            def emit(_name: str = name, **values: Any) -> Any:
+                return to_json(obj.emit(_name, *values.values()))
+
+            found[name] = Command(spec, args), emit
+        gtype = gtype.parent
+    return found
 
 
 def validation_reasons(exc: ValidationError) -> str:

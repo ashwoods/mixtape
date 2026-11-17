@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 0.8.0 (unreleased)
 
+### Added
+- `--feature gst:NAME[,key=value…]` (or `features=["gst:NAME"]`) makes any GStreamer tracer a
+  feature with no Python of its own: its options are the tracer's parameters, its readable
+  properties are `gst:NAME.property` and its action signals are commands, `gst:NAME.signal`,
+  with structure results as JSON. It refuses `leaks` and the tracers `perf` reads beside it.
+- The action signals of exposed elements are commands, `element.signal` (`mux.split-now`),
+  with the parameters `arg1`, `arg2`... when the model supports their types.
+
+### Changed
+- `Feature.name` is an instance attribute (a `gst:` feature has its own), and
+  `Feature.own_tracers` names the tracers a feature reads itself.
+
 ## 0.7.0 (2026-11-17)
 
 The first release since 0.5.1 (0.6.0 was never released). The core is rewritten as one

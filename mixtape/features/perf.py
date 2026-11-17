@@ -15,9 +15,11 @@ from pydantic import PositiveFloat
 from ..exceptions import FeatureError
 from ..model import prop
 from ..perf import Window
-from ..perf.collect import Collector, prepare
+from ..perf.collect import CORE, Collector, prepare
+from ..perf.parse import RUST
 from ..perf.record import Recorder
 from . import Feature
+from .tracers import _name
 
 
 if TYPE_CHECKING:
@@ -57,6 +59,7 @@ class Perf(Feature):
     """
 
     name = "perf"
+    own_tracers = (*(_name(entry) for entry in CORE), *RUST)
 
     def __init__(self, out: Path | None = None, interval: PositiveFloat = 1.0) -> None:
         self.out = out

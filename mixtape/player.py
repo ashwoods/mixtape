@@ -45,6 +45,7 @@ from .model import (
     LinkSpec,
     NodeSpec,
     PlayerSpec,
+    action_signals,
     codec_for,
     collect,
     command,
@@ -131,11 +132,10 @@ def _invalid(what: str, exc: ValidationError) -> InvalidValueError:
 
 
 class _Bound(NamedTuple):
-    """A command of one player: the declaration, whose method `owner` has under `attr`."""
+    """A command of one player: the declaration, and what it calls with the arguments."""
 
     declared: Command
-    owner: object
-    attr: str
+    call: Callable[..., Any]
 
 
 class Player:
@@ -752,18 +752,25 @@ class Player:
             feature.check(self)
 
     def _build_model(self) -> tuple[dict[str, _Bound], dict[str, tuple[Computed[Any], object]]]:
-        """The commands and computed properties of this player: its class's, then each
-        feature's as `feature.name`."""
+        """The commands and computed properties of this player: its class's, the action
+        signals of the exposed elements as `element.signal`, then each feature's as
+        `feature.name`."""
+
+        def bound(c: Command, path: str, call: Callable[..., Any]) -> _Bound:
+            return _Bound(replace(c, spec=c.spec.model_copy(update={"name": path})), call)
+
         declared = self._declarations()
-        commands = {name: _Bound(c, self, name) for name, c in declared.commands.items()}
+        commands = {name: _Bound(c, getattr(self, name)) for name, c in declared.commands.items()}
+        for key, element in self.exposed_elements().items():
+            for name, (c, emit) in action_signals(element).items():
+                commands[f"{key}.{name}"] = bound(c, f"{key}.{name}", emit)
         computed: dict[str, tuple[Computed[Any], object]] = {
             name: (c, self) for name, c in declared.computed.items()
         }
         for feature in self._features.values():
             for name, c in feature._declared.commands.items():
                 path = f"{feature.name}.{name}"
-                renamed = replace(c, spec=c.spec.model_copy(update={"name": path}))
-                commands[path] = _Bound(renamed, feature, name)
+                commands[path] = bound(c, path, feature._command(name))
             for name, p in feature._declared.computed.items():
                 computed[f"{feature.name}.{name}"] = (p, feature)
         return commands, computed
@@ -867,9 +874,7 @@ class Player:
             validated = declared.args.model_validate(args)
         except ValidationError as exc:
             raise _invalid(f"arguments for {name!r}", exc) from exc
-        result = getattr(bound.owner, bound.attr)(
-            **{k: getattr(validated, k) for k in type(validated).model_fields}
-        )
+        result = bound.call(**{k: getattr(validated, k) for k in type(validated).model_fields})
         if inspect.isawaitable(result):
             result = await result
         return None if declared.spec.builtin else result

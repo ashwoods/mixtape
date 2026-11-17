@@ -538,6 +538,7 @@ let aliasTarget = new Map();   // alias name → element path
 let rowsByPath = new Map();    // element path → property rows showing it
 let allRows = [], sideRows = [], sections = [];
 let elsBox = null;             // where the element sections are
+let sideNodes = [];            // the commands and the player's own properties, before elsBox
 let pendingState = null, atEos = false, seekHold = false;
 const ui = { filter: "", modified: false, open: new Map() };
 let perfView = null;           // the perf feature's measures on the graph and in charts (perf.js)
@@ -1048,9 +1049,11 @@ function makeSection(key, e, total) {
 /** Show a model: built once, then changed in place when only its elements change, so the
  * sections that stay keep what is open, focused or being typed. */
 function applyModel(m) {
-  const rest = (x) => toJSON({ name: x.name, commands: x.commands, properties: x.properties });
+  const rest = (x) => toJSON({ name: x.name, properties: x.properties });
   if (!model || rest(m) !== rest(model)) return build(m);
+  const commandsChanged = toJSON(m.commands) !== toJSON(model.commands);
   model = m;
+  if (commandsChanged) buildSide(m);  // an exposed element's action signals came or went
   const elements = Object.entries(m.elements);
   if (!sections.length || !elements.length) {  // to or from "No element is exposed"
     sections = [];
@@ -1082,6 +1085,29 @@ function applyModel(m) {
   applyFilter();
 }
 
+/** The player's commands and its own properties, (re)placed before the element sections:
+ * a column of their own beside the pipeline on wide screens, in view while the elements
+ * scroll; without commands the page stays one column. */
+function buildSide(m) {
+  const main = document.getElementById("main");
+  for (const node of sideNodes) node.remove();
+  const commands = Object.values(m.commands).filter((c) => !(c.builtin && ["play", "pause", "stop", "eos", "seek"].includes(c.name)));
+  const ownProps = Object.values(m.properties).filter((p) => !p.builtin && p.path !== PERF_SUMMARY);
+  const start = allRows.length;
+  const nodes = [];
+  if (commands.length) nodes.push(h("h2", { class: "sec-h" }, "Commands"), ...commands.map(commandRow));
+  if (ownProps.length) {
+    nodes.push(h("h2", { class: "sec-h" }, "Properties"),
+      ...ownProps.map((p) => propertyRow(p, p.path, p.target ? `→ ${p.target}` : null).el));
+  }
+  sideRows = allRows.slice(start);
+  const side = commands.length > 0;
+  main.classList.toggle("has-side", side);
+  document.body.classList.toggle("has-side", side);
+  sideNodes = side ? [h("aside", { class: "side", "aria-label": "Commands and properties" }, nodes)] : nodes;
+  elsBox.before(...sideNodes);
+}
+
 function build(m) {
   model = m;
   aliasTarget = new Map(Object.values(m.properties).filter((p) => p.target).map((p) => [p.path, p.target]));
@@ -1098,24 +1124,9 @@ function build(m) {
   const main = document.getElementById("main");
   main.replaceChildren(graphSection(), ...(perfView ? [perfView.section] : []));
   main.classList.toggle("has-perf", measured);
-  const commands = Object.values(m.commands).filter((c) => !(c.builtin && ["play", "pause", "stop", "eos", "seek"].includes(c.name)));
-  const ownProps = Object.values(m.properties).filter((p) => !p.builtin && p.path !== PERF_SUMMARY);
-  // the player's own commands and properties get a column of their own, beside the pipeline on
-  // wide screens and in view while the elements scroll; without commands the page stays one column
-  const side = commands.length > 0;
-  main.classList.toggle("has-side", side);
-  document.body.classList.toggle("has-side", side);
-  const own = side ? h("aside", { class: "side", "aria-label": "Commands and properties" }) : main;
-  if (commands.length) {
-    own.append(h("h2", { class: "sec-h" }, "Commands"), ...commands.map(commandRow));
-  }
-  if (ownProps.length) {
-    own.append(h("h2", { class: "sec-h" }, "Properties"),
-      ...ownProps.map((p) => propertyRow(p, p.path, p.target ? `→ ${p.target}` : null).el));
-  }
-  sideRows = allRows.slice();
   const els = elsBox = h("div", { class: "els" });
-  main.append(...(side ? [own] : []), els);
+  main.append(els);
+  buildSide(m);
   buildElements(els, m);
   for (const row of allRows) row.update();
   updateTransport(); updateTime(); applyFilter();

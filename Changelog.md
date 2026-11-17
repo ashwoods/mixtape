@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 0.8.0 (unreleased)
 
+### Added
+- `GraphChanged` and `ModelChanged` events: the player follows the pipeline's shape as it runs
+  (elements a decodebin adds, pads, links, caps) and publishes the new `graph()`, and the new
+  `describe()` when the exposed elements change, at most every `Player.shape_interval` (0.1 s).
+- The HTTP page's graph, element sections and perf measures follow those changes without a
+  reload, keeping open sections and values being typed. `WS /api/events` opens with `model`,
+  `values` and `graph` messages and sends `graph` and `model` on a change.
+- `perf` warns about an element added while it runs that was made before it set up the debug
+  log, as its measures carry a tracer's index instead of its name.
+
+### Fixed
+- The property changes of an exposed element come under its new key when a namesake added
+  later renames it (`q` becomes `a.q`); they kept the old one.
+
 ## 0.7.0 (2026-11-17)
 
 The first release since 0.5.1 (0.6.0 was never released). The core is rewritten as one

@@ -162,6 +162,9 @@ class Player:
     state_timeout: ClassVar[float] = 5.0
     """Seconds a change down to READY or NULL may take: a streaming thread that hangs blocks
     it, and the player then calls the pipeline stuck until the change finishes after all"""
+    shape_interval: ClassVar[float] = 0.1
+    """Seconds the player gathers changes to the pipeline's shape (elements, pads, links, caps)
+    before it publishes them as one `GraphChanged`, and `ModelChanged` when they change it"""
 
     _declared: ClassVar[Declarations]
 
@@ -212,6 +215,11 @@ class Player:
         self._last_position: tuple[float | None, float | None] | None = None  # the last published
         self._expose_all = expose_all
         self._notify_ids: list[tuple[Gst.Element, int]] = []
+        self._watched: dict[Gst.Element, str] = {}  # the key its notify handlers publish
+        self._shape_ids: dict[Gst.Object, list[int]] = {}  # element and pad handlers
+        self._shape_flush: asyncio.TimerHandle | None = None  # a publication on its way
+        self._graph_seen: GraphSpec | None = None  # as last published
+        self._exposed_seen: list[str] = []  # the keys of the exposed elements, likewise
         self._bin_ids: list[int] = []  # the pipeline's deep-element-added/removed handlers
         self._attached: list[Feature] = []  # in the order they attached
         for alias in self._declarations().props.values():
@@ -714,6 +722,7 @@ class Player:
         the way down (unless `auto-flush-bus` is off)."""
         if old != Gst.State.NULL and self.pipeline.get_auto_flush_bus():
             self._publish(events.StateChanged(old, Gst.State.NULL, Gst.State.VOID_PENDING))
+            self._shape_changed()
 
     def _interrupt_waits(self, state: Gst.State) -> None:
         """Fail the waits a change to `state` ends: other targets, and EOS on NULL."""
@@ -787,7 +796,10 @@ class Player:
     def graph(self) -> GraphSpec:
         """A snapshot of the pipeline's elements and the links between them."""
         self.setup()
-        keys = {e: key for key, e in self._element_keys().items()}
+        return self._graph(self._element_keys())
+
+    def _graph(self, element_keys: dict[str, Gst.Element]) -> GraphSpec:
+        keys = {e: key for key, e in element_keys.items()}
         pipeline_key = keys.pop(self.pipeline)
         nodes = {
             key: NodeSpec(
@@ -968,16 +980,23 @@ class Player:
             self._publish_position()
 
     def _connect_notify(self) -> None:
-        """Publish `PropertyChanged` for the readable properties of the exposed elements,
-        also of those added later (decodebin's children), from `setup` to `teardown`."""
+        """From `setup` to `teardown`, also for the elements added later (decodebin's children):
+        publish `PropertyChanged` for the readable properties of the exposed elements, and
+        `GraphChanged` and `ModelChanged` when the pipeline's shape changes."""
         self._disconnect_notify()
         for signal, callback in (  # first, so no element is added unseen meanwhile
-            ("deep-element-added", self._watch),
-            ("deep-element-removed", self._unwatch),
+            ("deep-element-added", self._added),
+            ("deep-element-removed", self._removed),
         ):
             self._bin_ids.append(self.pipeline.connect(signal, self._on_element_signal, callback))
-        for key, element in self.exposed_elements().items():
-            self._watch(element, key)
+        keys = self._element_keys()
+        for key, element in keys.items():
+            if element != self.pipeline:
+                self._watch_shape(element)
+            if self._is_exposed(element):
+                self._watch(element, key)
+        self._graph_seen = self._graph(keys)
+        self._exposed_seen = [key for key, e in keys.items() if self._is_exposed(e)]
 
     def _disconnect_notify(self) -> None:
         for handler in self._bin_ids:
@@ -986,6 +1005,24 @@ class Player:
         for element, handler in self._notify_ids:
             element.disconnect(handler)
         self._notify_ids.clear()
+        self._watched.clear()
+        for gobject, handlers in self._shape_ids.items():
+            for handler in handlers:
+                gobject.disconnect(handler)
+        self._shape_ids.clear()
+        if self._shape_flush is not None:
+            self._shape_flush.cancel()
+            self._shape_flush = None
+
+    def _added(self, element: Gst.Element) -> None:
+        self._watch(element)
+        self._watch_shape(element)
+        self._shape_changed()
+
+    def _removed(self, element: Gst.Element) -> None:
+        self._unwatch(element)
+        self._unwatch_shape(element)
+        self._shape_changed()
 
     def _on_element_signal(
         self,
@@ -1006,15 +1043,92 @@ class Player:
             key = next((k for k, e in self._element_keys().items() if e == element), None)
             if key is None:
                 return  # removed meanwhile
+        self._watched[element] = key
         for ps, _ in exposed_props(element):
             if ps.flags & GObject.ParamFlags.READABLE:
                 handler = element.connect(f"notify::{ps.name}", self._on_notify, key)
                 self._notify_ids.append((element, handler))
 
     def _unwatch(self, element: Gst.Element) -> None:
+        self._watched.pop(element, None)
         for entry in [entry for entry in self._notify_ids if entry[0] == element]:
             element.disconnect(entry[1])
             self._notify_ids.remove(entry)
+
+    # -- the pipeline's shape: GraphChanged and ModelChanged -- #
+
+    def _inside(self, gobject: Gst.Object) -> bool:
+        """Whether an element or pad is (still) in the pipeline."""
+        parent = gobject.get_parent()
+        while parent is not None and parent != self.pipeline:
+            parent = parent.get_parent()
+        return parent is not None
+
+    def _watch_shape(self, element: Gst.Element) -> None:
+        """Follow the pads of an element, on the loop: they come and go on streaming threads."""
+        if self._loop is None or element in self._shape_ids or not self._inside(element):
+            return  # torn down, watched already, or removed again meanwhile
+        self._shape_ids[element] = [  # before the walk, so no pad is added unseen meanwhile
+            element.connect("pad-added", self._on_pad_signal, self._watch_pad),
+            element.connect("pad-removed", self._on_pad_signal, self._unwatch_pad),
+        ]
+        for pad in _retrying(element.iterate_pads):
+            self._watch_pad(pad)
+
+    def _unwatch_shape(self, element: Gst.Element) -> None:
+        for gobject in [element, *(o for o in self._shape_ids if o.get_parent() == element)]:
+            for handler in self._shape_ids.pop(gobject, ()):
+                gobject.disconnect(handler)
+
+    def _watch_pad(self, pad: Gst.Pad) -> None:
+        if self._loop is None or pad in self._shape_ids or not self._inside(pad):
+            return
+        self._shape_ids[pad] = [
+            pad.connect(signal, self._on_shape_signal)
+            for signal in ("notify::caps", "linked", "unlinked")
+        ]
+        self._shape_changed()
+
+    def _unwatch_pad(self, pad: Gst.Pad) -> None:
+        for handler in self._shape_ids.pop(pad, ()):
+            pad.disconnect(handler)
+        self._shape_changed()
+
+    def _on_pad_signal(
+        self, element: Gst.Element, pad: Gst.Pad, callback: Callable[[Gst.Pad], None]
+    ) -> None:
+        """On whatever thread added or removed the pad: (un)watch it on the loop."""
+        self._call_soon(callback, pad)
+
+    def _on_shape_signal(self, *args: object) -> None:
+        """On whatever thread linked, unlinked or negotiated a pad: nothing more than a wakeup
+        of the loop, where the changes of `shape_interval` come together."""
+        self._call_soon(self._shape_changed)
+
+    def _shape_changed(self) -> None:
+        """Publish the pipeline's shape in `shape_interval`, with the changes until then."""
+        loop = self._loop
+        if loop is not None and self._shape_flush is None:
+            self._shape_flush = loop.call_later(self.shape_interval, self._publish_shape)
+
+    def _publish_shape(self) -> None:
+        """Publish `GraphChanged` when the graph differs from the last one published, and
+        `ModelChanged` when the exposed elements or their keys do."""
+        self._shape_flush = None
+        keys = self._element_keys()
+        renamed = {e: key for key, e in keys.items() if e in self._watched}
+        for element, key in renamed.items():  # a namesake came: `q` is `a.q` now
+            if self._watched[element] != key:
+                self._unwatch(element)
+                self._watch(element, key)
+        graph = self._graph(keys)
+        if graph != self._graph_seen:
+            self._graph_seen = graph
+            self._publish(events.GraphChanged(graph))
+        exposed = [key for key, e in keys.items() if self._is_exposed(e)]
+        if exposed != self._exposed_seen:
+            self._exposed_seen = exposed
+            self._publish(events.ModelChanged(self.describe()))
 
     def _on_notify(self, element: Gst.Element, ps: Any, key: str) -> None:
         """On whatever thread changed the property: read it there, publish on the loop."""
@@ -1138,6 +1252,7 @@ class Player:
                 if target == new == state and still_pending == pending and not future.done():
                     future.set_result(None)
         self._events.publish(events.StateChanged(old, new, pending))
+        self._shape_changed()  # a missed signal shows by the next state at the latest
 
     def _on_warning(self, message: Gst.Message) -> None:
         gerror, debug = message.parse_warning()

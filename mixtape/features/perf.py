@@ -68,6 +68,7 @@ class Perf(Feature):
         self._graph: dict[str, Any] | None = None  # for the report: the latest snapshot
         self._snapshot_failed = False
         self._task: asyncio.Task[None] | None = None
+        self._names: set[str] = set()  # of the elements checked for a record of their creation
 
     def prepare(self) -> None:
         prepare()
@@ -76,7 +77,8 @@ class Perf(Feature):
         Collector.get()  # before the pipeline's elements: their names are in the log
 
     def check(self, player: "Player") -> None:
-        unknown = Collector.get().unknown(e.get_name() for e in player._element_keys().values())
+        self._names = {e.get_name() for e in player._element_keys().values()}
+        unknown = Collector.get().unknown(self._names)
         if unknown:
             raise FeatureError(
                 f"The feature 'perf' has no record of the creation of "
@@ -117,10 +119,26 @@ class Perf(Feature):
             due += self.interval
             await asyncio.sleep(max(due - loop.time(), 0))
             keys = _keys(player)
+            await self._check_added(player)
             self._snapshot(player)
             assert self._recorder is not None
             self._summary = await asyncio.to_thread(self._recorder.window, keys)
             self.notify("summary")
+
+    async def _check_added(self, player: "Player") -> None:
+        """Warn once for each element added since `check` that was made before the collector
+        started: a decodebin's are not, but one the application made early and adds late is."""
+        added = {e.get_name() for e in player._element_keys().values()} - self._names
+        if not added:
+            return
+        self._names |= added
+        for name in await asyncio.to_thread(Collector.get().unknown, added):
+            logger.warning(
+                "perf has no record of the creation of %r, added to the pipeline after it "
+                "started: it was made before perf set up the debug log, so its measures "
+                "carry a tracer's index instead of its name",
+                name,
+            )
 
     def _snapshot(self, player: "Player") -> None:
         """Keep the pipeline's graph for the report of `out`, as of now: each window takes one,

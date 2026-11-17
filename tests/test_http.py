@@ -48,6 +48,13 @@ async def message(ws: Any) -> dict[str, Any]:
     return json.loads(await asyncio.wait_for(ws.recv(), 5))
 
 
+async def snapshot(ws: Any) -> dict[str, dict[str, Any]]:
+    """The model, values and graph a connection opens with, by type."""
+    first = [await message(ws) for _ in range(3)]
+    assert [m["type"] for m in first] == ["model", "values", "graph"]
+    return {m["type"]: m[m["type"]] for m in first}
+
+
 async def until(ws: Any, accept: Callable[[dict[str, Any]], bool]) -> list[dict[str, Any]]:
     """The messages up to and including the first one `accept` takes."""
     seen = []
@@ -155,10 +162,11 @@ async def test_dotted_element_keys(Gst: Any) -> None:
 @pytest.mark.asyncio
 async def test_websocket(served: Served) -> None:
     async with websockets.connect(served.ws_url) as ws:
-        first = await message(ws)
-        assert first["type"] == "values"
+        first = await snapshot(ws)
+        assert first["model"] == served.player.describe().model_dump(mode="json")
         assert first["values"]["state"] == "null" and first["values"]["src.pattern"] == "smpte"
         assert "sink.last-message" in first["values"]
+        assert first["graph"] == served.player.graph().model_dump(mode="json")
 
         await ws.send(json.dumps({"id": 1, "set": {"src.pattern": "ball"}}))
         seen = await until(ws, lambda m: m["type"] == "reply")
@@ -206,6 +214,21 @@ async def test_websocket(served: Served) -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_element_added_later_comes_as_a_graph_and_a_model_with_its_values(
+    served: Served, Gst: Any
+) -> None:
+    async with websockets.connect(served.ws_url) as ws:
+        await snapshot(ws)
+        served.player.pipeline.add(Gst.ElementFactory.make("identity", "late"))
+        seen = await until(ws, lambda m: m["type"] == "model")
+        graph = next(m["graph"] for m in seen if m["type"] == "graph")  # first, the same change
+        assert "late" in graph["nodes"]
+        assert "late" in seen[-1]["model"]["elements"]
+        assert seen[-1]["values"]["late.sleep-time"] == 0
+        assert not any(path.startswith("src.") for path in seen[-1]["values"])  # known already
+
+
+@pytest.mark.asyncio
 async def test_a_new_connection_gets_the_error_that_stopped_the_pipeline(Gst: Any) -> None:
     player = Player.from_description("filesrc name=src ! fakesink")
     async with player, serve(player, "127.0.0.1", 0) as listening:
@@ -214,15 +237,15 @@ async def test_a_new_connection_gets_the_error_that_stopped_the_pipeline(Gst: An
             await player.play()  # no location: the pipeline stops with an error
 
         async with websockets.connect(ws_url) as ws:
-            first, second = await message(ws), await message(ws)
-            assert first["type"] == "values" and first["values"]["state"] == "null"
+            first, second = await snapshot(ws), await message(ws)
+            assert first["values"]["state"] == "null"
             assert second["type"] == "error" and second["source"] == "src"
             assert player.error is not None and second["message"] == player.error.message
 
         await player.set("src.location", __file__)
         await player.play()  # started again: the error is over
         async with websockets.connect(ws_url) as ws:
-            assert (await message(ws))["type"] == "values"
+            await snapshot(ws)
             try:  # the file ends at once: an EOS, no error
                 while (m := json.loads(await asyncio.wait_for(ws.recv(), 0.3)))["type"] != "error":
                     pass
@@ -288,7 +311,7 @@ async def test_a_feature_in_the_model_commands_and_events(Gst: Any) -> None:
             assert bad.status_code == 422
             ws_url = f"ws://127.0.0.1:{listening.port}/api/events"
             async with websockets.connect(ws_url) as ws:
-                assert (await message(ws))["values"]["feat.level"] == 0
+                assert (await snapshot(ws))["values"]["feat.level"] == 0
                 response = await client.post("/api/commands/feat.bump", json={"times": 2})
                 assert (response.status_code, response.json()) == (200, {"result": 4})
                 seen = await until(ws, lambda m: m["type"] == "property")
@@ -316,7 +339,7 @@ async def test_an_origin_that_is_not_the_host_is_refused(served: Served) -> None
             pass
     assert refused.value.response.status_code == 403
     async with websockets.connect(served.ws_url, origin=Origin(f"http://{host}")) as ws:
-        assert (await message(ws))["type"] == "values"
+        await snapshot(ws)
 
 
 @pytest.mark.parametrize(

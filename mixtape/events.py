@@ -10,6 +10,7 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
 from .exceptions import PlayerPipelineError
+from .model import GraphSpec, PlayerSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +75,25 @@ class Position(Event):
 
     position: float | None
     duration: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class GraphChanged(Event):
+    """The pipeline's shape changed: elements came or went (decodebin's), pads came or went,
+    links or caps changed. The changes of `Player.shape_interval` come as one event, published
+    only when the graph differs from the one before."""
+
+    graph: GraphSpec
+    """The graph as of now, as `Player.graph` returns it"""
+
+
+@dataclass(frozen=True, slots=True)
+class ModelChanged(Event):
+    """The elements the model exposes changed, or their keys did (a namesake in another bin
+    makes `q` `a.q`). Published with the `GraphChanged` of the same change."""
+
+    model: PlayerSpec
+    """The model as of now, as `Player.describe` returns it"""
 
 
 @dataclass(frozen=True, slots=True)

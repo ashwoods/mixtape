@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel
 
 from mixtape import Player, command, prop
-from mixtape.events import PropertyChanged
+from mixtape.events import GraphChanged, ModelChanged, PropertyChanged
 from mixtape.exceptions import (
     InvalidValueError,
     ModelError,
@@ -458,4 +458,79 @@ async def test_property_changed_after_set_and_no_handlers_after_teardown(Gst):
         await player.set("nested.max-size-buffers", 42)
         assert (await next_change(stream, "nested.max-size-buffers")).value == 42
     assert not player._notify_ids
+    assert not player._shape_ids
     player.pipeline.get_by_name("src").set_property("pattern", "snow")  # nobody listens
+
+
+# -- shape events -- #
+
+DECODED = "audiotestsrc num-buffers=200 ! wavenc ! decodebin ! fakesink name=sink"
+
+
+async def next_event(stream, kind, accept=lambda event: True):
+    async def find():
+        async for event in stream:
+            if isinstance(event, kind) and accept(event):
+                return event
+        raise AssertionError(f"stream ended without a {kind.__name__}")
+
+    return await bounded(find())
+
+
+@pytest.mark.asyncio
+async def test_the_graph_and_model_follow_the_elements_decodebin_adds(Gst):
+    async with Player.from_description(DECODED, expose_all=True) as player:
+        stream = player.events()
+        await bounded(player.pause())
+
+        def parsed(event):  # wavparse, linked to the sink through decodebin, with caps
+            nodes = event.graph.nodes
+            return any(
+                nodes[link.source].factory == "wavparse" and link.sink == "sink" and link.caps
+                for link in event.graph.links
+            )
+
+        graph = (await next_event(stream, GraphChanged, parsed)).graph
+        (key,) = [key for key, node in graph.nodes.items() if node.factory == "wavparse"]
+        model = await next_event(stream, ModelChanged, lambda e: key in e.model.elements)
+        assert model.model == player.describe()
+
+
+@pytest.mark.asyncio
+async def test_changes_together_come_as_one_graph(Gst):
+    async with Player.from_description(PIPELINE) as player:
+        stream = player.events()
+        for i in range(5):
+            player.pipeline.add(Gst.ElementFactory.make("identity", f"late{i}"))
+        await asyncio.sleep(player.shape_interval * 4)
+        stream.close()
+        changes = [event async for event in stream if isinstance(event, GraphChanged)]
+        assert len(changes) == 1
+        assert {f"late{i}" for i in range(5)} <= set(changes[0].graph.nodes)
+
+
+@pytest.mark.asyncio
+async def test_no_shape_handlers_stay_on_a_removed_element(Gst):
+    async with Player.from_description(PIPELINE) as player:
+        late = Gst.ElementFactory.make("identity", "late")
+        player.pipeline.add(late)
+        await asyncio.sleep(0)  # deep-element-added hands the element to the loop
+        assert late in player._shape_ids and late.get_static_pad("src") in player._shape_ids
+        player.pipeline.remove(late)
+        await asyncio.sleep(0)
+        assert not [o for o in player._shape_ids if o == late or o.get_parent() == late]
+
+
+@pytest.mark.asyncio
+async def test_a_namesake_renames_an_element_and_its_changes_follow(Gst):
+    async with Player.from_description("bin.( name=a queue name=q ! fakesink )") as player:
+        stream = player.events()
+        assert "q" in player.describe().elements
+        b = Gst.Bin.new("b")
+        b.add(Gst.ElementFactory.make("queue", "q"))
+        player.pipeline.add(b)
+        model = (await next_event(stream, ModelChanged)).model
+        assert {"a.q", "b.q"} <= set(model.elements) and "q" not in model.elements
+        a_q = player.pipeline.get_by_name("a").get_by_name("q")
+        threading.Thread(target=a_q.set_property, args=("max-size-buffers", 7)).start()
+        assert (await next_change(stream, "a.q.max-size-buffers")).value == 7

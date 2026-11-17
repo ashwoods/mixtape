@@ -2,7 +2,12 @@
 
 Server to client, one JSON object per message:
 
-    {"type": "values", "values": {path: value}}      first, every readable property
+    {"type": "model", "model": {…}}                 first, as `/api/model`
+    {"type": "values", "values": {path: value}}      then every readable property
+    {"type": "graph", "graph": {…}}                 then the graph as `/api/graph`, and whenever
+                                                     the pipeline's shape changes
+    {"type": "model", "model", "values"}             the exposed elements changed: `values` has
+                                                     the readable properties of the new ones
     {"type": "state", "old", "new", "pending"}       the pipeline's state (`void-pending`)
     {"type": "property", "path", "element", "property", "value"}   (null for a computed one)
     {"type": "eos"}
@@ -29,6 +34,7 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from ... import events
 from ...exceptions import InvalidValueError, MixTapeError
+from ...model import PlayerSpec
 from ...player import Player
 from .errors import describe_error
 from .security import check_headers
@@ -71,7 +77,26 @@ def encode_event(event: events.Event) -> dict[str, Any] | None:
             return {"type": "warning", "source": source, "message": message, "debug": debug}
         case events.Position(position=position, duration=duration):
             return {"type": "position", "position": position, "duration": duration}
+        case events.GraphChanged(graph=graph):
+            return {"type": "graph", "graph": graph.model_dump(mode="json")}
+        case events.ModelChanged(model=model):
+            return {"type": "model", "model": model.model_dump(mode="json")}
     return None  # Message
+
+
+def _finite(values: dict[str, Any]) -> dict[str, Any]:
+    """The values JSON can carry: NaN and infinities are left out."""
+    return {
+        path: value
+        for path, value in values.items()
+        if not (isinstance(value, float) and not math.isfinite(value))
+    }
+
+
+def _element_values(player: Player, model: PlayerSpec, keys: set[str]) -> dict[str, Any]:
+    """`{path: value}` of the readable properties of the elements `keys` of `model`."""
+    paths = [p.path for key in keys for p in model.elements[key].properties.values() if p.readable]
+    return _finite(read_values(player, {path: path for path in paths}))
 
 
 def _encode(message: dict[str, Any]) -> str:
@@ -103,22 +128,36 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
         await websocket.close(code=WS_POLICY_VIOLATION, reason=problem)
         return
     await websocket.accept()
-    stream = player.events(position=True)  # before the values: nothing falls between them
-    last_error = player.error  # a later one comes through the stream
+    stream = player.events(position=True)  # before the snapshot: nothing falls between them
+    model = player.describe()
+    snapshot = [
+        {"type": "model", "model": model.model_dump(mode="json")},
+        {"type": "values", "values": _finite(all_values(player))},
+        {"type": "graph", "graph": player.graph().model_dump(mode="json")},
+    ]
+    if player.error is not None and (error := encode_event(events.Error(player.error))):
+        snapshot.append(error)  # the page may load after the error that stopped the pipeline
+    known = set(model.elements)  # the elements whose values the client has
     lock = asyncio.Lock()  # a reply and an event must not interleave on the socket
 
-    async def send(message: dict[str, Any] | str) -> None:
-        text = message if isinstance(message, str) else _encode(message)
+    async def send(*messages: dict[str, Any] | str) -> None:
+        texts = [m if isinstance(m, str) else _encode(m) for m in messages]
         async with lock:
             try:
-                await websocket.send_text(text)
+                for text in texts:
+                    await websocket.send_text(text)
             except (WebSocketDisconnect, RuntimeError):
                 pass  # the client left: the receiving loop ends the connection
 
     async def forward() -> None:
+        nonlocal known
         async for event in stream:
             if (message := encode_event(event)) is None:
                 continue
+            if isinstance(event, events.ModelChanged):
+                elements = set(event.model.elements)
+                message["values"] = _element_values(player, event.model, elements - known)
+                known = elements
             try:
                 text = _encode(message)
             except ValueError:
@@ -162,14 +201,7 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
     forwarding = asyncio.create_task(forward())
     receiving = asyncio.create_task(receive())
     try:
-        values = {
-            path: value
-            for path, value in all_values(player).items()
-            if not (isinstance(value, float) and not math.isfinite(value))  # as forward() does
-        }
-        await send({"type": "values", "values": values})
-        if last_error is not None and (error := encode_event(events.Error(last_error))):
-            await send(error)  # the page may load after the error that stopped the pipeline
+        await send(*snapshot)  # first: forward() waits for the lock
         await asyncio.wait({forwarding, receiving}, return_when=asyncio.FIRST_COMPLETED)
     finally:
         stream.close()

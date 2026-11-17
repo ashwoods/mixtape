@@ -121,7 +121,9 @@ stops and exits 0. In code: `async with mixtape.interfaces.http.serve(player, ho
   The page is generated from the model: transport and position, a form per command, a control
   per property, updated live. Press `/` to filter properties; "Modified" shows those that
   differ from their default. On top, the pipeline graph: click an element to jump to its
-  properties, hover a link for its caps; bins without exposed elements start folded.
+  properties, hover a link for its caps; bins without exposed elements start folded. The graph
+  and the element sections follow the pipeline as it changes (a decodebin's elements, new pads,
+  links and caps) without a reload, keeping open sections and values being typed.
 * `POST /api/commands/<name>` with a JSON object of arguments (optional) runs a command and
   returns `{"result": ...}`.
 * `GET`/`PATCH /api/elements/<element>` and `GET`/`PATCH /api/properties` read and set
@@ -130,8 +132,10 @@ stops and exits 0. In code: `async with mixtape.interfaces.http.serve(player, ho
 * Errors are `{"detail": ..., "errors": [...]}`: 404 for an unknown name, 422 for a rejected
   value or a read-only property, 409 when a command cannot do what was asked, 500 for a pipeline
   error.
-* `WS /api/events` sends every readable property first (`{"type": "values", ...}`), then the
-  events as JSON (`state`, `property`, `eos`, `error`, `warning`, `position`). It accepts
+* `WS /api/events` sends the model, every readable property and the graph first (`{"type":
+  "model", ...}`, `"values"`, `"graph"`), then the events as JSON (`state`, `property`, `eos`,
+  `error`, `warning`, `position`, and `graph` and `model` when the pipeline changes, the
+  `model` with the `values` of the elements it adds). It accepts
   `{"id": 1, "command": "play", "args": {}}` and `{"id": 2, "set": {"src.pattern": "ball"}}`
   and answers each with `{"type": "reply", "id": ..., "result": ...}` or `"error": {"status",
   "detail"}`.
@@ -209,6 +213,11 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+`describe()` and `graph()` are snapshots. When the pipeline's shape changes while it runs (a
+decodebin adds elements, pads come and go, links or caps change), the events say so: the
+changes of `shape_interval` (0.1 s) come as one `GraphChanged` with the new `graph()`, and as
+a `ModelChanged` with the new `describe()` when the exposed elements or their keys changed.
 
 Subclass `Player` to build an application. Override the state methods, take extra arguments,
 and call into the loop from GStreamer's threads with `call_soon_threadsafe` and

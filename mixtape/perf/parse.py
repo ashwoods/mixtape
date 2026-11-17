@@ -126,7 +126,11 @@ def _columns(line: str, numbers: int) -> tuple[int, str, list[int]] | None:
 
 def queue_levels(lines: Iterable[str]) -> list[Sample]:
     """`queue.*` from the `queue-levels` CSV: `ts, queue (or multiqueue:index), pointer,
-    current bytes, time and buffers, maximum bytes, time and buffers`."""
+    current bytes, time and buffers, maximum bytes, time and buffers`.
+
+    `queue.fill` stops at 1: a queue waits only while a level is at or over its limit, then
+    takes the next buffer whole, so its bytes or time can pass the limit by one buffer
+    (`gst_queue_is_filled` in gstqueue.c). The levels themselves are kept as they are."""
     samples: list[Sample] = []
     for line in lines:
         if (row := _columns(line, 6)) is None:
@@ -139,7 +143,7 @@ def queue_levels(lines: Iterable[str]) -> list[Sample]:
         )
         limits = ((cur_bytes, max_bytes), (cur_time, max_time), (cur_buffers, max_buffers))
         if fills := [cur / limit for cur, limit in limits if limit]:
-            samples.append(Sample(ts, "queue.fill", queue, max(fills)))
+            samples.append(Sample(ts, "queue.fill", queue, min(1.0, max(fills))))
     return samples
 
 

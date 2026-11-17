@@ -334,7 +334,9 @@ async def test_pause_while_buffering_stays_paused(pipeline):
                 pass
 
         def heading():
-            return player.state if player.pending == Gst.State.VOID_PENDING else player.pending
+            # one read: the change can finish on a streaming thread between two
+            _, state, pending = player.pipeline.get_state(0)
+            return state if pending == Gst.State.VOID_PENDING else pending
 
         await bounded(player.play())
         await buffering(50)

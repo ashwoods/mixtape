@@ -56,8 +56,8 @@ METRICS: dict[str, Metric] = {
     "queue.time": Metric("ns", "Time of data a queue holds (queue-levels)", compared=True),
     "queue.fill": Metric(
         "ratio",
-        "How full a queue is, 0 to 1: the highest of its levels over their non-zero limits "
-        "(queue-levels)",
+        "How full a queue is, 0 to 1: the highest of its levels over their non-zero limits, "
+        "1 when full, though a queue can hold one buffer past a limit (queue-levels)",
         compared=True,
     ),
     "process.cpu": Metric(

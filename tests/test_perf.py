@@ -95,6 +95,15 @@ def test_the_rust_csvs_give_queue_levels_lateness_and_push_times() -> None:
     assert max(push, key=lambda s: s.value) == Sample(102592917, "pad.push", "u:src", 103163458)
 
 
+def test_queue_fill_stops_at_full_when_the_last_buffer_passes_a_limit() -> None:
+    # measured on 1280x720 frames of 5529600 bytes: the queue under its 10485760-byte
+    # default takes a second frame and holds 11059200 bytes
+    lines = ["1,q,0x1,11059200,66666667,2,10485760,1000000000,200"]
+    samples = RUST["queue-levels"](lines)
+    assert Sample(1, "queue.bytes", "q", 11059200) in samples
+    assert Sample(1, "queue.fill", "q", 1.0) in samples
+
+
 def test_the_rust_csvs_keep_commas_in_names_and_skip_what_is_not_a_row() -> None:
     lines = ["1,a,b:src,0x1,5", "", "garbage", "2,c:src,0x2,x"]
     assert RUST["pad-push-timings"](lines) == [Sample(1, "pad.push", "a,b:src", 5)]

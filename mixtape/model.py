@@ -83,6 +83,8 @@ class ElementSpec(_Spec):
 
 class PlayerSpec(_Spec):
     name: str
+    features: list[str] = Field(default_factory=list)
+    """The names of the features the player has enabled, as `mixtape inspect` lists them"""
     commands: dict[str, CommandSpec]
     properties: dict[str, PropSpec]
     """The built-ins, the declared aliases and the computed properties"""
@@ -388,6 +390,12 @@ class Prop:
         )
 
 
+def summary(obj: Any) -> str | None:
+    """The first paragraph of the docstring of `obj` on one line, or None without one."""
+    paragraph = re.split(r"\n\s*\n", inspect.getdoc(obj) or "", maxsplit=1)[0]
+    return " ".join(paragraph.split()) or None
+
+
 class Computed[T]:
     """A read-only property computed by a getter, see `prop()`. Reading it on an instance
     calls the getter, so it works before the player is set up."""
@@ -397,7 +405,7 @@ class Computed[T]:
     def __init__(self, getter: Callable[[Any], T]) -> None:
         self.getter = getter
         self.name = getter.__name__
-        self.description = (inspect.getdoc(getter) or "").partition("\n")[0] or None
+        self.description = summary(getter)
         self._built: tuple[TypeAdapter[Any], dict[str, Any]] | None = None
 
     def __set_name__(self, owner: type, name: str) -> None:
@@ -522,7 +530,7 @@ def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Comm
         result = _inline_defs(TypeAdapter(returns).json_schema(), f"{what} result")
     spec = CommandSpec(
         name=name,
-        description=(inspect.getdoc(method) or "").partition("\n")[0] or None,
+        description=summary(method),
         parameters=_inline_defs(args.model_json_schema(), f"{what} parameters"),
         result=result,
         builtin=builtin,

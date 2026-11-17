@@ -1,14 +1,17 @@
 [project]
 name = "mixtape"
-version = "0.8.0.dev0"
-description = "GStreamer Python application mini-framework"
+version = "0.8.0"
+description = "A Python GStreamer application framework"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Ashley Camba Garrido", email = "ashwoods@gmail.com" }]
 # PyGObject (`gi`) and GStreamer come from the system (Homebrew or apt), see README.
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2.11"]  # serialize_by_alias
+dependencies = [
+    "pydantic>=2.11",  # serialize_by_alias
+    "typer>=0.29,<0.30",  # the command line
+]
 keywords = ["gstreamer", "multimedia", "pipeline", "asyncio", "player"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -61,6 +64,7 @@ dev = [
     "colorlog",
     "httpx",
     "mixtape[http]",
+    { include-group = "docs" },
     "mypy",
     "pytest",
     "pytest-asyncio",
@@ -68,6 +72,9 @@ dev = [
     "pytest-timeout",
     "ruff",
 ]
+
+# The site in docs/ (mkdocs.yml); .github/workflows/docs.yml builds it with only this group.
+docs = ["mkdocs-material==9.8.1", "mkdocstrings[python]==1.0.8"]
 
 [build-system]
 requires = ["hatchling"]
@@ -92,6 +99,11 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.format]
+# ruff formats the Python blocks of Markdown, and reads a page's `--8<-- "examples/x.py:main"`
+# include as Python; the code they include is formatted in examples/.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "N"]
 ignore = [
@@ -101,9 +113,11 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N803"] # the `Gst` fixture mirrors the module name
+# a `# > ` comment is a line the example prints, as long as the line is (ruff format wraps the code)
+"examples/**" = ["E501"]
 
 [tool.mypy]
-files = ["mixtape", "tests"]
+files = ["mixtape", "tests", "examples"]
 python_version = "3.12"
 strict_optional = true
 strict_equality = true

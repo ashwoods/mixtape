@@ -1,6 +1,7 @@
 """`mixtape perf compare` and the budgets of `@pytest.mark.perf`, on documents made by hand."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -85,7 +86,7 @@ def test_a_session_has_regressions_improvements_and_what_is_added() -> None:
         ("fast", "p95"),
         ("fast", "max"),
     ]
-    assert result["added"] == ["fresh"] and result["removed"] == ["gone"]
+    assert result["added"] == [{"test": "fresh"}] and result["removed"] == [{"test": "gone"}]
     text = compare.format_text(result)
     assert "slow  pipeline.latency  p95" in text and "10 ms → 16 ms  +60%" in text
     assert text.splitlines()[-1].startswith("1 regressions, 2 improvements, 1 added, 1 removed")
@@ -96,7 +97,9 @@ def test_a_metric_one_side_lacks_is_added_not_a_regression() -> None:
     base = index(a={"pipeline_latency": (1 * MS, 1 * MS)})
     new = index(a={"pipeline_latency": (1 * MS, 1 * MS), "process_cpu": (90, 90)})
     result = compare.compare(base, new, "session")
-    assert result["regressions"] == [] and result["added"] == ["a  process.cpu"]
+    assert result["regressions"] == [] and result["added"] == [
+        {"test": "a", "metric": "process.cpu"}
+    ]
 
 
 def test_a_run_compares_each_subject() -> None:
@@ -104,7 +107,8 @@ def test_a_run_compares_each_subject() -> None:
     new = summary("element.latency", "ns", q=(2 * MS, 2 * MS), w=(1, 1), v=(1, 1))
     result = compare.compare(base, new, "run")
     assert [(c["subject"], c["stat"]) for c in result["regressions"]] == [("q", "p95")]
-    assert result["added"] == ["element.latency  w"] and result["removed"] == ["element.latency  u"]
+    assert result["added"] == [{"metric": "element.latency", "subject": "w"}]
+    assert result["removed"] == [{"metric": "element.latency", "subject": "u"}]
     assert result["compared"] == 4  # q and v, p95 and max
     # a metric of a newer version is not compared, nor does it fail
     assert compare.compare(
@@ -180,7 +184,13 @@ def test_the_command_compares_single_runs_and_refuses_what_it_cannot(
     assert main(["perf", "compare", str(base), str(session)]) == 2
     assert "compare two sessions or two runs" in capsys.readouterr().err
     assert main(["perf", "compare", str(base), str(tmp_path / "missing")]) == 2
-    assert "neither an index.json nor a summary.json" in capsys.readouterr().err
+    assert capsys.readouterr().err == f"error: {tmp_path / 'missing'} does not exist\n"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert main(["perf", "compare", str(base), str(empty)]) == 2
+    err = capsys.readouterr().err
+    assert "neither an index.json nor a summary.json" in err
+    assert "perf,out=DIR" in err and "pytest --mixtape-perf DIR" in err
 
 
 # -- budgets -- #
@@ -251,3 +261,20 @@ def test_a_breach_says_what_is_over_what() -> None:
         "perf budget: queue.fill p95 is 95% on q, over 90%",
         "perf budget: pad.push max was not measured, it has no samples",
     ]
+
+
+def test_the_text_aligns_test_metric_and_stat_and_never_claims_100_percent() -> None:
+    base = index(
+        short={"pipeline_latency": (7.05e9, 7.05e9)},
+        a_longer_test_id={"element_latency": (3e9, 3e9)},
+    )
+    new = index(
+        short={"pipeline_latency": (29.1 * MS, 29.1 * MS)},
+        a_longer_test_id={"element_latency": (0, 0)},
+    )
+    text = compare.format_text(compare.compare(base, new, "session"))
+    rows = [re.match(r"  (\S+) +(\S+) +(p95|max) +", line) for line in text.splitlines()[1:5]]
+    assert all(rows)
+    starts = [(m.start(2), m.start(3)) for m in rows if m]
+    assert len(set(starts)) == 1, text  # metric and stat each start at one column
+    assert "-99%" in text and "-100%" in text  # 7.05 s → 29.1 ms is -99%; → 0 is -100%

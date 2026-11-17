@@ -36,7 +36,12 @@ def kind(folder: Path) -> str:
     for name, found in (("index.json", "session"), ("summary.json", "run")):
         if (folder / name).is_file():
             return found
-    raise CompareError(f"{folder} has neither an index.json nor a summary.json")
+    if not folder.exists():
+        raise CompareError(f"{folder} does not exist")
+    raise CompareError(
+        f"{folder} has neither an index.json nor a summary.json: `mixtape run --feature "
+        "perf,out=DIR` writes a summary.json, `pytest --mixtape-perf DIR` an index.json"
+    )
 
 
 def _values(document: dict[str, Any], what: str) -> dict[tuple[str, ...], dict[str, Any]]:
@@ -72,11 +77,17 @@ def _missing(
     tests: set[str],
     lack: dict[tuple[str, ...], Any],
     gone: set[str],
-) -> list[str]:
-    """What one side has and the other (with its `gone` tests) lacks: the tests, one line each
+    what: str,
+) -> list[dict[str, str]]:
+    """What one side has and the other (with its `gone` tests) lacks: the tests, one object each
     and not one for each of their metrics, then the metrics (and subjects) of the others."""
-    names = sorted(tests - gone)
-    names += ["  ".join(key) for key in mine if key not in lack and (not tests or key[0] in gone)]
+    names: list[dict[str, str]] = [{"test": test} for test in sorted(tests - gone)]
+    fields: tuple[str, ...] = ("test", "metric") if what == "session" else ("metric", "subject")
+    names += [
+        dict(zip(fields, key, strict=True))
+        for key in mine
+        if key not in lack and (not tests or key[0] in gone)
+    ]
     return names
 
 
@@ -85,8 +96,10 @@ def compare(
 ) -> dict[str, Any]:
     """Compare two `index.json` (`what` is `session`) or two `summary.json` (`run`) documents.
     `regressions` and `improvements` are lists of `{"test" (sessions), "metric", "subject",
-    "stat", "unit", "base", "new"}`, the worst change first; `added` and `removed` name what only
-    one side has: a test, or a metric of one, or a metric and subject of a run."""
+    "stat", "unit", "base", "new"}`, the worst change first; `added` and `removed` are lists of
+    what only one side has, as objects with those keys that say it: `{"test"}`, `{"test",
+    "metric"}` or, for a run, `{"metric", "subject"}`. `threshold_percent` is `threshold` in
+    percent, as `--threshold` is given."""
     before, after = _values(base, what), _values(new, what)
     regressions: list[dict[str, Any]] = []
     improvements: list[dict[str, Any]] = []
@@ -117,11 +130,11 @@ def compare(
     tests_before, tests_after = _tests(base, what), _tests(new, what)
     return {
         "kind": what,
-        "threshold": threshold,
+        "threshold_percent": round(threshold * 100, 9),
         "regressions": regressions,
         "improvements": improvements,
-        "added": _missing(after, tests_after, before, tests_before),
-        "removed": _missing(before, tests_before, after, tests_after),
+        "added": _missing(after, tests_after, before, tests_before, what),
+        "removed": _missing(before, tests_before, after, tests_after, what),
         "compared": len(both) * len(STATS),
     }
 
@@ -145,7 +158,11 @@ def compare_folders(base: Path, new: Path, threshold: float = THRESHOLD) -> dict
             f"{'index' if first_kind == 'session' else 'summary'}.json) but {new} is a "
             f"{second_kind}: compare two sessions or two runs"
         )
-    return compare(first, second, first_kind, threshold)
+    return {
+        "base": str(base),
+        "new": str(new),
+        **compare(first, second, first_kind, threshold),
+    }
 
 
 def _change(change: dict[str, Any]) -> list[str]:
@@ -153,8 +170,10 @@ def _change(change: dict[str, Any]) -> list[str]:
     was, now = change["base"], change["new"]
     shown = f"{measure(was, unit)} → {measure(now, unit)}"
     percent = f"{(now - was) / abs(was) * 100:+.0f}%" if was else "new"
-    where = change["test"] + "  " if "test" in change else ""
-    return [f"{where}{change['metric']}  {change['stat']}", change["subject"], shown, percent]
+    if percent == "-100%" and now:  # -100% is for a value that fell to 0
+        percent = "-99%"
+    where = [change["test"]] if "test" in change else []
+    return [*where, change["metric"], change["stat"], change["subject"], shown, percent]
 
 
 def _table(rows: list[list[str]]) -> list[str]:
@@ -174,10 +193,10 @@ def format_text(result: dict[str, Any]) -> str:
             lines += [f"{title}:", *_table([_change(c) for c in result[key]]), ""]
     for title, key in (("Added", "added"), ("Removed", "removed")):
         if result[key]:
-            lines += [f"{title}:", *(f"  {label}" for label in result[key]), ""]
+            lines += [f"{title}:", *("  " + "  ".join(item.values()) for item in result[key]), ""]
     lines.append(
         f"{len(result['regressions'])} regressions, {len(result['improvements'])} improvements, "
         f"{len(result['added'])} added, {len(result['removed'])} removed "
-        f"(threshold {result['threshold']:.0%}, {result['compared']} values compared)"
+        f"(threshold {result['threshold_percent']:g}%, {result['compared']} values compared)"
     )
     return "\n".join(lines)

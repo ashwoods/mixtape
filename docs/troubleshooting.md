@@ -1,0 +1,80 @@
+# Troubleshooting
+
+Each heading is the text of an error. Find yours, and the fix is under it.
+
+## ModuleNotFoundError: No module named 'gi' { #no-module-named-gi }
+
+The Python that runs your program has no PyGObject: it comes from your system, not from PyPI, and
+a venv does not see it unless you ask.
+
+Make the venv from a Python that has it, with `--system-site-packages`. This command must
+succeed with the Python you start from, and print nothing:
+
+```console
+$ python3 -c 'import gi'
+```
+
+Homebrew's Python is `/opt/homebrew/bin/python3` and Ubuntu's is `/usr/bin/python3`. Then
+`python3 -m venv --system-site-packages .venv`. [Install](index.md#install) has the steps.
+
+## error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: see https://shashi.to/mixtape/troubleshooting/ { #mixtape-needs-pygobject }
+
+`mixtape run` and `mixtape inspect` could not import PyGObject or GStreamer's bindings, so they
+stopped with exit status 1. The cause and the fix are those of
+[the `gi` error above](#no-module-named-gi): install GStreamer and PyGObject on the system, and
+make the venv from a Python that has them.
+
+## no element "x264enc" { #no-element-x264enc }
+
+The pipeline needs `x264enc`, which is in gst-plugins-ugly, and this GStreamer does not have that
+plugin. `mixtape run` prints it as the last words of an invalid pipeline, after the description, and
+`Player.from_description` raises `PlayerDescriptionError` with the same words:
+`error: invalid pipeline 'videotestsrc ! x264enc ! fakesink': no element "x264enc"`.
+
+Homebrew's `gstreamer` has the plugin. On Ubuntu, `sudo apt install gstreamer1.0-plugins-ugly`.
+Check that the element is there:
+
+```console
+$ gst-inspect-1.0 --exists x264enc && echo found
+found
+```
+
+[Measuring performance](perf.md) records with `x264enc`. Any other element named in this message
+is in another plugin: `gst-inspect-1.0 NAME`, run on a machine that has it, says which.
+
+## no element "webrtcsink" { #no-element-webrtcsink }
+
+`webrtcsink` and `webrtcsrc` are in gst-plugins-rs, which Ubuntu does not package. Homebrew's
+`gstreamer` includes it. On Ubuntu, build it with `scripts/build-rs-plugins` and set
+`GST_PLUGIN_PATH`: [A WebRTC client](webrtc.md#install) has the commands, and the check that both
+elements are there.
+
+## initialised before it could set GST_TRACERS { #gst-tracers }
+
+The message starts `The feature 'perf' needs the tracers …` (or `The feature 'leaks' needs the
+leaks tracer …`) and ends `…before anything else initialises GStreamer, or set GST_TRACERS
+yourself`. GStreamer creates its tracers when it initialises, once per process, and something in
+your program initialised it before the feature could ask for them.
+
+Build the player with `Player.from_description(..., features=['perf'])` before anything else
+touches GStreamer, or run `mixtape run --feature perf`, which does. If another library initialises
+GStreamer first, set `GST_TRACERS` yourself in the environment.
+[First in the process](perf.md#first-in-the-process) shows the program and the full message.
+
+## error: 127.0.0.1:8047 is in use (is another mixtape run --http running?): choose another port with --http PORT { #port-in-use }
+
+Something already listens on that port, often a `mixtape run --http` that is still running. The
+command exits 1. Stop the other one, or choose another port. This one stands in for it with a
+server on the port; it stops the server on its last line:
+
+```console
+$ python3 -m http.server 8047 --bind 127.0.0.1 > /dev/null 2>&1 &
+$ sleep 1
+$ mixtape run --http 8047 "videotestsrc ! fakesink"; echo "exit status $?"; kill $!
+error: 127.0.0.1:8047 is in use (is another mixtape run --http running?): choose another port with --http PORT
+exit status 1
+```
+
+`lsof -i :8047` names the process that holds the port. The [command line](cli.md#the-http-option)
+page has the options of `--http`, and the port `0` of [`serve()`](http.md#in-code) asks for a
+free one.

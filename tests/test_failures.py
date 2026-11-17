@@ -132,7 +132,7 @@ def test_a_failed_stop_keeps_the_pipeline_instead_of_disposing_it_outside_null()
         [sys.executable, "-c", run], capture_output=True, text=True, timeout=20, cwd=ROOT
     )
     assert done.returncode == 1
-    assert "error: Could not set the pipeline to null: f failed" in done.stderr
+    assert "error: could not set the pipeline to null: f failed" in done.stderr
     assert "CRITICAL" not in done.stderr, done.stderr
 
 
@@ -174,11 +174,11 @@ def test_run_exits_naming_the_element_that_hangs(monkeypatch, capsys):
 
     threading.Thread(target=interrupt, daemon=True).start()
     assert main(["run", HANGS]) == 1  # it hangs in the preroll: no EOS to wait for
-    assert "error: Could not set the pipeline to null within 0.5 s: f still changing" in (
+    assert "error: could not set the pipeline to null within 0.5 s: f still changing" in (
         capsys.readouterr().err
     )
 
 
 def test_run_fails_when_the_pipeline_cannot_stop(capsys):
     assert main(["run", "videotestsrc num-buffers=5 ! pyfaulty name=f mode=stop ! fakesink"]) == 1
-    assert "error: Could not set the pipeline to null: f failed" in capsys.readouterr().err
+    assert "error: could not set the pipeline to null: f failed" in capsys.readouterr().err

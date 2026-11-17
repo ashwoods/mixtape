@@ -20,6 +20,14 @@ logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "covers(*sections): the example sections (name:section, as in recorder:build) whose"
+        " code this test exercises; docs/ shows it under the snippet (hooks/source_lines.py)",
+    )
+
+
 @pytest.fixture
 def Gst():  # noqa
     import gi

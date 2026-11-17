@@ -34,7 +34,7 @@ def test_resolve_a_class_and_an_instance(monkeypatch: pytest.MonkeyPatch) -> Non
     ("spec", "message"),
     [
         ("feat,step=x", "step: Input should be a valid number"),
-        ("feat,nope=1", "nope: Extra inputs are not permitted"),
+        ("feat,nope=1", r"Feature 'feat' has no option 'nope'; its options: step \(number\)$"),
         ("feat,step", "not KEY=VALUE"),
         ("feat,=1", "not KEY=VALUE"),
         ("nofeat", "available: feat, other"),

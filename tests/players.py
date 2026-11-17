@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from mixtape import Feature, Player, command, features, prop
+from mixtape import Feature, Player, cli, command, features, prop
 
 
 class Demo(Player):
@@ -63,6 +63,7 @@ def register(monkeypatch: pytest.MonkeyPatch, *classes: Any, **named: Any) -> No
     entries = {c.name: _EntryPoint(c.name, c) for c in classes}
     entries |= {name: _EntryPoint(name, obj) for name, obj in named.items()}
     monkeypatch.setattr(features, "available", lambda: entries)
+    monkeypatch.setattr(cli, "_installed_features", lambda: list(entries))  # `--help` reads them
 
 
 class NoDescription(Player):

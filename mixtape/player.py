@@ -808,6 +808,7 @@ class Player:
             properties[path] = computed.spec(path)
         return PlayerSpec(
             name=type(self).__name__,
+            features=list(self._features),
             commands={name: bound.declared.spec for name, bound in self._commands.items()},
             properties=properties,
             elements={key: describe_element(e, key) for key, e in self.exposed_elements().items()},

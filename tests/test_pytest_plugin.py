@@ -329,7 +329,8 @@ def test_a_session_is_compared_with_its_baseline(
     result, out = measure(pytester, f"--mixtape-perf-baseline={base}")
     comparison = load(out / "compare.json")
     assert comparison["base"] == str(base) and comparison["new"] == str(out)
-    assert comparison["removed"] == ["test_suite.py::test_old"]
+    assert comparison["removed"] == [{"test": "test_suite.py::test_old"}]
+    assert comparison["threshold_percent"] == 50
     if regressed:
         assert result.ret == pytest.ExitCode.TESTS_FAILED
         result.assert_outcomes(passed=1)  # the tests did not fail, the session did
@@ -353,7 +354,7 @@ def test_a_baseline_needs_the_option_and_a_session(pytester: pytest.Pytester) ->
     result.stderr.fnmatch_lines(["*--mixtape-perf-baseline needs --mixtape-perf*"])
     result, _ = measure(pytester, "--mixtape-perf-baseline=nowhere")
     assert result.ret == pytest.ExitCode.USAGE_ERROR
-    result.stderr.fnmatch_lines(["*--mixtape-perf-baseline: *nowhere has neither an index.json*"])
+    result.stderr.fnmatch_lines(["*--mixtape-perf-baseline: *nowhere does not exist*"])
     # the folder of this session is no baseline: it is replaced as the session goes
     result, out = measure(pytester, f"--mixtape-perf-baseline={pytester.path / 'perf' / '.'}")
     assert result.ret == pytest.ExitCode.USAGE_ERROR

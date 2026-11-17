@@ -304,6 +304,7 @@ async def test_a_feature_in_the_model_commands_and_events(Gst: Any) -> None:
     async with player, serve(player, "127.0.0.1", 0) as listening:
         async with httpx.AsyncClient(base_url=listening.url) as client:
             model = (await client.get("/api/model")).json()
+            assert model["features"] == ["feat"]
             assert model["properties"]["feat.level"]["builtin"] is False
             assert "feat.bump" in model["commands"]
             assert (await client.get("/api/properties")).json()["feat.level"] == 0

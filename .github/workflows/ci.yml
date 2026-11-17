@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # gi and GStreamer come from apt, as in the Dockerfile.
+      # gi and GStreamer come from apt, as in the Dockerfile. The docs' examples need bad
+      # (webrtcbin, inter, proxy, unixfd), ugly (x264enc) and nice (webrtcbin's ICE). The dev
+      # packages are for building the Rust plugins below.
       - name: Install GStreamer
         run: |
           sudo apt-get update -yq
@@ -20,29 +22,38 @@ jobs:
             python3-gst-1.0 \
             gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-nice \
             gstreamer1.0-tools \
-            libgstreamer1.0-dev
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev
 
-      # The perf tracers (queue-levels, buffer-lateness, pad-push-timings) are
-      # not packaged for Ubuntu: build them once and cache the plugin.
-      - name: Cache GStreamer Rust tracers
-        id: tracers
+      # The perf tracers (queue-levels, buffer-lateness, pad-push-timings) and the WebRTC
+      # plugin (webrtcsink, webrtcsrc) are not packaged for Ubuntu: build them once and
+      # cache the plugins.
+      - name: Cache GStreamer Rust plugins
+        id: rs-plugins
         uses: actions/cache@v6
         with:
-          path: ~/.cache/gst-rs-tracers
-          key: gst-rs-tracers-${{ runner.os }}-0.15.4-${{ hashFiles('scripts/build-rs-tracers') }}
+          path: ~/.cache/gst-rs-plugins
+          key: gst-rs-plugins-${{ runner.os }}-0.15.4-${{ hashFiles('scripts/build-rs-plugins') }}
 
-      - name: Build GStreamer Rust tracers
-        if: steps.tracers.outputs.cache-hit != 'true'
+      - name: Build GStreamer Rust plugins
+        if: steps.rs-plugins.outputs.cache-hit != 'true'
         run: |
           rustup toolchain install stable --profile minimal
-          scripts/build-rs-tracers ~/.cache/gst-rs-tracers
+          scripts/build-rs-plugins ~/.cache/gst-rs-plugins
 
-      - name: Put the tracers on GST_PLUGIN_PATH
-        run: echo "GST_PLUGIN_PATH=$HOME/.cache/gst-rs-tracers" >> "$GITHUB_ENV"
+      - name: Put the Rust plugins on GST_PLUGIN_PATH
+        run: echo "GST_PLUGIN_PATH=$HOME/.cache/gst-rs-plugins" >> "$GITHUB_ENV"
 
-      - name: Check the tracers load
-        run: gst-inspect-1.0 queue-levels
+      - name: Check the Rust plugins load
+        run: |
+          gst-inspect-1.0 queue-levels
+          gst-inspect-1.0 webrtcsink
+          gst-inspect-1.0 webrtcsrc
 
       # setup-uv stopped publishing major tags at v8: pin the release.
       - uses: astral-sh/setup-uv@v10.3.3

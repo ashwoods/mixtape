@@ -548,3 +548,31 @@ async def test_a_namesake_renames_an_element_and_its_changes_follow(Gst):
         a_q = player.pipeline.get_by_name("a").get_by_name("q")
         threading.Thread(target=a_q.set_property, args=("max-size-buffers", 7)).start()
         assert (await next_change(stream, "a.q.max-size-buffers")).value == 7
+
+
+@pytest.mark.asyncio
+async def test_a_summary_is_the_first_paragraph_on_one_line(Gst):
+    class Wrapped(Player):
+        @command
+        async def stop_soon(self) -> None:
+            """Send an EOS event and wait for the EOS message it causes, while playing, for up
+            to `timeout` seconds.
+
+            A second paragraph is detail, not summary.
+            """
+
+        @prop
+        def level(self) -> int:
+            """The level of the thing,
+            as it was last measured."""
+            return 0
+
+    spec = Wrapped.from_description(PIPELINE).describe()
+    assert spec.commands["stop_soon"].description == (
+        "Send an EOS event and wait for the EOS message it causes, while playing, for up "
+        "to `timeout` seconds."
+    )
+    assert (
+        spec.properties["level"].description == "The level of the thing, as it was last measured."
+    )
+    assert spec.commands["eos"].description.endswith("never carries it to the sinks.")

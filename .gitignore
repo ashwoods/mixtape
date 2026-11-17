@@ -105,3 +105,4 @@ venv.bak/
 
 # ruff
 .ruff_cache/
+site/

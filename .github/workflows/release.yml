@@ -1,7 +1,8 @@
 name: Release
 
 # Publishing a GitHub release builds the wheel and sdist from its tag, attests their
-# provenance (`gh attestation verify <file> --repo ashwoods/mixtape`) and attaches them.
+# provenance (`gh attestation verify <file> --repo ashwoods/mixtape`), attaches them and
+# uploads them to PyPI.
 on:
   release:
     types: [published]
@@ -39,3 +40,25 @@ jobs:
         run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # Trusted publishing: pypi.org's mixtape project trusts this repository's release.yml in the
+  # `pypi` environment, so no token is stored.
+  pypi:
+    needs: dist
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mixtape/${{ github.ref_name }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

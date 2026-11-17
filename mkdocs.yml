@@ -1,0 +1,85 @@
+site_name: mixtape
+site_description: A Python GStreamer application framework, with a command line, a control page and pipeline metrics
+site_url: https://shashi.to/mixtape/
+repo_url: https://github.com/ashwoods/mixtape
+edit_uri: edit/main/docs/
+
+# adds a "Source: … · tested by …" line under each snippet from examples/
+hooks:
+  - hooks/source_lines.py
+
+extra_css:
+  - stylesheets/source-line.css
+  - stylesheets/console.css
+
+nav:
+  - Overview: index.md
+  - Guides:
+      - Writing an application: library.md
+      - Measuring performance: perf.md
+  - Reference:
+      - Command line: cli.md
+      - HTTP API: http.md
+      - API reference: reference.md
+  - Examples:
+      - A WebRTC client: webrtc.md
+      - Two pipelines: two-pipelines.md
+  - Troubleshooting: troubleshooting.md
+  - Changelog: changelog.md
+
+# the API reference (docs/reference.md): griffe reads mixtape/ statically, so the build
+# needs neither GStreamer nor `gi`
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: null
+            show_source: false
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            filters: ["!^_"]
+            heading_level: 3
+            show_root_heading: true
+            show_root_full_path: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
+theme:
+  name: material
+  features:
+    # picking a tab in one tab group picks it everywhere
+    - content.tabs.link
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      # the pipeline graphs: Material draws them with Mermaid
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      # the examples live outside docs/
+      base_path: [.]
+      check_paths: true
+      dedent_subsections: true

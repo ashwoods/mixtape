@@ -6,7 +6,7 @@
 
 **This project is in pre-alpha and the API is most likely to change**
 
-**Documentation: [shashi.to/mixtape](https://shashi.to/mixtape/)** · [Changelog](Changelog.md)
+**Documentation: [shashi.to/mixtape](https://shashi.to/mixtape/)** · [Changelog](https://shashi.to/mixtape/changelog/)
 
 [GStreamer] is a pipeline based framework for building complex multimedia processing 
 systems. It is written in C, based on [GObject], and offers several bindings in other languages,
@@ -37,7 +37,7 @@ your system, not from PyPI:
 
 ```console
 $ brew install gstreamer    # macOS
-$ sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
+$ sudo apt install python3-gi python3-gst-1.0 python3-venv gstreamer1.0-tools \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good    # Debian/Ubuntu
 ```
 
@@ -47,7 +47,7 @@ Make a venv from a Python that has the bindings: `python3 -c 'import gi'` must s
 
 ```console
 $ python3 -m venv --system-site-packages .venv && . .venv/bin/activate
-$ pip install 'mixtape[http]'
+$ pip install 'mixtape[http]>=0.8'
 ```
 
 To run the examples of the documentation, clone the repository; its commands run from that
@@ -80,7 +80,7 @@ the page says.
 
 ## Development
 
-[CONTRIBUTING.md](CONTRIBUTING.md) has what to install and how the checks work. In short, with
+[CONTRIBUTING.md](https://github.com/ashwoods/mixtape/blob/main/CONTRIBUTING.md) has what to install and how the checks work. In short, with
 [uv] and GStreamer installed:
 
 ```console

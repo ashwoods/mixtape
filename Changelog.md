@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.8.0 (unreleased)
+## 0.8.0 (2026-11-17)
 
 ### Added
 - `mixtape inspect --json` and `GET /api/model` have `features`, the names of the enabled
@@ -41,7 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The command line is built with Typer: a usage error prints `error: …`, the usage line of the
   command and a pointer to its `--help`, and exits 2. Options go anywhere, `-v` before and after
-  the command still adds up.
+  the command still adds up. mixtape now depends on `typer` (`<0.30`), which brings `rich`,
+  `shellingham` and `annotated-doc`.
+- The command line's errors start in lower case (`error: could not set the pipeline…`), and
+  say what to do next where they can.
 - `mixtape perf compare --json` (and `compare.json` of `--mixtape-perf-baseline`): `added` and
   `removed` are lists of objects with the keys that name what changed (`{"test"}`,
   `{"test", "metric"}`, or `{"metric", "subject"}`) and not strings of `"metric  subject"`;

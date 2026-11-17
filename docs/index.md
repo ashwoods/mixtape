@@ -24,7 +24,7 @@ system, not from PyPI:
 === "Ubuntu"
 
     ```console
-    $ sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
+    $ sudo apt install python3-gi python3-gst-1.0 python3-venv gstreamer1.0-tools \
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good
     ```
 
@@ -42,7 +42,7 @@ venv see the bindings, and the `http` extra adds the control page:
 
 ```console
 $ python3 -m venv --system-site-packages .venv && . .venv/bin/activate
-$ pip install 'mixtape[http]'
+$ pip install 'mixtape[http]>=0.8'
 ```
 
 To run the examples on these pages, clone the repository. The commands on these pages run from

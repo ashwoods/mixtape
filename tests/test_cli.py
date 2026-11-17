@@ -242,6 +242,24 @@ def test_an_abbreviated_option_is_refused(capsys: pytest.CaptureFixture[str]) ->
     assert main(["perf", "compare", "--thr", "10", "a", "b"]) == 2
 
 
+@pytest.mark.parametrize(
+    ("argv", "command"),
+    [
+        (["run", PIPELINE, "--http"], "mixtape run"),
+        (["perf", "compare", "a", "--threshold"], "mixtape perf compare"),
+    ],
+)
+def test_an_option_without_its_value_points_at_its_command_help(
+    argv: list[str], command: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # refused before the command has a context: reported by the review of round 4
+    assert main(argv) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: option '--") and err.endswith(
+        f"Try '{command} --help' for help.\n"
+    )
+
+
 def test_verbose_before_and_after_the_command_adds_up(monkeypatch: pytest.MonkeyPatch) -> None:
     logger = logging.getLogger("mixtape")
     monkeypatch.setattr(logger, "level", logger.level)  # restored afterwards
@@ -254,7 +272,7 @@ def test_verbose_before_and_after_the_command_adds_up(monkeypatch: pytest.Monkey
 def test_help_ends_with_examples_and_exit_statuses(capsys: pytest.CaptureFixture[str]) -> None:
     for command, statuses in [
         (["run"], "Exit status: 0 at EOS"),
-        (["inspect"], "Exit status: 0 on success, 2 "),
+        (["inspect"], "Exit status: 0 on success, 1 without PyGObject, 2 "),
         (["perf", "compare"], "Exit status: 0 when nothing got slower, 1 on a regression"),
     ]:
         assert main([*command, "--help"]) == 0
@@ -263,7 +281,7 @@ def test_help_ends_with_examples_and_exit_statuses(capsys: pytest.CaptureFixture
     assert main(["run", "--help"]) == 0
     out = capsys.readouterr().out
     assert '  mixtape run "videotestsrc ! autovideosink"\n' in out
-    assert "  mixtape run --http 8047 demo:Demo\n" in out
+    assert "  mixtape run --http 8047 examples/demo.py:Demo\n" in out
     assert "or gst:NAME for any GStreamer tracer" in " ".join(out.split())
 
 

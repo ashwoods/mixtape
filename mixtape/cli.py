@@ -210,11 +210,11 @@ def _start(ctx: typer.Context, verbose: int, *, needs_gst: bool = True) -> int |
     f"until interrupted.\n\n{TARGET_HELP}",
     epilog="Examples:\n\n\b\n"
     '  mixtape run "videotestsrc ! autovideosink"\n'
-    "  mixtape run --http 8047 demo:Demo\n"
+    "  mixtape run --http 8047 examples/demo.py:Demo\n"
     "\n"
-    "Exit status: 0 at EOS or after a first Ctrl-C, 1 on a pipeline error or when --http "
-    "cannot listen, 2 on bad usage or a target or feature that cannot be loaded, 130 on a "
-    "second Ctrl-C.",
+    "Exit status: 0 at EOS or after a first Ctrl-C, 1 on a pipeline error, when --http "
+    "cannot listen or without PyGObject, 2 on bad usage or a target or feature that cannot "
+    "be loaded, 130 on a second Ctrl-C.",
 )
 def run(
     ctx: typer.Context,
@@ -243,14 +243,14 @@ def run(
     feature: Features = None,
     verbose: Verbose = 0,
 ) -> int:
+    if (code := _start(ctx, verbose)) is not None:  # before the extra: it imports gi too
+        return code
     if http is not None:
         try:
             importlib.import_module("mixtape.interfaces.http")  # needs the extra
         except ImportError:
             _error("--http needs the http extra: pip install 'mixtape[http]'")
             return EXIT_USAGE
-    if (code := _start(ctx, verbose)) is not None:
-        return code
     player = _load_player(target, expose_all, feature or [])
     if player is None:
         return EXIT_USAGE
@@ -266,8 +266,8 @@ def _assignments(texts: Sequence[str] | None) -> list[tuple[str, str]]:
     short_help="show the commands, properties and elements a player exposes",
     help="Show what a player exposes: its commands, properties and the properties of its "
     f"elements, with their types, ranges and current values.\n\n{TARGET_HELP}",
-    epilog="Exit status: 0 on success, 2 on bad usage or a target that cannot be loaded, "
-    "130 on Ctrl-C.",
+    epilog="Exit status: 0 on success, 1 without PyGObject, 2 on bad usage or a target that "
+    "cannot be loaded, 130 on Ctrl-C.",
 )
 def inspect(
     ctx: typer.Context,
@@ -330,7 +330,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         code = get_command(app).main(args=argv, prog_name="mixtape", standalone_mode=False)
     except UsageError as exc:
-        _usage_error(exc)
+        _usage_error(exc, sys.argv[1:] if argv is None else argv)
         return exc.exit_code
     except ClickException as exc:
         _error(exc.format_message())
@@ -340,7 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return code if isinstance(code, int) else 0
 
 
-def _usage_error(exc: Any) -> None:
+def _usage_error(exc: Any, argv: Sequence[str]) -> None:
     """Print a usage error, and the usage line of the command that refused it."""
     ctx = exc.ctx
     if type(exc).__name__ == "NoArgsIsHelpError":  # a command with no words: its help
@@ -349,7 +349,12 @@ def _usage_error(exc: Any) -> None:
     _error(exc.format_message().rstrip("."))  # a click message ends with a full stop
     if ctx is not None:
         print(ctx.get_usage(), file=sys.stderr)
-        print(f"Try '{ctx.command_path} --help' for help.", file=sys.stderr)
+    # an option that misses its value is refused before its command has a context: its words
+    words = [arg for arg in argv if not arg.startswith("-")][:2]
+    named = " ".join(words if words == ["perf", "compare"] else words[:1])
+    fallback = f"mixtape {named}" if named in ("run", "inspect", "perf compare") else "mixtape"
+    path = ctx.command_path if ctx is not None else fallback
+    print(f"Try '{path} --help' for help.", file=sys.stderr)
 
 
 def _gst_available() -> bool:

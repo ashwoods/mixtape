@@ -6,7 +6,9 @@ PAGE = "README.md"
 
 SAMPLES: list[Sample] = [
     not_run(PAGE, "install", "^brew install gstreamer    # macOS", "installs system packages"),
-    not_run(PAGE, "pip", "pip install 'mixtape[http]'", "installs packages; the tests run in one"),
+    not_run(
+        PAGE, "pip", "pip install 'mixtape[http]>=0.8'", "installs packages; the tests run in one"
+    ),
     not_run(PAGE, "clone", "git clone", "clones the repository the tests run in"),
     run(PAGE, "first-run", 'mixtape run "videotestsrc num-buffers=60', exact=True),
     not_run(PAGE, "http-perf", "mixtape run --http 8047 --feature perf", "opens a video window"),

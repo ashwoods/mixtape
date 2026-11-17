@@ -11,7 +11,7 @@ from mixtape.events import Eos, StateChanged
 
 
 async def main() -> None:
-    description = "videotestsrc num-buffers=60 ! videoconvert ! fakesink"
+    description = "videotestsrc num-buffers=60 ! fakesink"
     async with Player.from_description(description) as player:
         events = player.events()
         await player.play()

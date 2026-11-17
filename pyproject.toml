@@ -1,7 +1,7 @@
 [project]
 name = "mixtape"
 version = "0.8.0.dev0"
-description = "GStreamer Python application mini-framework"
+description = "A Python GStreamer application framework"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

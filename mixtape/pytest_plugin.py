@@ -201,7 +201,8 @@ class Measure:
             recorder.discard()
             entry["folder"] = None
             raise
-        if recorder.measured <= {"process.cpu"}:  # nothing ran GStreamer: nothing to show
+        # only the CPU: nothing ran GStreamer, nothing to show
+        if recorder.measured <= {"process.cpu", "thread.cpu"}:
             recorder.discard()
             entry["folder"] = None
         else:

@@ -330,7 +330,9 @@ The built-in ones:
   and `pad.interval` of each `element:pad` from the core `stats`; `pad.lateness`, `pad.push`
   and `queue.bytes`, `queue.buffers`, `queue.time` and `queue.fill` (0 to 1) from the
   gst-plugins-rs `buffer-lateness`, `pad-push-timings` and `queue-levels`, left out with a
-  warning when they are not installed; and `process.cpu`. No Python runs on a streaming
+  warning when they are not installed; `process.cpu`; and `thread.cpu` by thread name (on
+  Linux and macOS; GStreamer names a streaming thread after its pad, `q:src`, and the
+  unnamed ones are `other`). No Python runs on a streaming
   thread: the core tracers write to the debug log, which a thread reads from GStreamer's ring
   buffer logger, in memory (it replaces the default logger and echoes the lines that are not
   the tracers' to stderr; with a `GST_DEBUG_FILE` in the environment the default logger stays,

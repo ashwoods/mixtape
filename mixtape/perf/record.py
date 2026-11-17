@@ -1,6 +1,6 @@
 """The recording of one run, for the `perf` feature (a player's run) and the pytest plugin (a
-test's): its windows of what the tracers measured and the CPU of the process, and the
-artifacts they make."""
+test's): its windows of what the tracers measured and the CPU of the process and its threads,
+and the artifacts they make."""
 
 import threading
 import time
@@ -11,6 +11,7 @@ from .aggregate import Window, rates, window
 from .collect import Collector
 from .metrics import Sample
 from .output import Artifacts
+from .threads import ThreadCpu
 
 
 def _subject(subject: str, keys: dict[str, str]) -> str:
@@ -38,6 +39,8 @@ class Recorder:
         """Nanoseconds since GStreamer initialised: when it started, and where the window
         collecting starts, which is the end of the last"""
         self._cpu = (time.process_time(), time.monotonic())  # at the window's start
+        self._threads = ThreadCpu()
+        self._threads.sample(self.start_ns)  # the baseline
         self.measured: set[str] = set()
         """The metrics it has windows of"""
 
@@ -55,6 +58,7 @@ class Recorder:
             samples, counts = self._subscription.take()
             end = self._collector.now()
             samples += rates(counts, self.end_ns, end)
+            samples += self._threads.sample(end)
             if keys:
                 samples = [s._replace(subject=_subject(s.subject, keys)) for s in samples]
             if cpu is not None:
@@ -67,7 +71,7 @@ class Recorder:
             return result
 
     def _cpu_sample(self) -> Sample | None:
-        """`process.cpu` since the last window."""
+        """`process.cpu` since the last window (`thread.cpu` is `ThreadCpu`'s)."""
         cpu, wall = time.process_time(), time.monotonic()
         (last_cpu, last_wall), self._cpu = self._cpu, (cpu, wall)
         if wall <= last_wall:

@@ -532,11 +532,12 @@ function makeControl(d, opts = {}) {
 
 // ---- state -------------------------------------------------------------------------------
 
-let model = null, modelText = null;
+let model = null;
 let values = new Map();        // element path (or built-in name) → value
 let aliasTarget = new Map();   // alias name → element path
 let rowsByPath = new Map();    // element path → property rows showing it
-let allRows = [], sections = [];
+let allRows = [], sideRows = [], sections = [];
+let elsBox = null;             // where the element sections are
 let pendingState = null, atEos = false, seekHold = false;
 const ui = { filter: "", modified: false, open: new Map() };
 let perfView = null;           // the perf feature's measures on the graph and in charts (perf.js)
@@ -577,17 +578,8 @@ function setConn(state) {
   document.getElementById("seek").disabled = state !== "live";
 }
 
-async function connect() {
+function connect() {
   setConn(model ? "offline" : "connecting");
-  let text;
-  try {
-    const r = await fetch("/api/model", { cache: "no-store" });
-    if (!r.ok) throw new Error(String(r.status));
-    text = await r.text();
-  } catch {
-    return reconnectLater();
-  }
-  if (text !== modelText) { modelText = text; build(parseJSON(text)); }
   const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/events`);
   ws = sock;
   sock.onmessage = (e) => onMessage(parseJSON(e.data));
@@ -607,6 +599,11 @@ function reconnectLater() {
 
 function onMessage(m) {
   switch (m.type) {
+    case "model":  // first on a connection, and when the exposed elements change
+      applyModel(m.model);
+      for (const [p, v] of Object.entries(m.values || {})) setValue(p, v);
+      break;
+    case "graph": applyGraph(m.graph); break;
     case "values":
       retry = 0;
       values = new Map();
@@ -617,14 +614,12 @@ function onMessage(m) {
       if (perfView && values.has(PERF_SUMMARY)) perfView.add(values.get(PERF_SUMMARY));
       updateTransport(); updateTime(); scheduleSummary();
       setConn("live");
-      scheduleGraph();
       break;
     case "state":
       values.set("state", m.new);
       pendingState = m.pending && m.pending !== "void-pending" ? m.pending : null;
       if (m.new === "ready" || m.new === "null") atEos = false;  // as the server clears it
       updateTransport();
-      scheduleGraph();  // elements add pads and link up on the way to paused
       break;
     case "property": setValue(m.path, m.value); break;
     case "position":
@@ -912,29 +907,19 @@ function commandRow(c) {
 
 // ---- pipeline graph: laid out and drawn by graph.js ------------------------------------------
 
-const graphLoad = { text: null, seq: 0, timer: 0 };
+let graphText = null;
 graph.frame = (g) => (model && Object.hasOwn(model.elements, g.pipeline)
   ? { name: g.pipeline, factory: model.elements[g.pipeline].factory, exposed: true } : null);
 graph.reveal = (key) => revealSection(key);
 graph.rendered = () => markGraph();
 
-function scheduleGraph() {
-  clearTimeout(graphLoad.timer);
-  graphLoad.timer = setTimeout(loadGraph, 120);
-}
-
-async function loadGraph() {
-  const seq = ++graphLoad.seq;
-  let text;
-  try {
-    const r = await fetch("/api/graph", { cache: "no-store" });
-    if (!r.ok) return;
-    text = await r.text();
-  } catch { return; }
-  if (seq !== graphLoad.seq || text === graphLoad.text) return;
-  graphLoad.text = text;
-  graph.data = JSON.parse(text);
-  if (perfView) perfView.setGraph(graph.data);
+/** Draw the graph the server sends: on connecting, and whenever the pipeline's shape changes. */
+function applyGraph(g) {
+  const text = toJSON(g);
+  if (text === graphText) return;
+  graphText = text;
+  graph.data = g;
+  if (perfView) perfView.setGraph(g);
   renderGraph();
 }
 
@@ -1010,8 +995,8 @@ function applyFilter() {
   all.textContent = sections.some((s) => !s.el.open) ? "Expand all" : "Collapse all";
 }
 
-function buildElements(main) {
-  const elements = Object.entries(model.elements);
+function buildElements(main, m) {
+  const elements = Object.entries(m.elements);
   const total = elements.reduce((n, [, e]) => n + Object.keys(e.properties).length, 0);
   main.append(h("h2", { class: "sec-h" }, "Elements"));
   if (!elements.length) {
@@ -1036,22 +1021,65 @@ function buildElements(main) {
   main.append(h("div", { class: "empty", id: "no-match", hidden: true }));
 
   for (const [key, e] of elements) {
-    const props = Object.entries(e.properties);
-    const count = h("span", { class: "ec" });
-    const summary = h("summary", {},
-      h("span", { class: "ek", text: key }),
-      e.factory !== key ? h("span", { class: "ef", text: e.factory }) : null,
-      e.description ? h("span", { class: "ed", text: e.description }) : null,
-      count);
-    const rows = props.map(([name, spec]) => propertyRow(spec, name));
-    const el = h("details", { class: "el", "data-element": key }, summary,
-      h("div", { class: "rows" }, rows.length ? rows.map((r) => r.el) : h("div", { class: "empty", text: "No properties." })));
-    const sec = { key, el, rows, count, search: `${key} ${e.factory} ${e.description || ""}`.toLowerCase(),
-      defaultOpen: total <= 80 && rows.length > 0 };
-    summary.addEventListener("click", () => { ui.open.set(key, !el.open); setTimeout(applyFilter); });
+    const sec = makeSection(key, e, total);
     sections.push(sec);
-    main.append(el);
+    main.append(sec.el);
   }
+}
+
+/** The section of an element: its properties, folded or open as `ui.open` says. */
+function makeSection(key, e, total) {
+  const props = Object.entries(e.properties);
+  const count = h("span", { class: "ec" });
+  const summary = h("summary", {},
+    h("span", { class: "ek", text: key }),
+    e.factory !== key ? h("span", { class: "ef", text: e.factory }) : null,
+    e.description ? h("span", { class: "ed", text: e.description }) : null,
+    count);
+  const rows = props.map(([name, spec]) => propertyRow(spec, name));
+  const el = h("details", { class: "el", "data-element": key }, summary,
+    h("div", { class: "rows" }, rows.length ? rows.map((r) => r.el) : h("div", { class: "empty", text: "No properties." })));
+  const sec = { key, el, rows, count, search: `${key} ${e.factory} ${e.description || ""}`.toLowerCase(),
+    defaultOpen: total <= 80 && rows.length > 0, json: toJSON(e) };
+  summary.addEventListener("click", () => { ui.open.set(key, !el.open); setTimeout(applyFilter); });
+  return sec;
+}
+
+/** Show a model: built once, then changed in place when only its elements change, so the
+ * sections that stay keep what is open, focused or being typed. */
+function applyModel(m) {
+  const rest = (x) => toJSON({ name: x.name, commands: x.commands, properties: x.properties });
+  if (!model || rest(m) !== rest(model)) return build(m);
+  model = m;
+  const elements = Object.entries(m.elements);
+  if (!sections.length || !elements.length) {  // to or from "No element is exposed"
+    sections = [];
+    elsBox.replaceChildren();
+    buildElements(elsBox, m);
+  } else {
+    const total = elements.reduce((n, [, e]) => n + Object.keys(e.properties).length, 0);
+    const kept = new Map(sections.map((s) => [s.key, s]));
+    const next = elements.map(([key, e]) => {
+      const sec = kept.get(key);
+      return sec && sec.json === toJSON(e) ? sec : makeSection(key, e, total);
+    });
+    for (const sec of sections) if (!next.includes(sec)) sec.el.remove();
+    // insert the new ones in their place; moving one that stays would blur what has focus
+    let prev = document.getElementById("no-match");
+    for (const sec of next) {
+      if (prev.nextElementSibling !== sec.el) prev.after(sec.el);
+      prev = sec.el;
+    }
+    sections = next;
+  }
+  allRows = [...sideRows, ...sections.flatMap((s) => s.rows)];
+  rowsByPath = new Map();
+  for (const row of allRows) {
+    if (!rowsByPath.has(row.path)) rowsByPath.set(row.path, []);
+    rowsByPath.get(row.path).push(row);
+  }
+  for (const row of allRows) row.update();
+  applyFilter();
 }
 
 function build(m) {
@@ -1085,9 +1113,10 @@ function build(m) {
     own.append(h("h2", { class: "sec-h" }, "Properties"),
       ...ownProps.map((p) => propertyRow(p, p.path, p.target ? `→ ${p.target}` : null).el));
   }
-  const els = h("div", { class: "els" });
+  sideRows = allRows.slice();
+  const els = elsBox = h("div", { class: "els" });
   main.append(...(side ? [own] : []), els);
-  buildElements(els);
+  buildElements(els, m);
   for (const row of allRows) row.update();
   updateTransport(); updateTime(); applyFilter();
   renderGraph();

@@ -76,7 +76,7 @@ async def test_model_and_page(served: Served) -> None:
         ("q", "sink"),
     ]
     page = await served.client.get("/")
-    assert page.status_code == 200 and "/api/model" in page.text
+    assert page.status_code == 200 and "/api/events" in page.text
 
 
 @pytest.mark.asyncio

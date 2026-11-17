@@ -11,6 +11,8 @@ either a command (`sh`) or an output (no language, or `text`), and every one nee
 - `output`: an output block with no command before it: `command` produces it.
 - `not_run`: a command that is setup, needs a camera, or runs until Ctrl-C, with the reason.
 - `illustrative`: an output that cannot be checked. The page must say so in the block's title.
+- `graph`: a ```mermaid graph of pipelines, which must be what tests/graphs.py makes of
+  their descriptions (`python -m tests.graphs` writes it).
 
 A block that no sample matches, or two do, fails `test_every_block_is_covered`, so a sample
 added to a page without a test fails the suite. Where a tool, an element or a platform is
@@ -57,9 +59,11 @@ class Block:
 
     @property
     def category(self) -> str:
-        """`command`, `output`, or `example` (a program included from examples/)."""
+        """`command`, `output`, `graph`, or `example` (a program included from examples/)."""
         if "--8<--" in self.text:
             return "example"
+        if self.lang == "mermaid":
+            return "graph"
         if self.lang in ("sh", "console"):
             return "command"
         if self.lang in ("", "text"):
@@ -108,7 +112,7 @@ class Sample:
     page: str
     name: str
     contains: str  # a unique substring of the block; `^` starts it with it
-    kind: str  # run, output, not-run, illustrative
+    kind: str  # run, output, not-run, illustrative, graph
     why: str = ""
     command: str = ""  # output: the command that produces the block
     shows: str | None = AUTO  # run: contains of the output block (AUTO: the next block)
@@ -122,14 +126,19 @@ class Sample:
     only: str = ""  # "linux" or "darwin"
     needs: tuple[str, ...] = ()  # tools on PATH that must be installed
     elements: tuple[str, ...] = ()  # GStreamer elements (or tracers) that must be installed
+    pipelines: tuple[tuple[str, str], ...] = ()  # graph: (title, description) of each pipeline
+    links: tuple[tuple[str, str, str], ...] = ()  # graph: dashed links, see tests/graphs.py
+    direction: str = "LR"  # graph: or TB
 
     @property
     def id(self) -> str:
-        return f"{self.page}:{self.name}"
+        return f"{self.page}:{'graph:' if self.kind == 'graph' else ''}{self.name}"
 
     @property
     def shown_category(self) -> str:
         """The category of the block `contains` finds."""
+        if self.kind == "graph":
+            return "graph"
         return "command" if self.kind in ("run", "not-run") and not self.command else "output"
 
 
@@ -147,6 +156,12 @@ def not_run(page: str, name: str, contains: str, why: str) -> Sample:
 
 def illustrative(page: str, name: str, contains: str, why: str) -> Sample:
     return Sample(page, name, contains, "illustrative", why=why)
+
+
+def graph(page: str, name: str, *pipelines: str | tuple[str, str], **kw: Any) -> Sample:
+    """The graph `%% name` of a page: of one pipeline, or of several, each with a title."""
+    titled = tuple(("", p) if isinstance(p, str) else p for p in pipelines)
+    return Sample(page, name, f"%% {name}\n", "graph", pipelines=titled, **kw)
 
 
 def on(platform: str, *strings: str) -> tuple[str, ...]:

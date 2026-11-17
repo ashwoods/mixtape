@@ -29,7 +29,7 @@ log = logging.getLogger("mkdocs.hooks.source_lines")
 
 OPEN = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([\w-]*)")
 # a fence in another language must include its code from examples/: no code is written on a page
-WRITTEN = ("sh", "console", "text", "")
+WRITTEN = ("sh", "console", "text", "mermaid", "")
 ANY_INCLUDE = re.compile(r'^\s*--8<--\s+"examples/')
 INCLUDE = re.compile(r'^\s*--8<--\s+"(examples/[^":]+):([^"]+)"\s*$')
 START = re.compile(r"--8<--\s*\[start:([^\]]+)\]")

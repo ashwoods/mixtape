@@ -48,6 +48,17 @@ done
 The same in Python: a `Player` drives the pipeline from an asyncio loop, and every message on
 its bus is also an event:
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% hello
+  p0n0["videotestsrc"]
+  p0n1["videoconvert"]
+  p0n2["fakesink"]
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+```
+
 ```python
 --8<-- "examples/hello.py:main"
 ```

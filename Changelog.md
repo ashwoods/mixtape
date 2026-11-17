@@ -26,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A documentation site, http://shashi.to/mixtape/, built with MkDocs from `docs/`: the command
   line, writing an application, the HTTP API, measuring performance with a real-world recorder,
   a WebRTC client and two pipelines that talk to each other. Its code comes from runnable
-  programs in `examples/`, and every command and snippet on it runs in the test suite.
+  programs in `examples/`, and every command and snippet on it runs in the test suite. Each
+  pipeline is drawn as a graph, made from `Player.graph()` and checked against it by the tests.
 
 ### Changed
 - The README is an overview with a quick start; the reference moved to the documentation site.

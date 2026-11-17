@@ -17,6 +17,15 @@ The names are in `mixtape` (`Player`, `Feature`, `prop`, `command`), `mixtape.ev
 running loop: the first `await` on the player attaches it to the loop that is running, and
 `async with` tears it down, setting the pipeline to NULL, when the block ends.
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% lifecycle
+  p0n0["videotestsrc"]
+  p0n1["fakesink"]
+  p0n0 --> p0n1
+```
+
 ```python
 --8<-- "examples/lib_lifecycle.py:lifecycle"
 ```
@@ -78,6 +87,15 @@ GStreamer has to be initialised before the elements are made, so call `Gst.init(
 `from_description` does it for you, and wraps a description that is a single element in a
 pipeline.
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% dynamic
+  p0n0["<b>src</b><br>videotestsrc"]
+  p0n1["<b>sink</b><br>fakesink"]
+  p0n0 --> p0n1
+```
+
 ```python
 --8<-- "examples/lib_dynamic.py:build"
 ```
@@ -125,6 +143,17 @@ A pipeline that fails later fails the `await player.play_until_eos()` that waits
 first error is the cause, because an element downstream often follows it with errors of its own.
 `player.error` keeps it until the pipeline starts again:
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% errors
+  p0n0["videotestsrc"]
+  p0n1["<b>flaky</b><br>identity"]
+  p0n2["fakesink"]
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+```
+
 ```python
 --8<-- "examples/lib_errors.py:playing"
 ```
@@ -170,6 +199,15 @@ iterator that ends when the player is torn down, or when you call its `close()`.
 
 They are frozen dataclasses, so they work with `match`. This program reads a short stream,
 with its position, and sets a property while it waits:
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% events
+  p0n0["<b>src</b><br>videotestsrc"]
+  p0n1["fakesink"]
+  p0n0 --> p0n1
+```
 
 ```python
 --8<-- "examples/lib_events.py:events"
@@ -225,7 +263,27 @@ of the elements that came as commands, and none of those that went. A decodebin'
 never named by you, so what it adds is a `GraphChanged` and no `ModelChanged`, unless the player
 exposes all elements.
 
-This program adds a named branch to a tee while the pipeline plays:
+This program adds a named branch to a tee while the pipeline plays. The graph is the pipeline
+once the branch, in a bin of its own, is added:
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% shape
+  p0n0["videotestsrc"]
+  p0n1["<b>t</b><br>tee"]
+  p0n2["queue"]
+  p0n3["<b>main</b><br>fakesink"]
+  subgraph p0n4["bin"]
+    p0n5["queue"]
+    p0n6["<b>extra</b><br>fakesink"]
+  end
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+  p0n1 --> p0n5
+  p0n2 --> p0n3
+  p0n5 --> p0n6
+```
 
 ```python
 --8<-- "examples/lib_shape.py:shape"
@@ -249,6 +307,17 @@ sections change without a reload.
 Subclass `Player` for an application of your own: its pipeline, its properties, its commands. The
 test card has a `videotestsrc` and a `fakesink`, a `pattern` to choose, a count of the frames
 that reached the sink and a command to show a pattern.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% testcard
+  p0n0["<b>src</b><br>videotestsrc"]
+  p0n1["<b>sink</b><br>fakesink"]
+  p0n2["video/x-raw<br>width=320<br>height=240"]
+  p0n0 --> p0n2
+  p0n2 --> p0n1
+```
 
 ```python
 --8<-- "examples/testcard.py:player"
@@ -358,6 +427,17 @@ Enable it with the `features` argument of a player, as an instance, a class or a
 `"name,key=value"` string. A player class can enable features for every instance with its own
 `features` attribute, such as `features = ("heartbeat,interval=2",)`: names and classes, not
 instances.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% heartbeat
+  p0n0["videotestsrc"]
+  p0n1["identity"]
+  p0n2["fakesink"]
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+```
 
 ```python
 --8<-- "examples/heartbeat_plugin/heartbeat_demo.py:demo"

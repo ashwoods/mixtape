@@ -36,6 +36,29 @@ where gst-plugins-rs is installed; `appsink` and `appsrc` when your code has to 
 The producer plays a camera at 10 frames per second into the channel `cam`. The consumer reads
 the channel at 30:
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% inter
+  subgraph p0["producer"]
+    p0n0["videotestsrc"]
+    p0n1["intervideosink"]
+    p0n2["video/x-raw<br>width=320<br>height=240<br>framerate=10/1"]
+  end
+  subgraph p1["consumer"]
+    p1n0["intervideosrc"]
+    p1n1["queue"]
+    p1n2["<b>sink</b><br>fakesink"]
+    p1n3["video/x-raw<br>framerate=30/1"]
+  end
+  p0n0 --> p0n2
+  p0n2 --> p0n1
+  p1n0 --> p1n3
+  p1n1 --> p1n2
+  p1n3 --> p1n1
+  p0n1 -. "channel cam" .-> p1n0
+```
+
 ```python
 --8<-- "examples/inter_restart.py:players"
 ```
@@ -74,6 +97,27 @@ not touch the other.
 The two pipelines then have to agree on time: they use one clock, and one base time, the clock
 time that is their running time 0. A buffer is stamped with the running time of the pipeline that
 made it, and a consumer with another base time sees it earlier or later than it was meant:
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% proxy
+  subgraph p0["producer"]
+    p0n0["videotestsrc"]
+    p0n1["<b>out</b><br>proxysink"]
+    p0n2["video/x-raw<br>framerate=10/1"]
+  end
+  subgraph p1["consumer"]
+    p1n0["<b>in</b><br>proxysrc"]
+    p1n2["queue"]
+    p1n3["<b>sink</b><br>fakesink"]
+  end
+  p0n0 --> p0n2
+  p0n2 --> p0n1
+  p1n0 --> p1n2
+  p1n2 --> p1n3
+  p0n1 -. "proxysink property" .-> p1n0
+```
 
 ```python
 --8<-- "examples/proxy_link.py:link"
@@ -135,6 +179,25 @@ Each process is a `mixtape run --http`, with its own control page and its own `p
 two commands in two terminals; the block below runs both in one shell, asks each process for
 the pads its `perf` measured, and stops them:
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% unixfd
+  subgraph p0["producer, :8101"]
+    p0n0["<b>cam</b><br>videotestsrc"]
+    p0n1["unixfdsink"]
+  end
+  subgraph p1["consumer, :8102"]
+    p1n0["<b>feed</b><br>unixfdsrc"]
+    p1n1["<b>conv</b><br>videoconvert"]
+    p1n2["fakesink"]
+  end
+  p0n0 --> p0n1
+  p1n0 --> p1n1
+  p1n1 --> p1n2
+  p0n1 -. "cam.sock" .-> p1n0
+```
+
 ```sh
 dir=$(mktemp -d)
 mixtape run --http 8101 --feature perf \
@@ -183,6 +246,26 @@ So with `perf` on two players in one process:
 - each player records both pipelines, and shows both on its page;
 - elements of the same name in the two pipelines share one subject: two queues named `q` are
   one `q`.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% two-players
+  subgraph p0["cam"]
+    p0n0["<b>cam</b><br>videotestsrc"]
+    p0n1["<b>q</b><br>queue"]
+    p0n2["fakesink"]
+  end
+  subgraph p1["mic"]
+    p1n0["<b>mic</b><br>audiotestsrc"]
+    p1n1["<b>q</b><br>queue"]
+    p1n2["fakesink"]
+  end
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+  p1n0 --> p1n1
+  p1n1 --> p1n2
+```
 
 ```python
 --8<-- "examples/two_players.py:serve"

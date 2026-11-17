@@ -123,6 +123,17 @@ This one has the alias of an element property, made with `prop()`, and a `@comma
 `description` is the pipeline that `mixtape` builds for it (see
 [Writing an application](library.md)):
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% demo
+  p0n0["audiotestsrc"]
+  p0n1["<b>vol</b><br>volume"]
+  p0n2["fakesink"]
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+```
+
 ```python
 --8<-- "examples/demo.py:player"
 ```

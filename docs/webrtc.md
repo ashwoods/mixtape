@@ -100,6 +100,21 @@ others. `stun-server=NULL` is for a call on one machine: no STUN server is asked
 address, so nothing goes out on the network. `congestion-control=disabled` leaves out the
 bandwidth estimation, which needs a plugin of its own.
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% publish
+  p0n0["videotestsrc"]
+  p0n1["videoconvert"]
+  p0n2["videoscale"]
+  p0n3["<b>out</b><br>webrtcsink"]
+  p0n6["video/x-raw<br>width=320<br>height=240"]
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+  p0n2 --> p0n6
+  p0n6 --> p0n3
+```
+
 ```python
 --8<-- "examples/webrtc_client.py:publish"
 ```
@@ -141,6 +156,50 @@ threads, so they too go to the loop, with the bin they belong to: a frame or a l
 of a call that has been hung up is ignored. `hangup` removes the bin again, and a client can call someone else
 afterwards. Both are commands, so the control page has them as buttons, and a failed call is a
 `CommandError`: the page shows its message.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart TB
+  %% call
+  subgraph p0["alice"]
+    p0n0["videotestsrc"]
+    p0n1["videoconvert"]
+    p0n2["videoscale"]
+    p0n3["<b>out</b><br>webrtcsink"]
+    subgraph p0n6["bin"]
+      p0n7["<b>in</b><br>webrtcsrc"]
+      p0n8["<b>convert</b><br>videoconvert"]
+      p0n9["<b>display</b><br>fakesink"]
+    end
+    p0n10["video/x-raw<br>width=320<br>height=240"]
+  end
+  subgraph p1["bob"]
+    p1n0["videotestsrc"]
+    p1n1["videoconvert"]
+    p1n2["videoscale"]
+    p1n3["<b>out</b><br>webrtcsink"]
+    subgraph p1n6["bin"]
+      p1n7["<b>in</b><br>webrtcsrc"]
+      p1n8["<b>convert</b><br>videoconvert"]
+      p1n9["<b>display</b><br>fakesink"]
+    end
+    p1n10["video/x-raw<br>width=320<br>height=240"]
+  end
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+  p0n2 --> p0n10
+  p0n8 --> p0n9
+  p0n10 --> p0n3
+  p1n0 --> p1n1
+  p1n1 --> p1n2
+  p1n2 --> p1n10
+  p1n8 --> p1n9
+  p1n10 --> p1n3
+  p0n3 -. "WebRTC" .-> p1n7
+  p1n3 -. "WebRTC" .-> p0n7
+  p0n7 -. "on a call" .-> p0n8
+  p1n7 -. "on a call" .-> p1n8
+```
 
 ```python
 --8<-- "examples/webrtc_client.py:call"

@@ -43,7 +43,12 @@ markdown_extensions:
   - attr_list
   - tables
   - pymdownx.highlight
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      # the pipeline graphs: Material draws them with Mermaid
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.snippets:

@@ -23,6 +23,23 @@ measuring: the elements have short names, because the report and the thread name
 the encoder is limited to one thread, as it would be on a machine that shares its cores with
 other work. The preset is `slow`, for a good picture at a low bitrate.
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% recorder
+  p0n0["<b>src</b><br>videotestsrc"]
+  p0n1["<b>q</b><br>queue"]
+  p0n2["<b>enc</b><br>x264enc"]
+  p0n3["<b>mux</b><br>mp4mux"]
+  p0n4["<b>sink</b><br>filesink"]
+  p0n5["video/x-raw<br>width=1280<br>height=720<br>framerate=30/1"]
+  p0n0 --> p0n5
+  p0n1 --> p0n2
+  p0n2 --> p0n3
+  p0n3 --> p0n4
+  p0n5 --> p0n1
+```
+
 `--feature perf,out=DIR` measures the run and writes everything to a folder. `out` is the only
 option you need; `interval` sets the length of a window in seconds (default 1).
 

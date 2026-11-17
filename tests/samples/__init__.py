@@ -2,7 +2,7 @@
 
 from tests.doc_samples import Sample
 
-from . import cli, http, index, library, perf, readme, two_pipelines, webrtc
+from . import cli, graphs, http, index, library, perf, readme, two_pipelines, webrtc
 
 SAMPLES: list[Sample] = [
     *readme.SAMPLES,
@@ -13,4 +13,5 @@ SAMPLES: list[Sample] = [
     *perf.SAMPLES,
     *webrtc.SAMPLES,
     *two_pipelines.SAMPLES,
+    *graphs.SAMPLES,
 ]

@@ -17,6 +17,17 @@ pip install 'mixtape[http]'
 `127.0.0.1`; an IPv6 address goes in brackets. Here is a player with an alias and a command,
 which `mixtape inspect` shows on the [command line](cli.md#inspect-a-player) page:
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% demo
+  p0n0["audiotestsrc"]
+  p0n1["<b>vol</b><br>volume"]
+  p0n2["fakesink"]
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+```
+
 ```sh
 cd examples && mixtape run --http 8047 demo:Demo
 ```
@@ -246,6 +257,27 @@ time the shape changes, the socket sends a `graph` message, and a `model` messag
 exposed elements are not the same, with the `values` of the ones that were added, so a client
 needs no other request. The `decodebin` elements are never named by you, so this one is played
 with `expose_all`, which exposes them:
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% shape
+  subgraph p0["the recorder"]
+    p0n0["audiotestsrc"]
+    p0n1["wavenc"]
+    p0n2["filesink"]
+  end
+  subgraph p1["the player"]
+    p1n0["filesrc"]
+    p1n1["<b>dec</b><br>decodebin"]
+    p1n3["fakesink"]
+  end
+  p0n0 --> p0n1
+  p0n1 --> p0n2
+  p1n0 --> p1n1
+  p0n2 -. "tone.wav" .-> p1n0
+  p1n1 -. "once decoded" .-> p1n3
+```
 
 ```python
 --8<-- "examples/http_shape.py:watch"

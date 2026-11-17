@@ -17,6 +17,7 @@ from tests.doc_samples import (
     shown_block,
     skip_reason,
 )
+from tests.graphs import mermaid
 from tests.samples import SAMPLES
 
 SAMPLES_BY_ID = {s.id: s for s in SAMPLES}
@@ -96,6 +97,18 @@ def test_sample(sample: Sample, tmp_path: Path) -> None:
         if sample.check_shown:
             assert shown, f"{sample.id}: no output block to check"
             sample.check(shown.text)
+
+
+@pytest.mark.parametrize("sample", [s for s in SAMPLES if s.kind == "graph"], ids=lambda s: s.id)
+def test_graph(sample: Sample) -> None:
+    reason = skip_reason(sample)
+    if reason:
+        pytest.skip(reason)
+    block = matching(sample)[0]
+    made = mermaid(sample.name, sample.pipelines, sample.links, sample.direction)
+    assert block.text == made, (
+        f"{block.where}: the graph is not the pipeline's; `python -m tests.graphs` writes:\n{made}"
+    )
 
 
 @pytest.mark.parametrize(

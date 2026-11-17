@@ -1,10 +1,11 @@
 """The machinery of tests/test_doc_samples.py: the fenced blocks of the pages and the samples
 that test them. The samples themselves are in tests/samples/, one module per page.
 
-A command is shown with its output, as click's documentation does: a ```console block is the
-`$ ` command (with its `\\` continuations), then what it prints. The tests read it as two
-blocks, the command and the output. Every fenced block in README.md and docs/*.md that is not
-an example program (`--8<--`) is a command, an output or a graph, and every one needs a sample:
+A command is shown with its output, as click's documentation does: a ```console block is its
+`$ ` lines (with their `\\` continuations), run as one command, then what they print. The
+tests read it as two blocks, the command and the output. Every fenced block in README.md and
+docs/*.md that is not an example program (`--8<--`) is a command, an output or a graph, and
+every one needs a sample:
 
 - `run`: a command, run verbatim with `bash -c` in the repository. Its status and its expected
   strings are checked, and every expected string must also be in the output under it (or in
@@ -72,7 +73,7 @@ class Block:
             return "command"
         if self.lang in ("", "text"):
             return "output"
-        assert self.lang != "sh", (
+        assert self.lang not in ("sh", "bash", "shell"), (
             f"{self.where}: write a command as ```console, `$ ` and its output"
         )
         raise AssertionError(
@@ -121,9 +122,9 @@ def console(page: str, start: int, title: str, body: list[str]) -> list[Block]:
     blocks = [Block(page, start, "console", "", "\n".join(command))]
     if n < len(body):
         assert not any(line.startswith("$ ") for line in body[n:]), (
-            f"{page}:{start}: one command per console block, then its output"
+            f"{page}:{start}: the `$ ` lines of a console block come first, then their output"
         )
-        blocks.append(Block(page, start + n, "text", title, "\n".join(body[n:])))
+        blocks.append(Block(page, start + n + 1, "text", title, "\n".join(body[n:])))
     return blocks
 
 
@@ -251,16 +252,27 @@ def inline_output(program: str) -> list[str]:
     return [m[1] or "" for line in lines if (m := INLINE.match(line))]
 
 
-def shown_code(page: str, program: str, blocks: list[Block] = BLOCKS) -> str:
-    """The sections of a program that a page includes, one after the other."""
+def shown_output(page: str, program: str, blocks: list[Block] = BLOCKS) -> list[str]:
+    """The `# >` lines in the sections of a program that a page includes."""
     text = (ROOT / program).read_text()
-    shown = []
+    shown: list[str] = []
     for block in blocks:
         if block.page == page and (m := INCLUDED.search(block.text)) and m[1] == program:
             section = re.search(rf"\[start:{m[2]}\]\n(.*?)\n[^\n]*\[end:{m[2]}\]", text, re.S)
             assert section, f"{program} has no section {m[2]}"
-            shown.append(section[1])
-    return "\n".join(shown)
+            lines = section[1].splitlines()
+            shown += [c[1] or "" for line in lines if (c := INLINE.match(line))]
+    return shown
+
+
+def programs_with_output(blocks: list[Block] = BLOCKS) -> set[tuple[str, str]]:
+    """(page, program) for each program a page shows `# >` lines of: each needs a `prints`."""
+    found: set[tuple[str, str]] = set()
+    for block in blocks:
+        if (m := INCLUDED.search(block.text)) and m[1].endswith(".py"):
+            if shown_output(block.page, m[1], [block]):
+                found.add((block.page, m[1]))
+    return found
 
 
 # --- running a sample -------------------------------------------------------------------------

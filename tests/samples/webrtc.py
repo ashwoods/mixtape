@@ -40,7 +40,9 @@ SAMPLES: list[Sample] = [
         PAGE,
         "demo",
         "python3 examples/webrtc_client.py --demo",
-        exact=True,
+        # not exact: where libnice is built with UPnP, as on Ubuntu, it can warn on stderr that
+        # the port it picked for its UPnP server is taken (CI run 44160582039)
+        expect=("alice received 60 frames from bob", "bob received 60 frames from alice"),
         elements=("webrtcsink", "webrtcsrc", "nicesrc"),
     ),
     not_run(

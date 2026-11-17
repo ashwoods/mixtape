@@ -63,6 +63,11 @@ paused -> playing
 end of stream
 ```
 
+With `--http`, a player is served with a control page, generated from its pipeline, its
+properties and its commands ([HTTP API](http.md#the-control-page)):
+
+![The control page of a player with a volume element and a shout command](images/control-page.png)
+
 ## Where to go next
 
 - [Command line](cli.md): `mixtape run` and `mixtape inspect`, setting properties, the control

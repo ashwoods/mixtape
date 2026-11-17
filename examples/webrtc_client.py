@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import logging
 import os
+import threading
 from collections.abc import Callable, Sequence
 from typing import Any
 from urllib.parse import urlsplit
@@ -40,6 +41,7 @@ def publisher(name: str, *, server: str = SERVER, serve: bool = False, camera: b
 # --8<-- [end:publish]
 
 logger = logging.getLogger(__name__)
+STOP_TIMEOUT = 2  # seconds the listener gets to stop
 
 
 # --8<-- [start:client]
@@ -67,12 +69,34 @@ class Client(Player):
         self._directory.connect("error", lambda _, message: logger.warning(message))
 
     async def set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
-        if state == Gst.State.NULL:  # the call and the listener end before the pipeline does
+        if state == Gst.State.NULL:  # the call ends before the pipeline, the listener after it
             self.hangup()
-            if self._listening:
-                self._directory.emit("stop")
-                self._listening = False
-        return await super().set_state(state)
+        result = await super().set_state(state)
+        if state == Gst.State.NULL and self._listening:
+            await self._stop_listening()
+        return result
+
+    async def _stop_listening(self) -> None:
+        """Stop the listener on a thread of its own, and wait at most a few seconds: the
+        signaller's stop deadlocks when a peer's status arrives as it stops."""
+        self._listening = False
+        loop = asyncio.get_running_loop()
+        stopped = loop.create_future()
+
+        def stopped_now() -> None:
+            if not stopped.done():  # not timed out
+                stopped.set_result(None)
+
+        def stop() -> None:
+            self._directory.emit("stop")
+            if not loop.is_closed():
+                _ = loop.call_soon_threadsafe(stopped_now)
+
+        threading.Thread(target=stop, daemon=True).start()
+        try:
+            await asyncio.wait_for(stopped, STOP_TIMEOUT)
+        except TimeoutError:
+            logger.warning("the listener did not stop in %ss", STOP_TIMEOUT)
 
     def _on_loop(self, callback: Any, *args: object) -> None:
         """Run `callback` on the asyncio loop: the signallers call from their own threads."""
@@ -259,6 +283,8 @@ async def demo(server: str, frames: int) -> None:
         await bob.play()
         for line in await asyncio.gather(talk(alice, "bob", frames), talk(bob, "alice", frames)):
             print(line)
+        alice.hangup()  # both, before either one stops publishing
+        bob.hangup()
 
 
 async def run(args: argparse.Namespace) -> None:

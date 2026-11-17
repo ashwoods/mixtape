@@ -115,7 +115,9 @@ A `Client` is a `Player` with that pipeline. `webrtcsrc` plays a given peer, but
 who publishes, so the client asks the signalling server itself: it creates a second
 signaller of the sink's kind, as a listener, and the server tells it who joins and who leaves.
 GStreamer's signals come on threads of their own, so they are handed to the asyncio loop
-before they touch the properties.
+before they touch the properties. The listener is stopped on a thread of its own, and the
+client waits for it at most two seconds: in gst-plugins-rs 0.15 the signaller's `stop` can
+deadlock when a peer's status arrives just as it stops, and it would take the loop with it.
 
 ```python
 --8<-- "examples/webrtc_client.py:client"

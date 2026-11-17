@@ -4,66 +4,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.7.0 (unreleased)
+## 0.7.0 (2026-11-17)
 
-The core is rewritten as one subclassable asyncio `Player` in `mixtape/player.py`.
-This release breaks the API.
+The first release since 0.5.1 (0.6.0 was never released). The core is rewritten as one
+subclassable asyncio `Player`, with a declarative model of what it exposes, a command line,
+an HTTP control page and feature plugins, among them `perf`, which measures pipelines with
+GStreamer's own tracers, in a player or in a pytest suite. This release breaks the API.
 
-- **Breaking:** `BasePlayer` (`mixtape.base`), `AsyncPlayer` and `mixtape.players` are removed;
-  use `mixtape.Player`.
-- **Breaking:** `Player` is a plain class, no longer an `attrs` class. `from_description` is
-  a sync classmethod; `create` is removed. `attrs` and `beppu` are no longer dependencies, and
-  mixtape has none: PyGObject comes from the system.
-- **Breaking:** `Player.events` is now a method returning an async iterator of `mixtape.events`
-  dataclasses (`StateChanged`, `Eos`, `Error`, `Warning`, `Message`). `PlayerEvents`,
-  `States` and the asyncio event subclasses are removed.
-- **Breaking:** `PlayerAlreadyConfigured` is removed; `PlayerDescriptionError` is new, and
+### Breaking
+- Python 3.12 or later (was 3.6). PyGObject and GStreamer come from the system, not from PyPI;
+  the one dependency is `pydantic` (2.11 or later). `attrs` and `beppu` are no longer used.
+- `AsyncPlayer`, `BasePlayer` (`mixtape.base`) and `mixtape.players` are removed: use
+  `mixtape.Player`, a plain class (no longer an `attrs` one). `from_description` is a sync
+  classmethod that needs no running loop; `create` is removed.
+- `ready`, `pause` and `play` return a `Gst.StateChangeReturn`, not a tuple.
+  `stop(eos=False, timeout=5.0)` replaces `stop(send_eos, teardown)`: clean up with
+  `teardown()` or `async with player`. `send_eos(timeout=None)` waits for the EOS message and
+  returns nothing. `__del__` is removed.
+- `Player.events` is a method returning an async iterator of the `mixtape.events` dataclasses
+  (`StateChanged`, `Eos`, `Error`, `Warning`, `PropertyChanged`, `Position`, `Message`).
+  `PlayerEvents`, `States` and the `asyncio.Event` subclasses are removed, and so are the
+  `on_*` bus handler methods: use `add_handler(message_type, callback)`.
+- `Player.run(description_or_pipeline, timeout=None)` is a sync classmethod that plays until
+  EOS and tears down; the `call_play`, `call_pause` and `call_stop` helpers are removed.
+- `PlayerAlreadyConfigured` is removed. `PlayerDescriptionError` is new, and
   `PlayerPipelineError` carries `source`, `message`, `debug` and `gerror`.
-- **Breaking:** `stop(eos=False, timeout=5.0)` replaces `stop(send_eos, teardown)`; use
-  `teardown()` or `async with player` to clean up. `__del__` is removed.
-- **Breaking:** `Player.run(description_or_pipeline, timeout=None)` is a sync classmethod that
-  plays until EOS and tears down; `autoplay` and the `call_x` helpers are gone.
-- New: `setup()` attaches to the running loop, and every async method attaches lazily.
-  `teardown()` is idempotent, safe after the loop closed, and the player can be re-used.
-- New: the `mixtape run "<pipeline>"` command (also `python -m mixtape`) plays a pipeline until EOS
-  or an error like `gst-launch-1.0 -e`, and makes video windows appear on macOS.
-- New: `add_handler`, `call_soon_threadsafe`, `run_coroutine_threadsafe`, `ensure_init`,
-  and the `pending`, `loop` and `error` properties.
-- New default bus policy: errors are stored, logged and published, set the pipeline to NULL, and
-  reach the awaiting caller; warnings are logged; clock loss, latency and buffering are handled
-  as `gst-play` does.
-- Fix: a state wait could be satisfied by a stale state (play, stop, play).
-- Fix: pipeline errors were raised into the loop's exception handler and never reached callers.
-- Fix: EOS flags were never reset, so a second `play_until_eos` returned at once.
-- Fix: teardown from `__del__` failed outside a running loop.
-- Fix: `Player(...)` raised on Python 3.14+ outside a running loop.
-- Fix: a hung streaming thread froze the loop, so neither Ctrl-C nor `--http` worked: state
-  changes run on a thread, and one down to READY or NULL that takes longer than
-  `state_timeout` (5 s) raises `PlayerSetStateError` naming the elements still changing; the
-  player refuses changes until it finishes, and `teardown` leaves such a pipeline.
-- Fix: a failed stop exited 0, and left the bus flushing so the next play hung; failed state
-  changes name the elements that failed them, when those still say so. `mixtape run` exits 1 when the pipeline cannot
-  stop. `async with player` stops the pipeline before the teardown and raises a stop that fails;
-  the waits it ends get `PlayerSetStateError`, no longer `CancelledError`.
-- **Behaviour change:** a failed start sets the pipeline to NULL, as an error does: GstBin
-  left it half way up, reported as `paused`. An element that fails silently (posts no ERROR)
-  may still not be named, since GStreamer keeps no trace of it.
-- **Behaviour change:** the `eos` command (`player.eos()`) waits 5 s by default (`timeout`,
-  was none) and raises `CommandError` (409 over HTTP) when no EOS comes, or at once while a
-  change is stuck.
-- Fix: `error` (and the error a failed start raises) is the first error since the pipeline left
-  NULL, the cause, not a fallback posted after it (basesrc follows its subclass's error with its
-  own); any change out of NULL clears it, `ready()` too. A failed start whose error queued a
-  NULL returns once that NULL is done, so `state` is `null` then.
-- Fix: a pipeline that teardown leaves outside NULL is kept for the life of the process on
-  purpose, instead of GStreamer printing a CRITICAL as it disposes it.
-- New: the `leaks` feature warns about the objects still alive once the pipeline is in NULL;
-  `teardown` detaches the features after setting NULL. A page connecting over `--http` gets
-  the error that stopped the pipeline. `error` is cleared when the pipeline starts again.
-- Packaging moved to `pyproject.toml` managed by uv; Python 3.12+
-- Checks are ruff, mypy and pytest, run by `scripts/check`; CI moved to GitHub Actions
-- Docker test image based on Ubuntu 24.04 packages
-- Fix `Player.play_until_eos` on Python 3.11+
+- `mixtape.features` is now the package of feature plugins (below); the HTTP interface lives
+  in `mixtape.interfaces.http`.
+
+### Added
+- **Player.** `setup()` attaches to the running loop, and every async method attaches lazily.
+  `teardown()` is idempotent, safe after the loop closed, and the player can be used again.
+  New: `play_until_eos`, `eos`, `seek`, `add_handler`, `call_soon_threadsafe`,
+  `run_coroutine_threadsafe`, `mixtape.player.ensure_init`, and the `pending`, `loop` and
+  `error` properties.
+- **Bus policy.** An error is stored in `error` (the first since the pipeline left NULL),
+  logged and published, sets the pipeline to NULL and reaches the awaiting caller as
+  `PlayerPipelineError`; a failed start ends in NULL too. Warnings are logged; clock loss,
+  latency and buffering are handled as `gst-play` does.
+- **State changes on a thread.** A hung streaming thread no longer freezes the loop: a change
+  down to READY or NULL that takes longer than `state_timeout` (5 s) raises
+  `PlayerSetStateError` naming the elements still changing, and the player refuses new changes
+  until it finishes; `teardown` leaves such a pipeline as it is and keeps it for the life of
+  the process. A new state change fails the waits it ends with `PlayerSetStateError`.
+  `async with player` stops the pipeline before the teardown and raises when that stop fails.
+- **Model.** `describe()` returns a pydantic model, with JSON Schema types, of the player's
+  commands and properties and those of its named elements (all of them with
+  `expose_all=True`): types, ranges and current values. Declare your own with `prop()` (an
+  alias of an element property), `@prop` (a computed one) and `@command`; use them with
+  `get`, `set` (validated and converted), `invoke` and `notify`. `graph()` returns the
+  elements, the links between them and their caps.
+- **Command line.** `mixtape run TARGET` (also `python -m mixtape`) plays a pipeline
+  description or a `module:Class` until EOS or an error, like `gst-launch-1.0 -e`, with
+  `--set PATH=VALUE`, `--feature` and `--expose-all`. Ctrl-C sends EOS, a second one stops, a
+  third kills. It exits 0 on EOS, 1 on an error or a pipeline that cannot stop, and 2 on bad
+  usage. On macOS, video windows appear. `mixtape inspect TARGET [--json]` prints the model
+  without playing.
+- **HTTP.** With the `http` extra (FastAPI and uvicorn, on the player's own loop),
+  `mixtape run --http [HOST:]PORT` serves a control page generated from the model (transport
+  and position, a form per command, a live control per property, the pipeline graph), a REST
+  API (`/api/model`, `/api/graph`, `/api/commands/<name>`, `/api/elements/<element>`,
+  `/api/properties`), `WS /api/events` and the OpenAPI at `/docs`. It binds to 127.0.0.1 and
+  checks `Host` and `Origin`; there is no authentication. In code:
+  `mixtape.interfaces.http.serve(player, host, port)`.
+- **Feature plugins.** Subclass `mixtape.Feature` to add commands and live properties
+  (`name.x`) to a player, with options validated from `__init__` and the hooks `prepare`
+  (before `Gst.init`), `initialised`, `check`, `attach` and `detach`. Enable one with the
+  `features` class attribute, `features=` or `--feature name,key=value`; packages register
+  their own under the `mixtape.features` entry point. Three are built in:
+  - `leaks` counts the GStreamer objects alive by type from the core `leaks` tracer
+    (`leaks.alive`, `leaks.checkpoint`, `leaks.reset`) and warns about those still alive once
+    the pipeline is in NULL.
+  - `tracers` runs GStreamer tracers, core or gst-plugins-rs, named in the syntax of
+    `GST_TRACERS`, and logs them at `GST_TRACER:7`. The environment's `GST_TRACERS` and
+    `GST_DEBUG` win, with a warning.
+  - `perf` measures element and pipeline latency, the buffers, bitrate and interval of each
+    pad, push time and lateness, queue levels and fill, and process and per-thread CPU, from
+    the core tracers and, when installed, the gst-plugins-rs ones. It reads them from
+    GStreamer's ring buffer logger, so no Python runs on a streaming thread. It publishes
+    `perf.summary` every window, shows it live on the `--http` page (on the graph and in uPlot
+    charts), and with `out=DIR` writes the samples, a CSV per metric, `summary.json` and a
+    `report.html` that works offline.
+- **pytest plugin.** `pytest --mixtape-perf DIR` measures every test of a GStreamer suite,
+  whether it uses a `Player` or `Gst.parse_launch`: a report per test, a session
+  `index.json` and `index.html`, and JUnit properties. A budget,
+  `@pytest.mark.perf(pipeline_latency_p95="20ms", ...)`, fails a test over its limit, and
+  `--mixtape-perf-baseline BASE` fails a session that got slower than an earlier one.
+- **`mixtape perf compare BASE NEW`** compares two sessions or two runs: a p95 or max that grew
+  by more than `--threshold` percent (default 50) and by more than a floor of its unit is a
+  regression, and it exits 1. `--json` prints the comparison as JSON.
+
+### Fixed
+- A state wait could be satisfied by a stale state (play, stop, play).
+- Pipeline errors went to the loop's exception handler and never reached callers.
+- Teardown from `__del__` failed outside a running loop.
+- Building a player raised on Python 3.14+ outside a running loop.
+
+### Project
+- Packaging moved to `pyproject.toml` (PEP 621, hatchling), managed by uv. The wheel ships
+  `py.typed` and uPlot 1.6.32 (MIT) in `mixtape/vendor/uplot`.
+- Checks are ruff, mypy and pytest, run by `scripts/check`. CI moved from Travis to GitHub
+  Actions (Ubuntu 24.04, Python 3.12, PyGObject 3.48), and a Docker image runs the same.
 
 ## 0.5.1 (2020-07-18)
 - Remove pygobject-stubs as test dependency

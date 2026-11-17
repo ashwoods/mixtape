@@ -1,7 +1,7 @@
 [project]
 name = "mixtape"
-version = "0.7.0.dev0"
-description = "Gstreamer python application mini-framework"
+version = "0.7.0"
+description = "GStreamer Python application mini-framework"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -9,13 +9,24 @@ authors = [{ name = "Ashley Camba Garrido", email = "ashwoods@gmail.com" }]
 # PyGObject (`gi`) and GStreamer come from the system (Homebrew or apt), see README.
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2.11"]  # serialize_by_alias
+keywords = ["gstreamer", "multimedia", "pipeline", "asyncio", "player"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
+    "Framework :: AsyncIO",
+    "Framework :: Pytest",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Testing",
     "Typing :: Typed",
 ]
 
@@ -41,6 +52,9 @@ mixtape = "mixtape.pytest_plugin"
 
 [project.urls]
 Homepage = "https://github.com/ashwoods/mixtape"
+Repository = "https://github.com/ashwoods/mixtape"
+Issues = "https://github.com/ashwoods/mixtape/issues"
+Changelog = "https://github.com/ashwoods/mixtape/blob/main/Changelog.md"
 
 [dependency-groups]
 dev = [
@@ -61,6 +75,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mixtape"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [".devcontainer", ".github", ".ultimate"]
 
 [tool.uv]
 required-version = ">=0.8"

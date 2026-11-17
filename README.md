@@ -1,11 +1,10 @@
 # mixtape: awesome mix vol. 1 🎵📼 
 
-![Pypi page] ![Pypi license] ![Pypi version] ![Build Status] ![Quality Gate Status]
+![Pypi page] ![Pypi license] ![Pypi version] ![Build Status]
 
 |[●▪▪●]| A python based `gstreamer` **player**-mini-framework.
 
-**This project is in pre-alpha and most functionality is incomplete and the API is
-most likely to change**
+**This project is in pre-alpha and the API is most likely to change**
 
 [Gstreamer] is a pipeline based framework for building complex multimedia processing 
 systems. It is written in C, based on [GObject], and offers several bindings in other languages,
@@ -25,13 +24,14 @@ and prototyping.
 
 *Features*:
 
-* Pluggable declarative definitions of Player features.
-* Optional loops (glib, asyncio, ...) (WIP)
-* Auto-generated `cmdline`, `console`, `http` and `dbus` service interfaces* (WIP)
-* `cmdline`, `console`, `http` and `dbus` service cmdline commands to jump start services 
-  from pipeline descriptions (WIP)
-
-## Quickstart
+* An asyncio `Player` to subclass, driven from the pipeline's bus.
+* A declarative model of a player's commands and properties, and of its elements'.
+* Auto-generated `cmdline` (`mixtape run`, `mixtape inspect`) and `http` (a control page and
+  a REST and WebSocket API) interfaces, started from a pipeline description. `console` and
+  `dbus` ones are still to come.
+* Pluggable features: `leaks`, `tracers` and `perf` are built in.
+* Pipeline metrics from GStreamer's own tracers, live, in a report, or for every test of a
+  pytest suite, with budgets and baselines.
 
 ## Install
 
@@ -44,34 +44,6 @@ You can use `pip` to install `mixtape`:
 `apt install python3-gi python3-gst-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good`
 on Debian/Ubuntu. Install `mixtape` into that Python, or into a venv created with
 `--system-site-packages` from it.
-
-## Development
-
-You need [uv] and GStreamer with its Python bindings:
-
-    brew install uv gstreamer   # macOS (Homebrew)
-    sudo apt install python3-gi python3-gst-1.0 \
-        gstreamer1.0-plugins-base gstreamer1.0-plugins-good   # Debian/Ubuntu
-
-Then run every check (ruff lint, ruff format, mypy, pytest) with:
-
-    scripts/check
-
-The first run creates `.venv` from the Python that has `gi` (Homebrew's `python3`, or
-`/usr/bin/python3`; set `MIXTAPE_PYTHON` to choose another) with `--system-site-packages`,
-so the venv sees PyGObject and GStreamer's Python overrides, then `uv sync`s the dev
-dependencies. Arguments go to pytest: `scripts/check -k eos`. After that, `uv run pytest`,
-`uv run ruff format` and `uv run mypy` work on their own, unless `UV_PYTHON` or a global
-`uv python pin` asks for another Python (then uv replaces the venv; `scripts/check` guards
-against that). To switch to another Python, `rm -rf .venv` and run `scripts/check` again.
-
-Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI does):
-
-    docker compose run --rm test
-
-`tests/test_gst_c_crash.py` runs `mixtape run` against the failing elements of
-[gst-c-crash](https://github.com/ashwoods/gst-c-crash) and skips unless they are found: build it
-and run `GST_PLUGIN_PATH=<build>/gst scripts/check`.
 
 ## Command line
 `mixtape run` plays a `gst-launch` style pipeline until EOS or an error, like
@@ -86,22 +58,6 @@ or usage. The first Ctrl-C (or SIGTERM) sends EOS and stops; a second one stops 
 to stop, then `mixtape run` exits 1 naming the elements still changing state. `-v` logs at info
 level and shows the error's debug string, `-vv` logs at debug level. On macOS, `mixtape run`
 runs the main run loop so video windows appear.
-
-### Comparing perf runs
-`mixtape perf compare BASE NEW` finds what got slower between two sessions of
-`pytest --mixtape-perf` (folders with an `index.json`) or two single runs (folders with a
-`summary.json`, as `mixtape run --feature perf,out=DIR` writes). It compares the p95 and max of
-the metrics where higher is worse and that are steady enough (latencies, CPU, queue levels;
-not buffers/s, bitrate or the interval, nor lateness and push time, which swing by tens of ms
-between two runs of a short test: bound those with a budget): for each test the worst of its subjects in a session, for
-each subject in a run. A value is a regression when it grew by more than `--threshold` percent
-(default 50) of the base *and* by more than a floor of its unit (100 µs, 5 points of CPU, 5% of
-a queue, one buffer, 4 KiB; `FLOORS` in `mixtape/perf/compare.py`). It prints the regressions,
-the improvements beyond the same bounds, what only one side has (added or removed, never a
-regression) and a line of counts, and exits 1 on a regression, 2 when a folder is not one of
-those. `--json` prints the comparison as JSON instead.
-
-    mixtape perf compare perf-main perf-pr --threshold 30
 
 ### Inspecting and setting properties
 A `Player` describes what it exposes: its properties, with types, ranges and current values,
@@ -402,13 +358,30 @@ the recorder keeps in memory (8 bytes each) for the summary anyway.
 
 The other check is a stored baseline: `--mixtape-perf-baseline BASE`, the `perf-out` of an
 earlier session, compares this session with it at the end as `mixtape perf compare` does
-(above), writes `perf-out/compare.json`, prints the result in its own section and fails the
+(below), writes `perf-out/compare.json`, prints the result in its own section and fails the
 session (exit status 1) when there are regressions.
 
 Tracers only exist when `Gst.init` creates them, so the plugin initialises GStreamer before the
 first conftest is read, and stops with a usage error when something did so earlier. It gives
 `GST_TRACERS` back to the environment, so child processes start no tracers. It is not aware of
 `pytest-xdist`: each worker would write its own index.
+
+### Comparing perf runs
+`mixtape perf compare BASE NEW` finds what got slower between two sessions of
+`pytest --mixtape-perf` (folders with an `index.json`) or two single runs (folders with a
+`summary.json`, as `mixtape run --feature perf,out=DIR` writes). It compares the p95 and max of
+the metrics where higher is worse and that are steady enough (latencies, CPU, queue levels;
+not buffers/s, bitrate or the interval, nor lateness and push time, which swing by tens of ms
+between two runs of a short test: bound those with a budget): for each test the worst of its
+subjects in a session, for each subject in a run. A value is a regression when it grew by more
+than `--threshold` percent (default 50) of the base *and* by more than a floor of its unit
+(100 µs, 5 points of CPU, 5% of a queue, one buffer, 4 KiB; `FLOORS` in
+`mixtape/perf/compare.py`). It prints the regressions, the improvements beyond the same bounds,
+what only one side has (added or removed, never a regression) and a line of counts, and exits 1
+on a regression, 2 when a folder is not one of those. `--json` prints the comparison as JSON
+instead.
+
+    mixtape perf compare perf-main perf-pr --threshold 30
 
 ### Writing a feature
 Subclass `Feature` with a `name`, the options as `__init__` keyword parameters (validated, so
@@ -475,6 +448,34 @@ lists the ones installed:
 heartbeat = "heartbeat:Heartbeat"
 ```
 
+## Development
+
+You need [uv] and GStreamer with its Python bindings:
+
+    brew install uv gstreamer   # macOS (Homebrew)
+    sudo apt install python3-gi python3-gst-1.0 \
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good   # Debian/Ubuntu
+
+Then run every check (ruff lint, ruff format, mypy, pytest) with:
+
+    scripts/check
+
+The first run creates `.venv` from the Python that has `gi` (Homebrew's `python3`, or
+`/usr/bin/python3`; set `MIXTAPE_PYTHON` to choose another) with `--system-site-packages`,
+so the venv sees PyGObject and GStreamer's Python overrides, then `uv sync`s the dev
+dependencies. Arguments go to pytest: `scripts/check -k eos`. After that, `uv run pytest`,
+`uv run ruff format` and `uv run mypy` work on their own, unless `UV_PYTHON` or a global
+`uv python pin` asks for another Python (then uv replaces the venv; `scripts/check` guards
+against that). To switch to another Python, `rm -rf .venv` and run `scripts/check` again.
+
+Without a native GStreamer, run the same checks in Docker (Ubuntu 24.04, as CI does):
+
+    docker compose run --rm test
+
+`tests/test_gst_c_crash.py` runs `mixtape run` against the failing elements of
+[gst-c-crash](https://github.com/ashwoods/gst-c-crash) and skips unless they are found: build it
+and run `GST_PLUGIN_PATH=<build>/gst scripts/check`.
+
 ----
 
     ....___.___.___.___.___.__....
@@ -492,12 +493,10 @@ We are Groot.
 
 [GStreamer]: https://gstreamer.freedesktop.org/
 [uv]: https://docs.astral.sh/uv/
-[GObject]: https://developer.gnome.org/gobject/stable/
+[GObject]: https://docs.gtk.org/gobject/
 [GStreamer tutorials]: https://gstreamer.freedesktop.org/documentation/tutorials/index.html
 [Pypi page]: https://img.shields.io/pypi/v/mixtape.svg
 [Pypi license]: https://img.shields.io/pypi/l/mixtape.svg
 [Pypi version]: https://img.shields.io/pypi/pyversions/mixtape.svg
 [Build Status]: https://github.com/ashwoods/mixtape/actions/workflows/ci.yml/badge.svg?branch=main
-[Quality Gate Status]: https://sonarcloud.io/api/project_badges/measure?project=ashwoods_mixtape&metric=alert_status
-[Requirements Status]: https://requires.io/github/ashwoods/mixtape/requirements.svg?branch=main
 

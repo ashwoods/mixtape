@@ -45,6 +45,7 @@ from .model import (
     LinkSpec,
     NodeSpec,
     PlayerSpec,
+    action_signals,
     codec_for,
     collect,
     command,
@@ -131,11 +132,10 @@ def _invalid(what: str, exc: ValidationError) -> InvalidValueError:
 
 
 class _Bound(NamedTuple):
-    """A command of one player: the declaration, whose method `owner` has under `attr`."""
+    """A command of one player: the declaration, and what it calls with the arguments."""
 
     declared: Command
-    owner: object
-    attr: str
+    call: Callable[..., Any]
 
 
 class Player:
@@ -761,18 +761,25 @@ class Player:
             feature.check(self)
 
     def _build_model(self) -> tuple[dict[str, _Bound], dict[str, tuple[Computed[Any], object]]]:
-        """The commands and computed properties of this player: its class's, then each
-        feature's as `feature.name`."""
+        """The commands and computed properties of this player: its class's, the action
+        signals of the exposed elements as `element.signal`, then each feature's as
+        `feature.name`."""
+
+        def bound(c: Command, path: str, call: Callable[..., Any]) -> _Bound:
+            return _Bound(replace(c, spec=c.spec.model_copy(update={"name": path})), call)
+
         declared = self._declarations()
-        commands = {name: _Bound(c, self, name) for name, c in declared.commands.items()}
+        commands = {name: _Bound(c, getattr(self, name)) for name, c in declared.commands.items()}
+        for key, element in self.exposed_elements().items():
+            for name, (c, emit) in action_signals(element).items():
+                commands[f"{key}.{name}"] = bound(c, f"{key}.{name}", emit)
         computed: dict[str, tuple[Computed[Any], object]] = {
             name: (c, self) for name, c in declared.computed.items()
         }
         for feature in self._features.values():
             for name, c in feature._declared.commands.items():
                 path = f"{feature.name}.{name}"
-                renamed = replace(c, spec=c.spec.model_copy(update={"name": path}))
-                commands[path] = _Bound(renamed, feature, name)
+                commands[path] = bound(c, path, feature._command(name))
             for name, p in feature._declared.computed.items():
                 computed[f"{feature.name}.{name}"] = (p, feature)
         return commands, computed
@@ -879,9 +886,7 @@ class Player:
             validated = declared.args.model_validate(args)
         except ValidationError as exc:
             raise _invalid(f"arguments for {name!r}", exc) from exc
-        result = getattr(bound.owner, bound.attr)(
-            **{k: getattr(validated, k) for k in type(validated).model_fields}
-        )
+        result = bound.call(**{k: getattr(validated, k) for k in type(validated).model_fields})
         if inspect.isawaitable(result):
             result = await result
         return None if declared.spec.builtin else result
@@ -1113,7 +1118,8 @@ class Player:
 
     def _publish_shape(self) -> None:
         """Publish `GraphChanged` when the graph differs from the last one published, and
-        `ModelChanged` when the exposed elements or their keys do."""
+        `ModelChanged`, with the commands built again, when the exposed elements or their
+        keys do."""
         self._shape_flush = None
         keys = self._element_keys()
         renamed = {e: key for key, e in keys.items() if e in self._watched}
@@ -1128,6 +1134,8 @@ class Player:
         exposed = [key for key, e in keys.items() if self._is_exposed(e)]
         if exposed != self._exposed_seen:
             self._exposed_seen = exposed
+            # the action signals of the elements that came, and none of those gone (or renamed)
+            self._commands, self._computed = self._build_model()
             self._publish(events.ModelChanged(self.describe()))
 
     def _on_notify(self, element: Gst.Element, ps: Any, key: str) -> None:

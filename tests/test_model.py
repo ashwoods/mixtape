@@ -522,6 +522,20 @@ async def test_no_shape_handlers_stay_on_a_removed_element(Gst):
 
 
 @pytest.mark.asyncio
+async def test_an_element_added_later_brings_its_action_signals_and_takes_them(Gst):
+    async with Player.from_description("fakesrc ! fakesink", expose_all=True) as player:
+        stream = player.events()
+        player.pipeline.add(Gst.ElementFactory.make("appsrc", "late"))
+        model = (await next_event(stream, ModelChanged)).model
+        assert "late.end-of-stream" in model.commands
+        assert (await bounded(player.invoke("late.end-of-stream"))) == "ok"
+        player.pipeline.remove(player.pipeline.get_by_name("late"))
+        model = (await next_event(stream, ModelChanged)).model
+        assert "late.end-of-stream" not in model.commands
+        assert "late.end-of-stream" not in player._commands  # its emit keeps no element alive
+
+
+@pytest.mark.asyncio
 async def test_a_namesake_renames_an_element_and_its_changes_follow(Gst):
     async with Player.from_description("bin.( name=a queue name=q ! fakesink )") as player:
         stream = player.events()

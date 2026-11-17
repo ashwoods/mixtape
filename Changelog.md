@@ -10,15 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GraphChanged` and `ModelChanged` events: the player follows the pipeline's shape as it runs
   (elements a decodebin adds, pads, links, caps) and publishes the new `graph()`, and the new
   `describe()` when the exposed elements change, at most every `Player.shape_interval` (0.1 s).
+  The commands follow too: an element added later brings its action signals, one removed
+  takes them.
 - The HTTP page's graph, element sections and perf measures follow those changes without a
   reload, keeping open sections and values being typed. `WS /api/events` sends `graph` and
   `model` messages on a change.
 - `perf` warns about an element added while it runs that was made before it set up the debug
   log, as its measures carry a tracer's index instead of its name.
+- `--feature gst:NAME[,key=value…]` (or `features=["gst:NAME"]`) makes any GStreamer tracer a
+  feature with no Python of its own: its options are the tracer's parameters, its readable
+  properties are `gst:NAME.property` and its action signals are commands, `gst:NAME.signal`,
+  with structure results as JSON. It refuses `leaks` and the tracers `perf` reads beside it.
+- The action signals of exposed elements are commands, `element.signal` (`mux.split-now`),
+  with the parameters `arg1`, `arg2`... when the model supports their types.
 
 ### Changed
 - `WS /api/events` opens with a `model` message, then `values` and `graph`: a client that
   expects `values` first must skip the `model` one.
+- `Feature.name` is an instance attribute (a `gst:` feature has its own), and
+  `Feature.own_tracers` names the tracers a feature reads itself.
 
 ### Fixed
 - The property changes of an exposed element come under its new key when a namesake added

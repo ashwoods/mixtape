@@ -10,8 +10,8 @@ in the `mixtape.features` entry point group, and enabled with `--feature NAME[,K
 import importlib.metadata
 import re
 import typing
-from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 __all__ = ["Feature", "FeatureError", "FeatureSpec", "available", "resolve", "resolve_all"]
 
 GROUP = "mixtape.features"
+GST = "gst:"
 _NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 
@@ -35,16 +36,19 @@ class Feature:
     every property), so a feature that needs the loop answers from what it has.
     """
 
-    name: ClassVar[str]
+    name: str
     """Its name in the model (`name.command`) and the entry point; `[a-z][a-z0-9_]*`"""
     requires: ClassVar[tuple[str, ...]] = ()
     """GStreamer plugin features (elements or tracers) the player needs to enable it"""
+    own_tracers: ClassVar[tuple[str, ...]] = ()
+    """GStreamer tracers it reads itself: `gst:NAME` of one is refused beside it, as both
+    would use the one tracer of the process"""
 
     player: "Player | None" = None
     """The player it is attached to: set just before `attach`, None again after `detach`"""
 
     _options: ClassVar[type[BaseModel]]
-    _declared: ClassVar[Declarations]
+    _declared: Declarations  # the class's; `gst:` features have their own
     _prepared = False
     _initialised = False
 
@@ -102,6 +106,10 @@ class Feature:
         if self.player is not None:
             self.player.notify(f"{self.name}.{prop}")
 
+    def _command(self, name: str) -> Callable[..., Any]:
+        """What its command `name` calls."""
+        return cast(Callable[..., Any], getattr(self, name))
+
     def _prepare_once(self) -> None:
         if not self._prepared:
             self._prepared = True
@@ -147,8 +155,9 @@ def _split_options(text: str) -> list[str]:
 
 def resolve(spec: FeatureSpec) -> Feature:
     """The feature a spec stands for. A string is `name[,key=value…]` (a value has commas
-    only inside parentheses), looked up in
-    `available()`; a class is built with its default options; an instance is itself."""
+    only inside parentheses), looked up in `available()`, or `gst:TRACER[,key=value…]`, any
+    GStreamer tracer (`mixtape.features.gst`); a class is built with its default options; an
+    instance is itself."""
     if isinstance(spec, Feature):
         return spec
     if not isinstance(spec, str):
@@ -160,6 +169,10 @@ def resolve(spec: FeatureSpec) -> Feature:
         if not sep or not key:
             raise FeatureError(f"Invalid option {item!r} of feature {name!r}: not KEY=VALUE")
         options[key] = value
+    if name.startswith(GST):
+        from .gst import GstTracer  # it imports this module
+
+        return GstTracer(name.removeprefix(GST), options)
     installed = available()
     if name not in installed:
         names = ", ".join(sorted(installed)) or "none installed"

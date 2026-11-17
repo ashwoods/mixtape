@@ -681,7 +681,7 @@ dev = [
     { name = "httpx" },
     { name = "mixtape", extras = ["http"] },
     { name = "mkdocs-material", specifier = "==9.8.1" },
-    { name = "mkdocstrings", extras = ["python"] },
+    { name = "mkdocstrings", extras = ["python"], specifier = "==1.0.8" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -691,7 +691,7 @@ dev = [
 ]
 docs = [
     { name = "mkdocs-material", specifier = "==9.8.1" },
-    { name = "mkdocstrings", extras = ["python"] },
+    { name = "mkdocstrings", extras = ["python"], specifier = "==1.0.8" },
 ]
 
 [[package]]

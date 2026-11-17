@@ -1,3 +1,5 @@
+# API reference
+
 The public API, generated from its docstrings. For how to use it, see [Writing an application](library.md).
 
 ## Player

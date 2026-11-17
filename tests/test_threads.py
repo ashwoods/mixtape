@@ -11,7 +11,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 PIPELINE = (
-    "videotestsrc is-live=true ! video/x-raw,width=640,height=480 ! videoconvert "
+    # short names: Linux cuts a thread's name to 15 bytes (`videotestsrc36:`, its pad gone)
+    "videotestsrc name=s is-live=true ! video/x-raw,width=640,height=480 ! videoconvert "
     "! queue name=q ! fakesink"
 )
 

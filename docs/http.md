@@ -29,19 +29,19 @@ flowchart LR
 ```
 
 ```console
-$ cd examples && mixtape run --http 8047 demo:Demo
+$ mixtape run --http 8047 examples/demo.py:Demo
 Serving on http://127.0.0.1:8047
 ```
 
-An EOS or a pipeline error does not end it: errors are printed, and the page can play again.
-The first Ctrl-C sends an EOS, stops the pipeline and exits 0.
+What ends it, and what happens on an EOS, an error or Ctrl-C, is on the
+[command line](cli.md#the-http-option) page.
 
 The commands below, which call the API with `curl`, start the server in the background, silence
-its messages, wait until it answers, and stop it at the end. That way each of them runs alone;
-in a terminal of yours you would start it once, as above. They use `127.0.0.1` rather than
-`localhost`, which may also resolve to an address that something else listens on.
+its messages, wait until it answers, and stop it on their last line. That way each of them runs
+alone; in a terminal of yours you would start it once, as above. They use the address
+`127.0.0.1`, as a name may resolve to an IPv6 address that something else listens on.
 
-## The control page
+## The control page { #the-control-page }
 
 `GET /` is a page that is generated from the model:
 
@@ -85,8 +85,7 @@ $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s 127.0.0.1:8047/api/model | head -c 90; echo
 $ curl -s 127.0.0.1:8047/api/graph; echo
 $ curl -s 127.0.0.1:8047/api/elements/vol; echo
-$ curl -s 127.0.0.1:8047/api/properties; echo
-$ kill -INT $!
+$ curl -s 127.0.0.1:8047/api/properties; echo; kill -INT $!
 {"name":"Player","features":[],"commands":{"pause":{"name":"pause","description":"Pause the pipeline.","param
 {"pipeline":"pipeline0","nodes":{"audiotestsrc0":{"name":"audiotestsrc0","factory":"audiotestsrc","parent":null,"bin":false,"exposed":false},"vol":{"name":"vol","factory":"volume","parent":null,"bin":false,"exposed":true},"sink":{"name":"sink","factory":"fakesink","parent":null,"bin":false,"exposed":true}},"links":[{"source":"audiotestsrc0","source_pad":"src","sink":"vol","sink_pad":"sink","caps":"audio/x-raw, format=(string)S16LE, layout=(string)interleaved, rate=(int)44100, channels=(int)1"},{"source":"vol","source_pad":"src","sink":"sink","sink_pad":"sink","caps":"audio/x-raw, format=(string)S16LE, layout=(string)interleaved, rate=(int)44100, channels=(int)1"}]}
 {"qos":false,"mute":false,"volume":0.25,"volume-full-range":0.25}
@@ -111,8 +110,7 @@ $ mixtape run --http 8047 \
 $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s -X PATCH 127.0.0.1:8047/api/elements/vol -d '{"volume": 0.5, "mute": true}'; echo
 $ curl -s -X POST 127.0.0.1:8047/api/commands/pause; echo
-$ curl -s 127.0.0.1:8047/api/properties | grep -o '"state":"[a-z]*"'
-$ kill -INT $!
+$ curl -s 127.0.0.1:8047/api/properties | grep -o '"state":"[a-z]*"'; kill -INT $!
 {"volume":0.5,"mute":true}
 {"result":null}
 "state":"paused"
@@ -123,13 +121,11 @@ under `/api/commands`. The `gain` alias of the `Demo` player is the `volume` of 
 `shout` returns a result:
 
 ```console
-$ cd examples
-$ mixtape run --http 8047 demo:Demo 2>/dev/null &
+$ mixtape run examples/demo.py:Demo --http 8047 2>/dev/null &
 $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s -X PATCH 127.0.0.1:8047/api/properties -d '{"gain": 0.25}'; echo
 $ curl -s 127.0.0.1:8047/api/elements/vol; echo
-$ curl -s -X POST 127.0.0.1:8047/api/commands/shout -d '{"word": "hi", "times": 3}'; echo
-$ kill -INT $!
+$ curl -s -X POST 127.0.0.1:8047/api/commands/shout -d '{"word": "hi", "times": 3}'; echo; kill -INT $!
 {"gain":0.25}
 {"qos":false,"mute":false,"volume":0.25,"volume-full-range":0.25}
 {"result":"hihihi"}
@@ -157,8 +153,7 @@ $ curl -s -X PATCH 127.0.0.1:8047/api/elements/nosuch -d '{"volume": 1}' -w ' %{
 $ curl -s -X PATCH 127.0.0.1:8047/api/properties -d '{"state": "null"}' -w ' %{http_code}\n'
 $ curl -s -X POST 127.0.0.1:8047/api/commands/seek -d '{"position": -1}' -w ' %{http_code}\n'
 $ curl -s -X POST 127.0.0.1:8047/api/commands/pause > /dev/null
-$ curl -s -X POST 127.0.0.1:8047/api/commands/eos -w ' %{http_code}\n'
-$ kill -INT $!
+$ curl -s -X POST 127.0.0.1:8047/api/commands/eos -w ' %{http_code}\n'; kill -INT $!
 {"detail":"Invalid value for 'vol.volume': Input should be less than or equal to 10","errors":[{"type":"less_than_equal","loc":[],"msg":"Input should be less than or equal to 10","input":11}]} 422
 {"detail":"Unknown element 'nosuch'"} 404
 {"detail":"'state' is read-only"} 422
@@ -174,8 +169,7 @@ readable:
 $ mixtape run --http 8047 "filesrc location=/tmp/missing.mp4 ! fakesink" 2>/dev/null &
 $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s -X POST 127.0.0.1:8047/api/commands/play -w ' %{http_code}\n'
-$ curl -s 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
-$ kill -INT $!
+$ curl -s 127.0.0.1:8047/api/properties -w ' %{http_code}\n'; kill -INT $!
 {"detail":"filesrc0: Resource not found."} 500
 {"state":"null","position":null,"duration":null} 200
 ```
@@ -250,7 +244,7 @@ flowchart LR
 --8<-- "examples/http_shape.py:watch"
 ```
 
-## Security
+## Security { #security }
 
 There is no authentication. The server binds to `127.0.0.1` by default, and binding it to
 another address says so, as anyone who can reach the port can control the player:
@@ -270,8 +264,8 @@ a player on your machine, by a cross-origin request or by DNS rebinding:
 
 - A request whose `Origin` is not the `Host` it was sent to is refused with 403. Browsers send an
   `Origin` and `curl` does not, so `curl` and your programs pass.
-- A request whose `Host` is a DNS name other than `localhost` or this machine's own name is
-  refused with 403, so that a name that was rebound to your address does not pass. Bound to a
+- A request whose `Host` is a DNS name is refused with 403, except the loopback name and this
+  machine's own name, so that a name that was rebound to your address does not pass. Bound to a
   loopback address, the `Host` must be a loopback one as well.
 - The WebSocket is checked the same way, and a connection that is refused is closed with code 1008.
 
@@ -280,8 +274,7 @@ $ mixtape run --http 8047 "videotestsrc is-live=true ! fakesink" 2>/dev/null &
 $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s -H "Origin: http://evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
 $ curl -s -H "Host: evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
-$ curl -s -H "Origin: http://127.0.0.1:8047" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
-$ kill -INT $!
+$ curl -s -H "Origin: http://127.0.0.1:8047" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'; kill -INT $!
 {"detail":"Origin 'http://evil.example' does not match Host '127.0.0.1:8047'"} 403
 {"detail":"Host 'evil.example' is not allowed"} 403
 {"state":"playing","position":0.51,"duration":null} 200
@@ -289,10 +282,10 @@ $ kill -INT $!
 
 ## In code
 
-`mixtape run --http` is `serve()` with the signal handling of a command line. In a program of
-yours, `serve(player, host, port)` is an async context manager that serves the player in the
-running loop until its block ends. It returns once the server listens, with where it
-listens: the port `0` asks the system for a free one, and `listening.url` says which. It raises
+`mixtape run --http` is [`serve()`](reference.md#mixtape.interfaces.http.serve) with the signal
+handling of a command line. In a program of yours, `serve(player, host, port)` is an async
+context manager that serves the player in the running loop until its block ends. It returns
+once the server listens, with where it listens: the port `0` asks the system for a free one, and `listening.url` says which. It raises
 `OSError` when the address is taken.
 
 The server runs in the player's loop, so a client in the same program, as here, must not block
@@ -303,5 +296,5 @@ it:
 ```
 
 A program that serves until it is stopped waits for what stops it inside the block, such as
-a signal, as `mixtape run --http` does, and `create_app(player, host=...)` returns the FastAPI app, if you
+a signal, as `mixtape run --http` does, and [`create_app(player, host=...)`](reference.md#mixtape.interfaces.http.create_app) returns the FastAPI app, if you
 have a server of your own to put it in.

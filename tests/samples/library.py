@@ -66,7 +66,7 @@ SAMPLES: list[Sample] = [
         "testcard",
         "examples/testcard.py",
     ),
-    run(PAGE, "inspect-testcard", "mixtape inspect testcard:Testcard", exact=True),
+    run(PAGE, "inspect-testcard", "mixtape inspect examples/testcard.py:Testcard", exact=True),
     prints(
         PAGE,
         "heartbeat",

@@ -9,7 +9,7 @@ SAMPLES: list[Sample] = [
     run(
         PAGE,
         "serve",
-        "^cd examples && mixtape run --http 8047 demo:Demo",
+        "^mixtape run --http 8047 examples/demo.py:Demo",
         hangs=True,
         timeout=6,
         exact=True,

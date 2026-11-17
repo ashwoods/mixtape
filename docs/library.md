@@ -1,19 +1,25 @@
 # Writing an application
 
 mixtape is a library first: `mixtape run` is a small program built on it. This page builds
-applications on the same pieces: a `Player` that drives a pipeline from an asyncio loop,
-the events it publishes, a model of its properties and commands that the [command line](cli.md)
-and the [HTTP API](http.md) read, and features that add to that model.
+applications on the same pieces: a [`Player`](reference.md#mixtape.Player) that drives a
+pipeline from an asyncio loop, the events it publishes, a model of its properties and commands
+that the [command line](cli.md) and the [HTTP API](http.md) read, and features that add to that
+model.
 
-It starts with the smallest programs and ends with one application of its own, a test card:
-a `Player` subclass with a pattern to choose, a frame counter and a command.
+It starts with the smallest programs, then builds one application of its own, a test card: a
+`Player` subclass with a pattern to choose, a frame counter and a command. Errors, events and
+features follow as topics.
 
-The names are in `mixtape` (`Player`, `Feature`, `prop`, `command`), `mixtape.events` and
-`mixtape.exceptions`.
+The names are in `mixtape` ([`Feature`](reference.md#mixtape.Feature),
+[`prop`](reference.md#mixtape.prop), [`command`](reference.md#mixtape.command)),
+[`mixtape.events`](reference.md#mixtape.events) and
+[`mixtape.exceptions`](reference.md#mixtape.exceptions); the [API reference](reference.md) lists
+them all.
 
 ## Play a pipeline
 
-`Player.from_description` builds a player from a `gst-launch-1.0` description. It needs no
+[`Player.from_description`](reference.md#mixtape.Player.from_description) builds a player from a
+`gst-launch-1.0` description. It needs no
 running loop: the first `await` on the player attaches it to the loop that is running, and
 `async with` tears it down, setting the pipeline to NULL, when the block ends.
 
@@ -30,24 +36,30 @@ flowchart LR
 --8<-- "examples/lib_lifecycle.py:lifecycle"
 ```
 
-`play()`, `pause()`, `ready()` and `stop()` return when the pipeline has reached the state, not
-before. `stop()` sets it to NULL, after an EOS with `stop(eos=True)`. A player that is torn down can
-be used again. Without `async with`, call `player.setup()` on the loop to attach it and
-`player.teardown()` to detach it.
+The `# >` comments under the prints are what the program prints; the tests check them.
+
+[`play()`](reference.md#mixtape.Player.play), [`pause()`](reference.md#mixtape.Player.pause),
+`ready()` and [`stop()`](reference.md#mixtape.Player.stop) return when the pipeline has reached
+the state, not before. `stop()` sets it to NULL, after an EOS with `stop(eos=True)`. A player that
+is torn down can be used again. Without `async with`, call
+[`player.setup()`](reference.md#mixtape.Player.setup) on the loop to attach it and
+[`player.teardown()`](reference.md#mixtape.Player.teardown) to detach it.
 
 ### Until the end of the stream
 
-`await player.play_until_eos()` plays and returns on the next EOS. The pipeline is still playing
+[`await player.play_until_eos()`](reference.md#mixtape.Player.play_until_eos) plays and returns
+on the next EOS. The pipeline is still playing
 then; calling it again plays the stream again, from READY:
 
 ```python
 --8<-- "examples/lib_until_eos.py:until_eos"
 ```
 
-`Player.run` is the shortcut for a script: it plays a description (or a `Gst.Pipeline`) until
-EOS, tears the player down and returns. It starts the loop itself, so it cannot be called from
-a coroutine. It raises `TimeoutError` when `timeout` seconds pass first, and
-`PlayerPipelineError` when the pipeline fails (see below).
+[`Player.run`](reference.md#mixtape.Player.run) is the shortcut for a script: it plays a
+description (or a `Gst.Pipeline`) until EOS, tears the player down and returns. It starts the
+loop itself, so it cannot be called from a coroutine. It raises `TimeoutError` when `timeout`
+seconds pass first, and [`PlayerPipelineError`](reference.md#mixtape.exceptions.PlayerPipelineError)
+when the pipeline fails (see [When it goes wrong](#when-it-goes-wrong)).
 
 ```python
 --8<-- "examples/lib_run.py:run"
@@ -73,20 +85,99 @@ flowchart LR
 --8<-- "examples/lib_dynamic.py:build"
 ```
 
-Only elements with a name of your own are in the model: `describe().elements` lists the
+Only elements with a name of your own are in the model:
+[`describe().elements`](reference.md#mixtape.Player.describe) lists the
 pipeline, `src` and `sink` here, and not `videotestsrc0`. Give a name to what you want to
 read and set, or pass `expose_all=True` to expose every element.
 
+## Subclass Player
+
+Subclass [`Player`](reference.md#mixtape.Player) for an application of your own: its pipeline, its properties, its commands. The
+test card has a `videotestsrc` and a `fakesink`, a `pattern` to choose, a count of the frames
+that reached the sink and a command to show a pattern.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+flowchart LR
+  %% testcard
+  p0n0["<b>src</b><br>videotestsrc"]
+  p0n1["<b>sink</b><br>fakesink"]
+  p0n2["video/x-raw<br>width=320<br>height=240"]
+  p0n0 --> p0n2
+  p0n2 --> p0n1
+```
+
+```python
+--8<-- "examples/testcard.py:player"
+```
+
+What each part does:
+
+- `description` is the pipeline of the class. `Testcard.from_description(Testcard.description)`
+  builds it, and so do `mixtape run examples/testcard.py:Testcard` and
+  `mixtape inspect examples/testcard.py:Testcard`. A subclass with its own `__init__` takes the
+  pipeline and passes the keyword arguments on (`expose_all`, `features`) to `super().__init__`.
+- [`prop("src.pattern")`](reference.md#mixtape.prop) declares an alias of an element property: `pattern` in the model, with the
+  type, the range and the value of `src.pattern`, and a description of your own (and a `label`
+  for the page). Reading `card.pattern` is `card.get("pattern")`. A property is set with
+  `await card.set("pattern", "ball")`, which validates the value and changes nothing when it is
+  rejected. A typo in the target fails when the player is built.
+- `@prop` on a method declares a read-only property that the method computes. Its return type
+  hint is the type in the model, and a missing one fails when the class is defined. The first
+  line of its docstring is the description. [`self.notify("frames")`](reference.md#mixtape.Player.notify)
+  publishes its current value as a
+  [`PropertyChanged`](reference.md#mixtape.events.PropertyChanged) event.
+- [`@command`](reference.md#mixtape.command) on a method, sync or async, declares a command. The type hints of its parameters
+  are the types of its arguments, and a default makes an argument optional. `Literal` is an
+  enumeration. The arguments are validated before the method runs, and the return hint is the
+  type of the result. It takes no `*args` or `**kwargs`. The built-in `play`, `pause`, `stop`,
+  `eos` and `seek` are commands of every player, and a command calls your override of a method
+  such as `play`.
+- A pad probe, a signal handler or a callback of an element runs on a GStreamer thread, where
+  the loop's objects are off limits.
+  [`player.call_soon_threadsafe(callback, *args)`](reference.md#mixtape.Player.call_soon_threadsafe)
+  runs a function on the loop, and
+  [`player.run_coroutine_threadsafe(coroutine)`](reference.md#mixtape.Player.run_coroutine_threadsafe)
+  runs a coroutine there and returns a `concurrent.futures.Future` with its result. The probe uses the first: it
+  counts each frame on the loop, which also publishes the count, as `notify` is for the loop
+  thread only.
+
+`describe()` returns the player's model as a pydantic model (`describe().model_dump_json()` is
+JSON with JSON Schema for every type), [`get(path)`](reference.md#mixtape.Player.get) reads a
+property, [`set(path, value)`](reference.md#mixtape.Player.set) sets one and
+[`invoke(name, **arguments)`](reference.md#mixtape.Player.invoke) runs a command: the calls that
+the command line and the HTTP API make. A name that does not exist is an
+[`UnknownNameError`](reference.md#mixtape.exceptions.UnknownNameError), a rejected value or
+argument an [`InvalidValueError`](reference.md#mixtape.exceptions.InvalidValueError), and a
+property that cannot be written a
+[`NotWritableError`](reference.md#mixtape.exceptions.NotWritableError).
+
+```python
+--8<-- "examples/testcard.py:main"
+```
+
+The command line reads the same model without playing, from the file and the class. Here is
+the command of the test card:
+
+```console
+$ mixtape inspect examples/testcard.py:Testcard | grep 'show('
+  show(pattern: smpte|ball|snow = smpte)                  Show a test pattern.
+```
+
+See [Command line](cli.md) for what else `mixtape run` and `mixtape inspect` do with a class,
+and [HTTP API](http.md) for the control page it gets.
+
 ## When it goes wrong
 
-Everything that can fail has an exception, all of them subclasses of `mixtape.exceptions.MixTapeError`:
+Everything that can fail has an exception, all of them subclasses of
+[`mixtape.exceptions.MixTapeError`](reference.md#mixtape.exceptions.MixTapeError):
 
-| Exception               | Raised when                                                                  |
-|-------------------------|------------------------------------------------------------------------------|
-| `PlayerDescriptionError`| `from_description` cannot parse the description                              |
-| `PlayerPipelineError`   | the pipeline posts an error: `source`, `message`, `debug` and the `gerror`   |
-| `PlayerSetStateError`   | a state change fails, or the pipeline is stuck changing state                |
-| `PlayerNotConfigured`   | a method needs the running loop of the player and there is none              |
+| Exception | Raised when |
+|-----------|-------------|
+| [`PlayerDescriptionError`](reference.md#mixtape.exceptions.PlayerDescriptionError) | `from_description` cannot parse the description |
+| `PlayerPipelineError` | the pipeline posts an error: `source`, `message`, `debug` and the `gerror` |
+| [`PlayerSetStateError`](reference.md#mixtape.exceptions.PlayerSetStateError) | a state change fails, or the pipeline is stuck changing state |
+| [`PlayerNotConfigured`](reference.md#mixtape.exceptions.PlayerNotConfigured) | a method needs the running loop of the player and there is none |
 
 A typo in the description fails at once, with the parser's message:
 
@@ -102,9 +193,10 @@ player has already set the pipeline to NULL:
 --8<-- "examples/lib_errors.py:start"
 ```
 
-A pipeline that fails later fails the `await player.play_until_eos()` that waits for it. The
-first error is the cause, because an element downstream often follows it with errors of its own.
-`player.error` keeps it until the pipeline starts again:
+When the pipeline fails after it started, the `await player.play_until_eos()` that waits for it
+raises. The first error is the cause, because an element downstream often follows it with errors
+of its own. [`player.error`](reference.md#mixtape.Player.error) keeps it until the pipeline
+starts again:
 
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
@@ -125,25 +217,27 @@ The player also logs an error and a warning through the `mixtape.player` logger.
 turns that off to keep its output to what it prints, the `# >` lines.
 
 An error that happens while nothing awaits, a pipeline that plays while the program sleeps, does
-not raise anywhere: it is an `Error` event and `player.error`.
+not raise anywhere: it is an [`Error` event](reference.md#mixtape.events.Error) and
+`player.error`.
 
 ## Events
 
-Every message on the pipeline's bus is also an event. `player.events()` subscribes to the events
-published from now on, so call it before the change that you want to see. It returns an async
-iterator that ends when the player is torn down, or when you call its `close()`.
+Every message on the pipeline's bus is also an event.
+[`player.events()`](reference.md#mixtape.Player.events) subscribes to the events published from
+now on, so call it before the change that you want to see. It returns an async iterator that
+ends when the player is torn down, or when you call its `close()`.
 
-| Event            | Fields                                  | Published when                                         |
-|------------------|-----------------------------------------|--------------------------------------------------------|
-| `StateChanged`   | `old`, `new`, `pending`                 | the pipeline itself changed state                      |
-| `Eos`            |                                         | the stream ended                                       |
-| `Error`          | `error`                                 | the pipeline failed; the player set it to NULL already |
-| `Warning`        | `source`, `message`, `debug`            | an element posted a warning                            |
-| `PropertyChanged`| `path`, `element`, `property`, `value`  | an exposed element's property changed, on any thread, or a computed property was notified |
-| `Position`       | `position`, `duration`                  | either changed, in seconds; only for `events(position=True)` |
-| `GraphChanged`   | `graph`                                 | the pipeline's elements, pads, links or caps changed   |
-| `ModelChanged`   | `model`                                 | the exposed elements or their keys changed             |
-| `Message`        | `message`                               | any bus message, after the specific event for it       |
+| Event | Fields | Published when |
+|-------|--------|----------------|
+| [`StateChanged`](reference.md#mixtape.events.StateChanged) | `old`, `new`, `pending` | the pipeline itself changed state |
+| [`Eos`](reference.md#mixtape.events.Eos) | | the stream ended |
+| [`Error`](reference.md#mixtape.events.Error) | `error` | the pipeline failed; the player set it to NULL already |
+| [`Warning`](reference.md#mixtape.events.Warning) | `source`, `message`, `debug` | an element posted a warning |
+| [`PropertyChanged`](reference.md#mixtape.events.PropertyChanged) | `path`, `element`, `property`, `value` | an exposed element's property changed, on any thread, or a computed property was notified |
+| [`Position`](reference.md#mixtape.events.Position) | `position`, `duration` | either changed, in seconds; only for `events(position=True)` |
+| [`GraphChanged`](reference.md#mixtape.events.GraphChanged) | `graph` | the pipeline's elements, pads, links or caps changed |
+| [`ModelChanged`](reference.md#mixtape.events.ModelChanged) | `model` | the exposed elements or their keys changed |
+| [`Message`](reference.md#mixtape.events.Message) | `message` | any bus message, after the specific event for it |
 
 They are frozen dataclasses, so they work with `match`. This program reads a short stream,
 with its position, and sets a property while it waits:
@@ -161,12 +255,12 @@ flowchart LR
 --8<-- "examples/lib_events.py:events"
 ```
 
-`Position` is read every `Player.position_interval` seconds (0.25) while some stream asks for it,
+`Position` is read every [`Player.position_interval`](reference.md#mixtape.Player.position_interval) seconds (0.25) while some stream asks for it,
 and published when the value changed. A stream that asks for them gets the current one at once.
 
 ### Handling one kind of message
 
-`add_handler` calls a function on the loop for the bus messages of a type, after the
+[`add_handler`](reference.md#mixtape.Player.add_handler) calls a function on the loop for the bus messages of a type, after the
 built-in handling of them. It returns the function that removes it. A handler that raises is
 logged and does not stop the others.
 
@@ -182,7 +276,7 @@ everything in order, in a loop of your own.
 `describe()` and `graph()` are snapshots. A pipeline changes while it runs: a decodebin adds
 elements, pads come and go, links are made and caps are negotiated. The player watches for it
 and publishes what changed as `GraphChanged` with the new `graph()`. The changes of
-`Player.shape_interval` (0.1 s) come together as one event, and only when the graph differs from
+[`Player.shape_interval`](reference.md#mixtape.Player.shape_interval) (0.1 s) come together as one event, and only when the graph differs from
 the last one published.
 
 When the elements the model exposes change, or their keys do (a second `q` in another bin makes
@@ -220,95 +314,30 @@ flowchart LR
 The web page of the [HTTP API](http.md) follows the same events: its graph and its element
 sections change without a reload.
 
-## Subclass Player
-
-Subclass `Player` for an application of your own: its pipeline, its properties, its commands. The
-test card has a `videotestsrc` and a `fakesink`, a `pattern` to choose, a count of the frames
-that reached the sink and a command to show a pattern.
-
-```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
-flowchart LR
-  %% testcard
-  p0n0["<b>src</b><br>videotestsrc"]
-  p0n1["<b>sink</b><br>fakesink"]
-  p0n2["video/x-raw<br>width=320<br>height=240"]
-  p0n0 --> p0n2
-  p0n2 --> p0n1
-```
-
-```python
---8<-- "examples/testcard.py:player"
-```
-
-What each part does:
-
-- `description` is the pipeline of the class. `Testcard.from_description(Testcard.description)`
-  builds it, and so do `mixtape run testcard:Testcard` and `mixtape inspect testcard:Testcard`. A
-  subclass with its own `__init__` takes the pipeline and passes the keyword arguments on
-  (`expose_all`, `features`) to `super().__init__`.
-- `prop("src.pattern")` declares an alias of an element property: `pattern` in the model, with the
-  type, the range and the value of `src.pattern`, and a description of your own (and a `label`
-  for the page). Reading `card.pattern` is `card.get("pattern")`. A property is set with
-  `await card.set("pattern", "ball")`, which validates the value and changes nothing when it is
-  rejected. A typo in the target fails when the player is built.
-- `@prop` on a method declares a read-only property that the method computes. Its return type
-  hint is the type in the model, and a missing one fails when the class is defined. The first
-  line of its docstring is the description. `self.notify("frames")` publishes its current value
-  as a `PropertyChanged`.
-- `@command` on a method, sync or async, declares a command. The type hints of its parameters
-  are the types of its arguments, and a default makes an argument optional. `Literal` is an
-  enumeration. The arguments are validated before the method runs, and the return hint is the
-  type of the result. It takes no `*args` or `**kwargs`. The built-in `play`, `pause`, `stop`,
-  `eos` and `seek` are commands of every player, and a command calls your override of a method
-  such as `play`.
-- A pad probe, a signal handler or a callback of an element runs on a GStreamer thread, where
-  the loop's objects are off limits. `player.call_soon_threadsafe(callback, *args)` runs a
-  function on the loop, and `player.run_coroutine_threadsafe(coroutine)` runs a coroutine there
-  and returns a `concurrent.futures.Future` with its result. The probe uses the first: it
-  counts each frame on the loop, which also publishes the count, as `notify` is for the loop
-  thread only.
-
-`describe()` returns the player's model as a pydantic model (`describe().model_dump_json()` is
-JSON with JSON Schema for every type), `get(path)` reads a property, `set(path, value)` sets one
-and `invoke(name, **arguments)` runs a command: the calls that the command line and the HTTP API
-make. A name that does not exist is an `UnknownNameError`, a rejected value or argument an
-`InvalidValueError`, and a property that cannot be written a `NotWritableError`.
-
-```python
---8<-- "examples/testcard.py:main"
-```
-
-The command line reads the same model without playing, from the module and the class. Here is
-the command of the test card:
-
-```console
-$ PYTHONPATH=examples mixtape inspect testcard:Testcard | grep 'show('
-  show(pattern: smpte|ball|snow = smpte)                  Show a test pattern.
-```
-
-See [Command line](cli.md) for what else `mixtape run` and `mixtape inspect` do with a class,
-and [HTTP API](http.md) for the control page it gets.
-
-## Write a feature
+## Write a feature { #write-a-feature }
 
 A feature is a plugin of a player: it adds commands and live properties to the model, next to
 the elements', as `feature.name`. They show up in `describe()`, `mixtape inspect`, the HTTP API
 and the control page like any other. [Measuring performance](perf.md) uses the built-in
 `perf`; this one counts beats.
 
-A feature is a `Feature` subclass with a `name`, its options as the keyword parameters of
-`__init__`, and `@command` methods and `@prop` getters like a player's. Its hooks run in this
-order:
+A feature is a [`Feature`](reference.md#mixtape.Feature) subclass with a `name`, its options as
+the keyword parameters of `__init__`, and `@command` methods and `@prop` getters like a player's.
+Its hooks run in this order:
 
-- `prepare` runs once, before GStreamer is initialised, when the player is built from a
-  description: the place to set environment variables.
-- `initialised` runs once GStreamer is initialised and before the pipeline is built from a
-  description: what has to be in place before an element is made.
-- `check` runs when the player is built, once `requires` (GStreamer elements or tracers) is
-  met. It raises `FeatureError` if the feature cannot work with this pipeline.
-- `attach` runs when the player is set up, on its loop: start what runs beside the pipeline.
-- `detach` runs when the player is torn down, with the pipeline in NULL: stop it.
+- [`prepare`](reference.md#mixtape.Feature.prepare) runs once, before GStreamer is initialised,
+  when the player is built from a description: the place to set environment variables.
+- [`initialised`](reference.md#mixtape.Feature.initialised) runs once GStreamer is initialised
+  and before the pipeline is built from a description: what has to be in place before an element
+  is made.
+- [`check`](reference.md#mixtape.Feature.check) runs when the player is built, once
+  [`requires`](reference.md#mixtape.Feature.requires) (GStreamer elements or tracers) is met. It
+  raises [`FeatureError`](reference.md#mixtape.exceptions.FeatureError) if the feature cannot
+  work with this pipeline.
+- [`attach`](reference.md#mixtape.Feature.attach) runs when the player is set up, on its loop:
+  start what runs beside the pipeline.
+- [`detach`](reference.md#mixtape.Feature.detach) runs when the player is torn down, with the
+  pipeline in NULL: stop it.
 
 ```python
 --8<-- "examples/heartbeat_plugin/heartbeat.py:feature"
@@ -316,9 +345,9 @@ order:
 
 - The options are validated. `heartbeat,interval=0.5` on the command line gives a float, and a
   value that does not fit is a `FeatureError` before anything starts.
-- `notify("beats")` publishes the current value of the property `beats` as a `PropertyChanged` of
-  `heartbeat.beats`, and does nothing while the feature is detached. Like the player's, it is for the
-  loop thread only.
+- [`notify("beats")`](reference.md#mixtape.Feature.notify) publishes the current value of the
+  property `beats` as a `PropertyChanged` of `heartbeat.beats`, and does nothing while the
+  feature is detached. Like the player's, it is for the loop thread only.
 - Getters and commands must also work when the player is not set up, because `mixtape inspect`
   reads every property: answer from what you have. `self.player` is the player while attached.
 - A feature declares computed properties only. Its name cannot be that of an element of the

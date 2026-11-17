@@ -5,10 +5,32 @@ the same commands, properties and control page that a [`Player`](library.md) you
 
 - `mixtape run` plays a pipeline until it ends,
 - `mixtape inspect` prints what a player exposes, without playing,
+- `mixtape perf compare` compares two [perf](perf.md) runs,
 - `--set` sets properties before playing, `--http` adds the [control page](http.md), and
   `--feature` adds [features](#features) such as tracers.
 
-`python3 -m mixtape` does the same as `mixtape`.
+The commands on these pages run from a checkout of mixtape, as [the first page](index.md#install)
+says. `python3 -m mixtape` does the same as `mixtape`, and `mixtape --version` prints the
+versions of mixtape, GStreamer, PyGObject and Python, for a bug report. `mixtape --help` lists the
+commands, and each has a `--help` of its own:
+
+```console
+$ mixtape --help
+Usage: mixtape [OPTIONS] COMMAND [ARGS]...
+
+  Run GStreamer pipelines.
+
+Options:
+  -v, --verbose  log more: -v info, -vv debug
+  --version      show the versions of mixtape, GStreamer, PyGObject and
+                 Python, and exit
+  -h, --help     Show this message and exit.
+
+Commands:
+  run      run a pipeline until EOS or an error, like gst-launch-1.0 -e
+  inspect  show the commands, properties and elements a player exposes
+  perf     work with what the perf feature measured
+```
 
 ## Run a pipeline
 
@@ -20,8 +42,8 @@ $ mixtape run videotestsrc num-buffers=60 ! fakesink; echo "exit status $?"
 exit status 0
 ```
 
-It exits 0 at EOS, 1 on a pipeline error, and 2 on a bad description or bad usage. A
-description that GStreamer cannot parse never starts:
+The [exit status](#exit-status) says how it ended. A description that GStreamer cannot parse
+never starts:
 
 ```console
 $ mixtape run "videotestsrc ! nosuchelement ! fakesink"; echo "exit status $?"
@@ -37,9 +59,9 @@ error: filesrc0: Resource not found.
 exit status 1
 ```
 
-`-v` logs what the player does, at info level, and shows the debug string of an error, the
-line of GStreamer's source and the details that belong to it. `-vv` logs at debug level. It
-works before or after `run`:
+`-v` logs what the player does, at info level. With an error it also prints GStreamer's debug
+string for it: the line of its source and the details. `-vv` logs at debug level. Both work
+before or after `run`:
 
 ```console
 $ mixtape run -v "filesrc location=/tmp/missing.mp4 ! fakesink" 2>&1 | grep "No such file"
@@ -93,12 +115,15 @@ WARNING mixtape.player: Could not set the pipeline to null within 5 s: identity0
 exit status 130
 ```
 
-## Inspect a player
+## Inspect a player { #inspect-a-player }
 
 A player describes what it exposes: its commands, its properties, with their types, ranges
 and current values, and the properties of its elements. `mixtape inspect` prints that without
-playing, for a description or for a `module:Class`, the player class of a program of yours.
-This one has the alias of an element property, made with `prop()`, and a `@command`; its
+playing, for a description or for a player class of yours: `path/to/file.py:Class`, whose
+folder is put on `sys.path`, or `module:Class` for a module in the current folder or on
+`sys.path`. A class takes no further words, and `mixtape run` takes the same targets.
+
+`Demo` has the alias of an element property, made with `prop()`, and a `@command`; its
 `description` is the pipeline that `mixtape` builds for it (see
 [Writing an application](library.md)):
 
@@ -117,10 +142,8 @@ flowchart LR
 --8<-- "examples/demo.py:player"
 ```
 
-`demo` is a module in the current folder, which `mixtape` finds there:
-
 ```console
-$ cd examples && mixtape inspect demo:Demo
+$ mixtape inspect examples/demo.py:Demo
 Demo
 
 Commands:
@@ -166,7 +189,7 @@ the schema of its parameters and of its result. It is what `GET /api/model` of t
 added, never renamed or removed. This is the `gain` property of the player above:
 
 ```console
-$ cd examples && mixtape inspect --json demo:Demo \
+$ mixtape inspect --json examples/demo.py:Demo \
     | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["properties"]["gain"], indent=2))'
 {
   "path": "gain",
@@ -241,7 +264,7 @@ a property of the player, an alias such as `gain` or a built-in, or `element.pro
 is the name that `inspect` prints first in each row:
 
 ```console
-$ cd examples && mixtape run demo:Demo --set gain=0.5 --set vol.mute=true && echo done
+$ mixtape run examples/demo.py:Demo --set gain=0.5 --set vol.mute=true && echo done
 done
 ```
 
@@ -264,13 +287,13 @@ error: 'q' is ambiguous: use a.q or b.q
 exit status 2
 ```
 
-## A control page: `--http`
+## A control page: `--http` { #the-http-option }
 
 `--http [HOST:]PORT` serves the player over HTTP in the same process and plays it, until you
 press Ctrl-C. It needs the `http` extra (`pip install 'mixtape[http]'`):
 
 ```console
-$ cd examples && mixtape run --http 8047 demo:Demo
+$ mixtape run --http 8047 examples/demo.py:Demo
 Serving on http://127.0.0.1:8047
 ```
 
@@ -281,15 +304,15 @@ screenshot, the REST and WebSocket API behind the page, and what to know before 
 another address.
 
 An EOS or a pipeline error does not end `mixtape run --http`: errors are printed, and the page
-can play again. The first Ctrl-C sends an EOS, stops, and exits 0.
+can play again. The first Ctrl-C sends an EOS, stops, and exits 0. A port that is taken exits 1:
+see [Troubleshooting](troubleshooting.md#port-in-use).
 
 ## Features
 
-A feature is a plugin of a player. It adds commands and live properties to the model, next to
-the elements', as `feature.name`. `--feature NAME[,KEY=VALUE…]` enables one, and can be
-repeated; its options are the `KEY=VALUE` pairs after the name, and a value may contain commas
-only inside parentheses. `mixtape run --help` lists the features that are installed. A name that
-is not one fails before anything plays:
+`--feature NAME[,KEY=VALUE…]` enables a [feature](library.md#write-a-feature), a plugin of the
+player, and can be repeated; its options are the `KEY=VALUE` pairs after the name, and a value
+may contain commas only inside parentheses. `mixtape run --help` lists the features that are
+installed. A name that is not one fails before anything plays:
 
 ```console
 $ mixtape inspect --feature nope "videotestsrc ! fakesink"; echo "exit status $?"
@@ -405,10 +428,9 @@ $ mixtape run --http 8047 --feature gst:queue-levels \
     "videotestsrc is-live=true ! queue name=q ! fakesink" 2>/dev/null &
 $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s -X POST 127.0.0.1:8047/api/commands/gst:queue-levels.write-log \
-    -d '{"arg1": "/tmp/q.csv"}'; echo
-$ cut -d, -f2 /tmp/q.csv | sort -u
+    -d '{"arg1": "/tmp/q.csv"}' > /dev/null
 $ kill -INT $!
-{"result":null}
+$ cut -d, -f2 /tmp/q.csv | sort -u
 q
 ```
 
@@ -423,3 +445,50 @@ exit status 2
 ```
 
 As for `tracers`, a `gst:` feature has to be first in the process.
+
+## Compare two runs: `mixtape perf compare` { #compare-two-runs }
+
+`mixtape perf compare BASE NEW` compares two folders that the [`perf` feature](perf.md) wrote:
+two runs of `mixtape run --feature perf,out=DIR`, or two sessions of `pytest --mixtape-perf`.
+It lists what got slower and what got faster beyond a threshold, and exits 1 on a regression.
+[Measuring performance](perf.md#fix-it-and-prove-it) compares a slow recorder with a fixed one.
+
+```console
+$ mixtape perf compare --help
+Usage: mixtape perf compare [OPTIONS] BASE NEW
+
+  Compare two sessions of `pytest --mixtape-perf` (folders with an index.json)
+  or two single runs (folders with a summary.json, as `mixtape run --feature
+  perf,out=DIR` writes): the p95 and max of every metric where higher is
+  worse. A value is a regression when it grew by more than the threshold and
+  by more than a floor of its unit (100 µs, 5 points of CPU, 5% of a queue).
+  Exits 1 on a regression.
+
+Arguments:
+  BASE <path>  the folder to compare with  [required]
+  NEW <path>   the folder to check  [required]
+
+Options:
+  --threshold PERCENT  how much a value may grow, in percent of the base;
+                       default 50
+  --json               print the comparison as JSON
+  -v, --verbose        log more: -v info, -vv debug
+  -h, --help           Show this message and exit.
+
+  Exit status: 0 when nothing got slower, 1 on a regression, 2 on a folder
+  that cannot be compared or bad usage, 130 on Ctrl-C.
+```
+
+`--json` prints the comparison as one object, with the keys `kind` (`session` or `run`),
+`threshold_percent`, `base` and `new` (the folders as given), `regressions`, `improvements`,
+`added`, `removed` and `compared` (how many values were compared). From 0.8, keys are only added,
+never renamed or removed.
+
+## Exit status
+
+| Status | `mixtape run` | `mixtape inspect` | `mixtape perf compare` |
+|--------|---------------|-------------------|------------------------|
+| 0 | EOS, or after a first Ctrl-C | the model was printed | nothing got slower |
+| 1 | a pipeline error, `--http` cannot listen, or [PyGObject or GStreamer is missing](troubleshooting.md#mixtape-needs-pygobject) | [PyGObject or GStreamer is missing](troubleshooting.md#mixtape-needs-pygobject) | a regression |
+| 2 | bad usage, or a target or feature that cannot be loaded | bad usage, or a target that cannot be loaded | a folder that cannot be compared, or bad usage |
+| 130 | a second Ctrl-C | Ctrl-C | Ctrl-C |

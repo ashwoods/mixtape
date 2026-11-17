@@ -5,6 +5,7 @@ from tests.doc_samples import Sample, on, run
 PAGE = "cli.md"
 
 SAMPLES: list[Sample] = [
+    run(PAGE, "help", "^mixtape --help", exact=True),
     # --- run
     run(PAGE, "words", "^mixtape run videotestsrc num-buffers=60", exact=True),
     run(PAGE, "bad-description", '^mixtape run "videotestsrc ! nosuchelement', exact=True),
@@ -34,7 +35,7 @@ SAMPLES: list[Sample] = [
     run(
         PAGE,
         "inspect-demo",
-        "^cd examples && mixtape inspect demo:Demo",
+        "^mixtape inspect examples/demo.py:Demo",
         expect=(
             "Demo\n",
             "shout(word: string, times: integer = 2)",
@@ -54,7 +55,7 @@ SAMPLES: list[Sample] = [
     run(
         PAGE,
         "inspect-json",
-        "^cd examples && mixtape inspect --json",
+        "^mixtape inspect --json examples/demo.py:Demo",
         expect=('"target": "vol.volume"', '"mutable": null', '"minimum": 0.0'),
     ),
     run(PAGE, "named", '^mixtape inspect "videotestsrc name=src', exact=True),
@@ -70,14 +71,14 @@ SAMPLES: list[Sample] = [
         ),
     ),
     # --- set
-    run(PAGE, "set", "^cd examples && mixtape run demo:Demo --set", exact=True),
+    run(PAGE, "set", "^mixtape run examples/demo.py:Demo --set", exact=True),
     run(PAGE, "set-bad-value", '^mixtape run "audiotestsrc num-buffers=10', exact=True),
     run(PAGE, "set-ambiguous", "^mixtape run --set q.max-size-buffers=5", exact=True),
     # --- http
     run(
         PAGE,
         "http",
-        "^cd examples && mixtape run --http 8047 demo:Demo",
+        "^mixtape run --http 8047 examples/demo.py:Demo",
         hangs=True,
         timeout=6,
         exact=True,
@@ -132,4 +133,6 @@ SAMPLES: list[Sample] = [
         exact=True,
     ),
     run(PAGE, "gst-leaks-refused", "^mixtape run --feature gst:leaks", exact=True),
+    # --- compare
+    run(PAGE, "perf-compare-help", "^mixtape perf compare --help", exact=True),
 ]

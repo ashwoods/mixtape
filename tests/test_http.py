@@ -116,7 +116,8 @@ async def test_commands(served: Served) -> None:
     assert (await client.post("/api/commands/seek", json={})).status_code == 422
     assert (await client.post("/api/commands/seek", content=b"{")).status_code == 422
     assert (await client.post("/api/commands/seek", json=[1])).status_code == 422
-    assert (await client.post("/api/commands/nope")).status_code == 404
+    unknown = await client.post("/api/commands/nope")  # as the WebSocket says it
+    assert (unknown.status_code, unknown.json()) == (404, {"detail": "Unknown command 'nope'"})
     await client.post("/api/commands/stop")
     assert served.player.get("state") == "null"
 

@@ -127,6 +127,13 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
             },
         )
 
+    @app.post("/api/commands/{name}", include_in_schema=False)
+    async def invoke_other(name: str, request: Request) -> dict[str, Any]:
+        """A command with no route of its own: one that came with a later element (its action
+        signals), or none, which is the player's `Unknown command 'name'`, 404."""
+        result = await player.invoke(name, **await _json_object(request))
+        return {"result": jsonable_encoder(result)}
+
     def element_spec(key: str) -> ElementSpec:
         element = player.describe().elements.get(key)
         if element is None:

@@ -1,11 +1,13 @@
-# Fallback for running the checks without a native GStreamer: the same
-# Ubuntu packages as CI (.github/workflows/ci.yml), running scripts/check.
+# Fallback for running the checks without a native GStreamer: the Ubuntu packages
+# of CI's `stock` job (.github/workflows/ci.yml), without the Rust plugins, running
+# scripts/check. The docs' samples call curl, which the runners have.
 FROM ubuntu:24.04
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
 
 RUN apt-get update -yq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+        curl \
         python3 \
         python3-gi \
         python3-gst-1.0 \

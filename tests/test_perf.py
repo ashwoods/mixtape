@@ -451,8 +451,10 @@ def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
     assert summary["pipeline"] == pipeline and summary["windows"] >= 1
     assert summary["format_version"] == 1 and summary["lost"] == 0
     metrics = summary["metrics"]
-    # perf's own threads, which read the log and write the windows, are not the pipeline's
-    assert not any(s.startswith("mixtape-perf") for s in metrics["thread.cpu"]["subjects"])
+    # perf's own threads, which read the log and write the windows, are not the pipeline's;
+    # in a run this short the pipeline's threads may be gone before a window counts them
+    threads = metrics.get("thread.cpu", {"subjects": {}})["subjects"]
+    assert not any(s.startswith("mixtape-perf") for s in threads)
     assert metrics["element.latency"]["subjects"]["queue0"]["n"] == 30
     assert metrics["pipeline.latency"]["subjects"]["videotestsrc0→fakesink0"]["n"] == 30
     assert metrics["process.cpu"]["unit"] == "%"

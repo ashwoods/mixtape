@@ -289,6 +289,19 @@ async def test_error_during_a_pending_play_reaches_the_caller():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sink", ["fakesink", "fakesink async=false"], ids=["async", "at-once"])
+async def test_a_state_is_published_before_the_wait_for_it_returns(sink: str):
+    # what a WebSocket's reply to `play` relies on to come after the states
+    async with Player.from_description(f"videotestsrc ! {sink}") as player:
+        stream = player.events()
+        await player.play()
+        published = []
+        while not stream._queue.empty():
+            published.append(stream._queue.get_nowait())
+        assert [e.new for e in published if isinstance(e, StateChanged)][-1] == Gst.State.PLAYING
+
+
+@pytest.mark.asyncio
 async def test_an_eos_after_an_error_does_not_end_the_wait_the_error_ended():
     async with Player.from_description("videotestsrc name=src is-live=true ! fakesink") as player:
         stream = player.events()

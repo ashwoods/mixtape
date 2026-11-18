@@ -29,8 +29,8 @@ _NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 
 class Feature:
-    """A plugin of a `Player`. Subclass it with a `name`, the options as `__init__` keyword
-    parameters, and `@command` methods and `@prop` getters for its model.
+    """A plugin of a [`Player`][mixtape.Player]. Subclass it with a `name`, the options as
+    `__init__` keyword parameters, and `@command` methods and `@prop` getters for its model.
 
     Getters and commands must work when the player is not set up (`mixtape inspect` reads
     every property), so a feature that needs the loop answers from what it has.
@@ -45,7 +45,8 @@ class Feature:
     would use the one tracer of the process"""
 
     player: "Player | None" = None
-    """The player it is attached to: set just before `attach`, None again after `detach`"""
+    """The player it is attached to: set just before [`attach`][mixtape.Feature.attach], None
+    again after [`detach`][mixtape.Feature.detach]"""
 
     _options: ClassVar[type[BaseModel]]
     _declared: Declarations  # the class's; `gst:` features have their own
@@ -69,7 +70,8 @@ class Feature:
     @classmethod
     def from_options(cls, **raw: Any) -> Self:
         """The feature with its options validated, strings from a command line included
-        (`"0.5"` is a float). Raises `FeatureError` for a rejected one."""
+        (`"0.5"` is a float). Raises [`FeatureError`][mixtape.exceptions.FeatureError] for a
+        rejected one."""
         try:
             options = cls._options.model_validate(raw)
         except ValidationError as exc:
@@ -97,20 +99,23 @@ class Feature:
     def initialised(self) -> None:
         """Called once GStreamer is initialised (by the player or before), and before the player
         builds its pipeline from a description: the place for what has to be in place before an
-        element is made, such as a logger. Raise `FeatureError` if the feature cannot work."""
+        element is made, such as a logger. Raise
+        [`FeatureError`][mixtape.exceptions.FeatureError] if the feature cannot work."""
 
     def check(self, player: "Player") -> None:
-        """Called when the player is built, after GStreamer is initialised and `requires` is
-        met, before it is set up: raise `FeatureError` if the feature cannot work here, so the
+        """Called when the player is built, after GStreamer is initialised and
+        [`requires`][mixtape.Feature.requires] is met, before it is set up: raise
+        [`FeatureError`][mixtape.exceptions.FeatureError] if the feature cannot work here, so the
         player is not built rather than failing later in `attach`."""
 
     def attach(self, player: "Player") -> None:
-        """Called by `Player.setup`, on the running loop. One that raises gets no `detach`:
-        it cleans up after itself, and the features attached before it are detached."""
+        """Called by [`Player.setup`][mixtape.Player.setup], on the running loop. One that
+        raises gets no `detach`: it cleans up after itself, and the features attached before
+        it are detached."""
 
     def detach(self, player: "Player") -> None:
-        """Called by `Player.teardown`, once the pipeline is in NULL. An exception is logged
-        and teardown goes on."""
+        """Called by [`Player.teardown`][mixtape.Player.teardown], once the pipeline is in NULL.
+        An exception is logged and teardown goes on."""
 
     def notify(self, prop: str) -> None:
         """Publish the current value of its computed property `prop` to the player's event

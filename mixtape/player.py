@@ -153,12 +153,13 @@ class Player:
     The player reads the pipeline's bus on the loop it is attached to,
     which happens lazily on the first `await` of any of its methods.
     Subclass it and override the state methods, or react to bus messages
-    with `add_handler` and `events()`.
+    with [`add_handler`][mixtape.Player.add_handler] and [`events()`][mixtape.Player.events].
 
-    Its controls and state are described by `describe()`: the properties of the
-    named elements (all of them with `expose_all`), the aliases declared with
-    `prop()`, the computed properties declared with `@prop`, the commands declared with
-    `@command`, and the built-ins. The features it enables add their own, as `feature.name`.
+    Its controls and state are described by [`describe()`][mixtape.Player.describe]: the
+    properties of the named elements (all of them with `expose_all`), the aliases declared with
+    [`prop()`][mixtape.prop], the computed properties declared with `@prop`, the commands
+    declared with [`@command`][mixtape.command], and the built-ins. The features it enables
+    add their own, as `feature.name`.
     """
 
     features: ClassVar[Sequence[str | type[Feature]]] = ()
@@ -167,13 +168,15 @@ class Player:
     description: ClassVar[str | None] = None
     """The pipeline description of a subclass that carries its own, for `mixtape run`"""
     position_interval: ClassVar[float] = 0.25
-    """Seconds between the reads that publish `Position` to `events(position=True)` streams"""
+    """Seconds between the reads that publish [`Position`][mixtape.events.Position] to
+    `events(position=True)` streams"""
     state_timeout: ClassVar[float] = 5.0
     """Seconds a change down to READY or NULL may take: a streaming thread that hangs blocks
     it, and the player then calls the pipeline stuck until the change finishes after all"""
     shape_interval: ClassVar[float] = 0.1
     """Seconds the player gathers changes to the pipeline's shape (elements, pads, links, caps)
-    before it publishes them as one `GraphChanged`, and `ModelChanged` when they change it"""
+    before it publishes them as one [`GraphChanged`][mixtape.events.GraphChanged], and
+    [`ModelChanged`][mixtape.events.ModelChanged] when they change it"""
 
     _declared: ClassVar[Declarations]
 
@@ -284,7 +287,8 @@ class Player:
     def run(cls, description_or_pipeline: str | Gst.Pipeline, timeout: float | None = None) -> None:
         """Play a pipeline until EOS and tear it down, for scripts.
 
-        Raises `PlayerPipelineError` on a pipeline error and `TimeoutError`
+        Raises [`PlayerPipelineError`][mixtape.exceptions.PlayerPipelineError] on a pipeline
+        error and `TimeoutError`
         when `timeout` seconds pass first.
         """
         if isinstance(description_or_pipeline, str):
@@ -614,7 +618,8 @@ class Player:
             self._discard_eos_waiter(future)
 
     async def play_until_eos(self) -> None:
-        """Play and return on the next EOS; raise `PlayerPipelineError` on an error.
+        """Play and return on the next EOS; raise
+        [`PlayerPipelineError`][mixtape.exceptions.PlayerPipelineError] on an error.
 
         A pipeline still at the EOS of an earlier run restarts from READY."""
         self.setup()
@@ -1227,8 +1232,9 @@ class Player:
     def events(self, position: bool = False) -> events.EventStream:
         """Subscribe to the events published from now on.
 
-        With `position`, the stream also gets `Position` events: the current one at once,
-        then one whenever the position or duration changes, read every `position_interval`.
+        With `position`, the stream also gets [`Position`][mixtape.events.Position] events: the
+        current one at once, then one whenever the position or duration changes, read every
+        [`position_interval`][mixtape.Player.position_interval].
         """
         self.setup()
         stream = self._events.subscribe(position)

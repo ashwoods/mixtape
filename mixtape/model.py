@@ -453,7 +453,8 @@ def prop(target: str, *, label: str | None = None, description: str | None = Non
 def prop(
     target: str | Callable[[Any], Any], *, label: str | None = None, description: str | None = None
 ) -> Any:
-    """Declare an alias of the element property `target` (`"enc.bitrate"`) on a `Player`.
+    """Declare an alias of the element property `target` (`"enc.bitrate"`) on a
+    [`Player`][mixtape.Player].
 
     As a decorator of a method (`@prop`) it declares a read-only computed property instead,
     typed by the method's return hint and described by its docstring."""
@@ -466,7 +467,7 @@ _COMMAND = "__mixtape_command__"
 
 
 def command[F: Callable[..., Any]](method: F) -> F:
-    """Mark a sync or async method of a `Player` as a command."""
+    """Mark a sync or async method of a [`Player`][mixtape.Player] as a command."""
     setattr(method, _COMMAND, True)
     return method
 

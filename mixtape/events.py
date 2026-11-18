@@ -1,4 +1,4 @@
-"""Events a `Player` publishes, and the stream subscribers read them from."""
+"""Events a [`Player`][mixtape.Player] publishes, and the stream subscribers read them from."""
 
 import asyncio
 from dataclasses import dataclass
@@ -51,7 +51,7 @@ class Warning(Event):
 @dataclass(frozen=True, slots=True)
 class PropertyChanged(Event):
     """A property changed: an exposed element's, on whatever thread changed it, or a
-    computed one, published on the loop by `Player.notify`.
+    computed one, published on the loop by [`Player.notify`][mixtape.Player.notify].
 
     `path` is the element path (`enc.bitrate`, or `a.enc.bitrate` when the element name
     is not unique); aliases map to it via `PropSpec.target`. The element's key is fixed
@@ -63,14 +63,15 @@ class PropertyChanged(Event):
     element: str | None
     property: str | None
     value: Any
-    """The JSON-friendly value, as `Player.get` returns it"""
+    """The JSON-friendly value, as [`Player.get`][mixtape.Player.get] returns it"""
 
 
 @dataclass(frozen=True, slots=True)
 class Position(Event):
-    """The playback position or duration changed, in seconds as `Player.get` returns them.
+    """The playback position or duration changed, in seconds as
+    [`Player.get`][mixtape.Player.get] returns them.
 
-    Only streams made with `Player.events(position=True)` receive it.
+    Only streams made with [`Player.events(position=True)`][mixtape.Player.events] receive it.
     """
 
     position: float | None
@@ -80,20 +81,22 @@ class Position(Event):
 @dataclass(frozen=True, slots=True)
 class GraphChanged(Event):
     """The pipeline's shape changed: elements came or went (decodebin's), pads came or went,
-    links or caps changed. The changes of `Player.shape_interval` come as one event, published
-    only when the graph differs from the one before."""
+    links or caps changed. The changes of
+    [`Player.shape_interval`][mixtape.Player.shape_interval] come as one event, published only
+    when the graph differs from the one before."""
 
     graph: GraphSpec
-    """The graph as of now, as `Player.graph` returns it"""
+    """The graph as of now, as [`Player.graph`][mixtape.Player.graph] returns it"""
 
 
 @dataclass(frozen=True, slots=True)
 class ModelChanged(Event):
     """The elements the model exposes changed, or their keys did (a namesake in another bin
-    makes `q` `a.q`). Published with the `GraphChanged` of the same change."""
+    makes `q` `a.q`). Published with the [`GraphChanged`][mixtape.events.GraphChanged] of the same
+    change."""
 
     model: PlayerSpec
-    """The model as of now, as `Player.describe` returns it"""
+    """The model as of now, as [`Player.describe`][mixtape.Player.describe] returns it"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +141,7 @@ class EventStream:
 
 
 class Broadcast:
-    """Fan out events to any number of `EventStream` subscribers."""
+    """Fan out events to any number of [`EventStream`][mixtape.events.EventStream] subscribers."""
 
     def __init__(self) -> None:
         self._streams: set[EventStream] = set()

@@ -945,28 +945,26 @@ class Player:
     async def set(self, path: str, value: Any) -> None:
         """Validate `value` and set the property. Nothing changes when it is rejected."""
         self.setup()
+        if path in BUILTIN_PROPS or path in self._computed:
+            raise NotWritableError(f"{path!r} is read-only")
+        element, ps, codec = self._resolve(path)
+        flags = int(ps.flags)
+        if not flags & GObject.ParamFlags.WRITABLE or flags & GObject.ParamFlags.CONSTRUCT_ONLY:
+            raise NotWritableError(f"{path!r} is read-only or can only be set on construction")
         try:
-            if path in BUILTIN_PROPS or path in self._computed:
-                raise NotWritableError(f"{path!r} is read-only")
-            element, ps, codec = self._resolve(path)
-            flags = int(ps.flags)
-            if not flags & GObject.ParamFlags.WRITABLE or flags & GObject.ParamFlags.CONSTRUCT_ONLY:
-                raise NotWritableError(f"{path!r} is read-only or can only be set on construction")
+            validated = codec.adapter.validate_python(value)
+        except ValidationError as exc:
+            raise _invalid(f"value for {path!r}", exc) from exc
+        # GLib reports an out of range value as a warning and leaves the old one
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", GObject.Warning)
             try:
-                validated = codec.adapter.validate_python(value)
-            except ValidationError as exc:
-                raise _invalid(f"value for {path!r}", exc) from exc
-            # GLib reports an out of range value as a warning and leaves the old one
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always", GObject.Warning)
-                try:
-                    element.set_property(ps.name, codec.write(validated))
-                except (TypeError, ValueError, OverflowError) as exc:
-                    raise InvalidValueError(f"Invalid value for {path!r}: {exc}") from exc
-            if problems := [w for w in caught if issubclass(w.category, GObject.Warning)]:
-                raise InvalidValueError(f"Invalid value for {path!r}: {problems[0].message}")
-        finally:
-            self._commands_changed()
+                element.set_property(ps.name, codec.write(validated))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise InvalidValueError(f"Invalid value for {path!r}: {exc}") from exc
+        self._commands_changed()  # a check may read what changed, watched or not
+        if problems := [w for w in caught if issubclass(w.category, GObject.Warning)]:
+            raise InvalidValueError(f"Invalid value for {path!r}: {problems[0].message}")
 
     async def invoke(self, name: str, /, **args: Any) -> Any:
         """Call the command `name` with validated `args` and return its result.
@@ -975,22 +973,22 @@ class Player:
         command's [`when`][mixtape.command] check refuses it. Built-in commands return None,
         as their specs say."""
         self.setup()
+        if (bound := self._commands.get(name)) is None:
+            raise UnknownNameError(f"Unknown command {name!r}")
+        declared = bound.declared
         try:
-            if (bound := self._commands.get(name)) is None:
-                raise UnknownNameError(f"Unknown command {name!r}")
-            declared = bound.declared
-            try:
-                validated = declared.args.model_validate(args)
-            except ValidationError as exc:
-                raise _invalid(f"arguments for {name!r}", exc) from exc
-            if (reason := self._refusal(name, bound)) is not None:
-                raise CommandError(reason)
+            validated = declared.args.model_validate(args)
+        except ValidationError as exc:
+            raise _invalid(f"arguments for {name!r}", exc) from exc
+        if (reason := self._refusal(name, bound)) is not None:
+            raise CommandError(reason)
+        try:
             result = bound.call(**{k: getattr(validated, k) for k in type(validated).model_fields})
             if inspect.isawaitable(result):
                 result = await result
-            return None if declared.spec.builtin else result
         finally:
-            self._commands_changed()
+            self._commands_changed()  # what it did, or failed to, may change what can run
+        return None if declared.spec.builtin else result
 
     def _element_keys(self) -> dict[str, Gst.Element]:
         """Every element of the pipeline tree by its key: its name when no other element has

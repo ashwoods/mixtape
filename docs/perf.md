@@ -354,8 +354,8 @@ FAILED examples/recorder_suite/test_recorder.py::test_records_720p - Failed: ...
 
 The message names the metric and the statistic, the subject that had the worst value, the value
 and the limit. A metric the test has no samples of fails too, and when the log of the test lost
-lines, the failure adds a line saying that the numbers are incomplete. The 360p test passed, as it has no
-budget, but `index.html` shows what happened to it:
+lines, the failure adds a line saying that the numbers are incomplete. The 360p test passed, as
+it has no budget, but `index.html` shows what happened to it:
 
 ![index.html of the failing session: the 720p test failed, with its worst numbers next to the passing 360p test's](images/perf-index.png)
 
@@ -365,8 +365,8 @@ A budget bounds what you chose to bound. The other check compares the whole sess
 earlier one: `--mixtape-perf-baseline BASE` takes the `--mixtape-perf` folder of that session
 (CI keeps the one of the main branch), compares at the end as `mixtape perf compare` does,
 writes `compare.json` next to the index (the same JSON as `mixtape perf compare --json`; from
-0.8, fields are only added, never renamed or removed: `lost` is an addition), prints the result in its own section and fails the
-session, exit status 1, on a regression. Here the baseline is a session with the fast encoder,
+0.8, fields are only added, never renamed or removed: `lost` is an addition), prints the result
+in its own section and fails the session, exit status 1, on a regression. Here the baseline is a session with the fast encoder,
 and the new one runs only the 360p test with the slow one:
 
 ```console

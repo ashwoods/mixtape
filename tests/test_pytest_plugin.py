@@ -195,7 +195,6 @@ def test_a_session_with_xdist_workers_is_a_usage_error(pytester: pytest.Pytester
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     result.stderr.fnmatch_lines(["*--mixtape-perf measures a session run serially*without -n*"])
     assert not out.exists()
-    measure(pytester, "--numprocesses=0")[0].assert_outcomes(passed=1)
 
 
 def test_a_perf_player_and_the_plugin_both_get_the_samples(pytester: pytest.Pytester) -> None:

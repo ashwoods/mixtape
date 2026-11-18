@@ -20,8 +20,8 @@ gi.require_version("Gst", "1.0")
 from gi.repository import GLib, GObject, Gst
 from pydantic import NonNegativeFloat, ValidationError
 
-from . import events, hints
-from .exceptions import (
+from .. import events, hints
+from ..exceptions import (
     CommandError,
     FeatureError,
     InvalidValueError,
@@ -34,8 +34,8 @@ from .exceptions import (
     PlayerSetStateError,
     UnknownNameError,
 )
-from .features import Feature, FeatureSpec, resolve_all
-from .model import (
+from ..features import Feature, FeatureSpec, resolve_all
+from ..model import (
     BUILTIN_PROPS,
     Codec,
     Command,
@@ -52,7 +52,7 @@ from .model import (
     is_user_named,
     validation_reasons,
 )
-from .spec import GraphSpec, LinkSpec, NodeSpec, PlayerSpec
+from ..spec import GraphSpec, LinkSpec, NodeSpec, PlayerSpec
 
 logger = logging.getLogger(__name__)
 

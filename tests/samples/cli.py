@@ -25,19 +25,7 @@ SAMPLES: list[Sample] = [
         exact=True,
     ),
     # --- inspect
-    run(
-        PAGE,
-        "inspect-demo",
-        "^mixtape inspect examples/demo.py:Demo",
-        expect=(
-            "Demo\n",
-            "shout(word: string, times: integer = 2)",
-            "Repeat a word.",
-            "→ vol.volume",
-            "vol (volume) — Volume",
-            "mute",
-        ),
-    ),
+    run(PAGE, "inspect-demo", "^mixtape inspect examples/demo.py:Demo", exact=True),
     run(
         PAGE,
         "mutable",
@@ -78,18 +66,7 @@ SAMPLES: list[Sample] = [
     ),
     # --- features
     run(PAGE, "unknown-feature", "^mixtape inspect --feature nope", exact=True),
-    run(
-        PAGE,
-        "leaks",
-        "^mixtape inspect --feature leaks,interval=0.5",
-        expect=(
-            "Features: leaks\n",
-            "leaks.checkpoint()",
-            "The change in live objects by type since the last checkpoint",
-            "leaks.reset()",
-            "leaks.alive  r-  object",
-        ),
-    ),
+    run(PAGE, "leaks", "^mixtape inspect --feature leaks,interval=0.5", exact=True),
     run(
         PAGE,
         "tracers-active",

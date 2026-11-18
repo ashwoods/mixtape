@@ -160,7 +160,7 @@ Commands:
   pause()                                                 Pause the pipeline.
   play()                                                  Play the pipeline.
   stop(eos: boolean = false, timeout: number | null = 5)  Set the pipeline to NULL, after an EOS when `eos` and it is playing.
-  eos(timeout: number | null = 5)                         Send an EOS event and wait for the EOS message it causes, while playing, for up to
+  eos(timeout: number | null = 5)                         Send an EOS event and wait for the EOS message it causes, while playing, for up to `timeout` seconds: a streaming thread that hangs never carries it to the sinks.
   seek(position: number)                                  Seek to a position in seconds, flushing.
   shout(word: string, times: integer = 2)                 Repeat a word.
 
@@ -351,7 +351,7 @@ Commands:
   pause()                                                 Pause the pipeline.
   play()                                                  Play the pipeline.
   stop(eos: boolean = false, timeout: number | null = 5)  Set the pipeline to NULL, after an EOS when `eos` and it is playing.
-  eos(timeout: number | null = 5)                         Send an EOS event and wait for the EOS message it causes, while playing, for up to
+  eos(timeout: number | null = 5)                         Send an EOS event and wait for the EOS message it causes, while playing, for up to `timeout` seconds: a streaming thread that hangs never carries it to the sinks.
   seek(position: number)                                  Seek to a position in seconds, flushing.
   leaks.checkpoint()                                      The change in live objects by type since the last checkpoint
   leaks.reset()                                           Forget the live objects counted so far, and go on tracking

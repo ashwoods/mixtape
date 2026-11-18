@@ -13,7 +13,8 @@ sections they cover with a marker (registered in tests/conftest.py):
 A key is the example's file name without `.py`, a colon and the section name, so the names of
 the examples must be unique across examples/ and its folders.
 
-The links point at the commit the site is built from (`git rev-parse HEAD`), not at main, so a
+The links point at the commit the site is built from (`git rev-parse HEAD`; main where git
+cannot say), so a
 site built from a release links to the code of that release. Links to `blob/main/` or
 `tree/main/` written on a page are pinned the same way.
 
@@ -83,9 +84,14 @@ def on_config(config: Any) -> Any:
     global root, repo, sha, blob, tests, sections
     root = Path(config.config_file_path).parent
     repo = config.repo_url.rstrip("/")
-    sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as e:
+        # the Docker check has no git, or a checkout of another owner: link to main
+        log.info("source links point at main: no commit from git (%s)", e)
+        sha = "main"
     blob = f"{repo}/blob/{sha}"
 
     sections = set()

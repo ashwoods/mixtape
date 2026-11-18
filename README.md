@@ -79,9 +79,10 @@ $ pip install 'mixtape[http]'
 
 ### From a source checkout
 
-The examples in the documentation are those of the `main` branch, and they can need code that
-is newer than the PyPI release. They and the commands next to them run from the folder of a
-checkout, so install from one to run them:
+The documentation describes the latest release, and each snippet's source link points at its
+commit; `main` can be ahead of it. Its programs are in the repository's `examples/` folder, and
+they and the commands next to them run from the folder of a checkout, so install from one to
+run them:
 
 ```console
 $ git clone https://github.com/ashwoods/mixtape

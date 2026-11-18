@@ -33,8 +33,8 @@ where gst-plugins-rs is installed; `appsink` and `appsrc` when your code has to 
 
 ## Decoupled: intervideo
 
-The producer plays a test pattern (a stand-in for a camera) at 10 frames per second into the channel `cam`. The consumer reads
-the channel at 30:
+The producer plays a test pattern (a stand-in for a camera) at 10 frames per second into the
+channel `cam`. The consumer reads the channel at 30:
 
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%

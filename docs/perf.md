@@ -267,8 +267,8 @@ Serving on http://127.0.0.1:8047
 ## First in the process
 
 GStreamer [creates its tracers once per process](concepts.md#tracers-once-per-process), when it
-initialises. `mixtape run` and `Player.from_description` prepare the features before anything initialises
-GStreamer, so a `perf` they build works. A program that initialised GStreamer first, or imported
+initialises. `mixtape run` and `Player.from_description` prepare the features before anything
+initialises GStreamer, so a `perf` they build works. A program that initialised GStreamer first, or imported
 something that did, cannot have it, and the error says so
 ([Troubleshooting](troubleshooting.md#gst-tracers) has the fix):
 

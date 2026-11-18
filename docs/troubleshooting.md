@@ -14,7 +14,7 @@ succeed with the Python you start from, and print nothing:
 $ python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst; Gst.IteratorError'
 ```
 
-Homebrew's Python is `$(brew --prefix)/bin/python3` and Ubuntu's is `/usr/bin/python3`. Then
+Homebrew's Python is `$(brew --prefix)/bin/python3` and Ubuntu's and Debian's is `/usr/bin/python3`. Then
 `python3 -m venv --system-site-packages .venv`. [Install](index.md#install) has the steps.
 
 ## error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: see https://shashi.to/mixtape/troubleshooting/ { #mixtape-needs-pygobject }

@@ -10,10 +10,9 @@ builds a player step by step, and the [command line](cli.md) and the [HTTP API](
 A [`Player`](reference.md#mixtape.Player) wraps one `Gst.Pipeline`, made from a
 `gst-launch-1.0` description (`Player.from_description`) or in code (`Player(pipeline)`). It
 attaches to the asyncio loop that is running when you first `await` one of its methods (that
-is `setup`), reads
-the pipeline's bus there, and publishes each bus message as an
-[event](library.md#events). Everything else on this page is made from the player: its model, its
-features and its interfaces.
+is `setup`), reads the pipeline's bus there, and publishes each bus message as an
+[event](library.md#events). Everything else on this page is made from the player: its model,
+its features and its interfaces.
 
 One player has one pipeline, one model and one stream of events. Two players in one process do
 not see each other, with one exception, the [tracers](#tracers-once-per-process). mixtape has
@@ -23,9 +22,11 @@ nothing that groups players ([Two pipelines](two-pipelines.md#what-mixtape-does-
 
 The model is what a player lets you read, set and call: its properties and its commands. It is
 data, with a JSON Schema for every type, and
-[`player.describe()`](reference.md#mixtape.Player.describe) returns it. Every interface below reads it, and
-[`get(path)`](reference.md#mixtape.Player.get), [`set(path, value)`](reference.md#mixtape.Player.set)
-and [`invoke(name, **arguments)`](reference.md#mixtape.Player.invoke) are the calls that they make: a value is validated against its type before anything changes.
+[`player.describe()`](reference.md#mixtape.Player.describe) returns it. Every interface below
+reads it, and [`get(path)`](reference.md#mixtape.Player.get),
+[`set(path, value)`](reference.md#mixtape.Player.set) and
+[`invoke(name, **arguments)`](reference.md#mixtape.Player.invoke) are the calls that they
+make: a value is validated against its type before anything changes.
 
 It has these parts, each under its own name:
 
@@ -63,9 +64,9 @@ Two elements of one name in different bins are keyed by their dotted path, `a.q`
 
 ## Threads { #threads }
 
-Two kinds of threads meet in a player. Your code, the model and the events run on the asyncio
-loop. GStreamer runs the pipeline on its own streaming threads, and calls into Python from
-them:
+Three kinds of threads meet in a player. Your code, the model and the events run on the
+asyncio loop. GStreamer runs the pipeline on its own streaming threads, and calls into Python
+from them. Short-lived threads of mixtape's change the state:
 
 | Thread | Runs | Meets the loop |
 |--------|------|----------------|
@@ -82,7 +83,7 @@ them:
   it to the loop with `call_soon_threadsafe`, so a `PropertyChanged` event is published on the
   loop although the property changed on a streaming thread.
 - **A change of state**, and the sending of an EOS, run on a short-lived daemon thread, and the
-  loop awaits it. A streaming thread that hangs holds the locks of the pipeline, and a call from
+  loop awaits it (`teardown()`, which is sync, waits for it). A streaming thread that hangs holds the locks of the pipeline, and a call from
   the loop would hang the loop with it; this way Ctrl-C and the other tasks keep working, and
   a change to READY or NULL that takes longer than `state_timeout` is reported as stuck.
 - **A command** and the HTTP server run on the loop. A sync command blocks it while it runs, so

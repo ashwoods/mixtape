@@ -18,10 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mixtape inspect --json` and `GET /api/model` have it as `unavailable`, and `invoke` refuses
   such a command with a `CommandError` (409 over HTTP) that has the reason. The player
   publishes a `CommandsChanged` event, sent by the WebSocket as a `commands` message, when the
-  list changes; `Player.update_commands()` checks again for a condition it cannot see. The
-  control page disables the commands that cannot run. `play`, `pause` and `stop` cannot run
-  while a state change is stuck, `eos` needs a playing pipeline that is not at its EOS, and
-  `seek` a paused or playing pipeline that answers a seeking query.
+  list changes; `Player.update_commands()` checks again for a condition it cannot see. A check
+  that raises, or returns anything but `True`, `False` or a non-empty string, makes its command
+  unavailable, and the first one is logged. The control page disables the commands that cannot
+  run. `play`, `pause` and `stop` cannot run while a state change is stuck, `eos` needs a
+  playing pipeline that is not at its EOS, and `seek` a paused or playing pipeline that answers
+  a seeking query.
 
 ### Changed
 - `perf` keeps 4 MiB of the debug log of each thread instead of 1 MiB: a WebRTC call logged
@@ -29,8 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `invoke("play")`, `"pause"` or `"stop"` while a state change is stuck raises a
   `CommandError` instead of a `PlayerSetStateError`, as every command that cannot run does.
   Calling `play()`, `pause()` or `stop()` still raises `PlayerSetStateError`.
+- `teardown()`, and leaving `async with`, fails the waits it ends, a pending `play()` or
+  `play_until_eos()`, with `PlayerSetStateError("The player was torn down")` instead of
+  cancelling them with `CancelledError`.
 
 ### Fixed
+- An ERROR from the pipeline no longer blocks the asyncio loop: the player sets the pipeline to
+  NULL on a worker thread, not on the loop, where a streaming thread that hung froze it (3.1 s
+  with `state_timeout=0.5`). The waits the error ends fail, and the `Error` event is published,
+  once the NULL finished, or after `Player.state_timeout` with the player stuck: `play()` and the
+  like raise `PlayerSetStateError` until it is not.
+- The pauses and plays that the player does on BUFFERING and CLOCK_LOST messages run on that
+  worker thread too, not on the loop.
+- A player used again after its loop was closed without cancelling its tasks (`play_until_eos()`
+  still waiting) works: the next EOS no longer raises `RuntimeError: Event loop is closed` and
+  hangs `play_until_eos()`, and the pad-added relink handlers are not connected a second time.
+- An `events(position=True)` poll that raises is logged once, instead of ending silently for
+  good, and the next `events(position=True)` starts a new poll.
 - `perf` gives a window shorter than half the interval, such as the one a run ends with, no CPU
   use or rates: a few milliseconds of CPU looked large in it, and `perf compare` of two runs of
   the same code listed them as regressions.

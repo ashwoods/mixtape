@@ -43,7 +43,8 @@ The `# >` comments under the prints are what the program prints; the tests check
 the state, not before. `stop()` sets it to NULL, after an EOS with `stop(eos=True)`. A player that
 is torn down can be used again. Without `async with`, call
 [`player.setup()`](reference.md#mixtape.Player.setup) on the loop to attach it and
-[`player.teardown()`](reference.md#mixtape.Player.teardown) to detach it.
+[`player.teardown()`](reference.md#mixtape.Player.teardown) to detach it. A teardown fails the
+waits it ends, a pending `play()` or `play_until_eos()`, with a `PlayerSetStateError`.
 
 ### Until the end of the stream
 
@@ -171,11 +172,13 @@ and [HTTP API](http.md) for the control page it gets.
 
 A command can say when it can run. `@command(when=check)` takes a function that is called with
 the player (the feature, for a command of a [feature](#write-a-feature)). It is sync, and
-returns `True` when the command can run, or the reason it cannot, as a string. `False` gives the
-generic reason `'name' cannot run now`. A check that raises makes its command unavailable, with
-`'name' could not be checked:` and the exception's message. A check should be quick and change
-nothing. A feature's check runs only while the feature is attached: before, as in `mixtape
-inspect`, its command is unavailable because the feature is not attached.
+returns `True` when the command can run, or the reason it cannot, as a non-empty string. `False`
+gives the generic reason `'name' cannot run now`. A check that raises makes its command
+unavailable, with `'name' could not be checked:` and the exception's message, and the first one
+is logged. So does a check that returns anything else, such as `None`, `""` or `0`: the reason
+is `'name' could not be checked: it returned None, not True, False or a reason`. A check should
+be quick and change nothing. A feature's check runs only while the feature is attached: before,
+as in `mixtape inspect`, its command is unavailable because the feature is not attached.
 
 [`player.unavailable()`](reference.md#mixtape.Player.unavailable) is the map of the commands that
 cannot run now, `{name: reason}`; it is in `describe().unavailable` too, so in `mixtape inspect
@@ -212,7 +215,7 @@ Everything that can fail has an exception, all of them subclasses of
 |-----------|-------------|
 | [`PlayerDescriptionError`](reference.md#mixtape.exceptions.PlayerDescriptionError) | `from_description` cannot parse the description |
 | `PlayerPipelineError` | the pipeline posts an error: `source`, `message`, `debug` and the `gerror` |
-| [`PlayerSetStateError`](reference.md#mixtape.exceptions.PlayerSetStateError) | a state change fails, or the pipeline is stuck changing state |
+| [`PlayerSetStateError`](reference.md#mixtape.exceptions.PlayerSetStateError) | a state change fails, the pipeline is stuck changing state, or the player is torn down while it waits |
 | [`PlayerNotConfigured`](reference.md#mixtape.exceptions.PlayerNotConfigured) | a method needs the running loop of the player and there is none |
 
 A typo in the description fails at once, with the parser's message:
@@ -267,7 +270,7 @@ ends when the player is torn down, or when you call its `close()`.
 |-------|--------|----------------|
 | [`StateChanged`](reference.md#mixtape.events.StateChanged) | `old`, `new`, `pending` | the pipeline itself changed state |
 | [`Eos`](reference.md#mixtape.events.Eos) | | the stream ended |
-| [`Error`](reference.md#mixtape.events.Error) | `error` | the pipeline failed; the player set it to NULL already |
+| [`Error`](reference.md#mixtape.events.Error) | `error` | the pipeline failed; the player set it to NULL already, or waited `state_timeout` and is stuck |
 | [`Warning`](reference.md#mixtape.events.Warning) | `source`, `message`, `debug` | an element posted a warning |
 | [`PropertyChanged`](reference.md#mixtape.events.PropertyChanged) | `path`, `element`, `property`, `value` | an exposed element's property changed, on any thread, or a computed property was notified |
 | [`Position`](reference.md#mixtape.events.Position) | `position`, `duration` | either changed, in seconds; only for `events(position=True)` |

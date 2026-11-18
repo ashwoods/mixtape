@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 
+from ..encoding import jsonable
 from ...exceptions import (
     CommandError,
     InvalidValueError,
@@ -36,7 +37,8 @@ def describe_error(exc: MixTapeError) -> tuple[int, dict[str, Any]]:
     else:
         body = {"detail": str(exc)}
     if isinstance(exc, InvalidValueError):
-        body["errors"] = jsonable_encoder(exc.errors)
+        # the input of an error can be a NaN or an infinity, which JSON has not
+        body["errors"] = jsonable(jsonable_encoder(exc.errors))
     body["code"] = exc.code
     body["hint"] = exc.hint if isinstance(exc, UnknownNameError) else None
     return status, body

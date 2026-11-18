@@ -6,6 +6,7 @@ nothing but the standard library (`watch` excepted: it needs the websockets of t
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -18,9 +19,9 @@ from .hints import property_hint
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT = 10.0
-"""Seconds to wait for an answer. A command that waits on the server (`eos`, `stop` with `eos`)
-gets its own `timeout` argument on top."""
+TIMEOUT = 30.0
+"""Seconds to wait for an answer: more than a `stop` with an EOS takes with its defaults (5 s for
+the EOS, 5 s for the state). A command with a `timeout` argument gets it on top."""
 LIST_HINT = "mixtape get URL lists them"
 WS_TRY_AGAIN_LATER = 1013
 """The close code of the server for a client that fell too far behind its events."""
@@ -75,7 +76,7 @@ class Client:
         """The JSON of the answer to `method path` with `body` as JSON. A refusal of the server
         raises its error, as ClientError."""
         url = self.url + path
-        data = None if body is None else json.dumps(body).encode()
+        data = None if body is None else json.dumps(body, allow_nan=False).encode()
         headers = {"Accept": "application/json"}
         if data is not None:
             headers["Content-Type"] = "application/json"
@@ -85,15 +86,22 @@ class Client:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            raise self._refusal(exc.code, exc.read()) from None
+            try:
+                raw = exc.read()
+            except (http.client.HTTPException, OSError):
+                raw = b""
+            raise self._refusal(exc.code, raw) from None
         except (urllib.error.URLError, OSError) as exc:  # refused, unknown host, timed out
             reason = getattr(exc, "reason", exc)
             if isinstance(reason, TimeoutError):
                 raise ClientError(
                     f"{self.url} did not answer {method} {path} within {timeout:g} s",
-                    "connection_failed",
+                    "timeout",
+                    "it may still be doing it: `mixtape get URL` shows the values",
                 ) from None
             raise _unreachable(self.url, reason) from None
+        except http.client.HTTPException as exc:  # it does not speak HTTP: an SSH server
+            raise self._bad_response(f"{type(exc).__name__}: {exc}") from None
         try:
             return json.loads(raw)
         except ValueError:

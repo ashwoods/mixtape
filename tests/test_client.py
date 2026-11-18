@@ -2,6 +2,8 @@ import json
 import signal
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 
 import pytest
@@ -54,6 +56,20 @@ def test_errors_are_the_servers(url: str, capsys: pytest.CaptureFixture[str]) ->
     assert json.loads(capsys.readouterr().err)["error"]["code"] == "invalid_value"
     assert main(["call", url, "paus"]) == 2
     assert capsys.readouterr().err == "error: unknown command 'paus': did you mean 'pause'?\n"
+    assert main(["set", "--json", url, "vol.volume:=NaN"]) == 2  # JSON has no NaN
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == "usage"
+
+
+def test_a_nan_is_an_invalid_value(url: str) -> None:
+    """Python's json reads a NaN, which pydantic refuses: its error has the NaN, which the
+    body has as null, not a 500."""
+    body = b'{"volume": NaN}'
+    headers = {"Content-Type": "application/json"}
+    request = urllib.request.Request(f"{url}/api/elements/vol", body, headers, method="PATCH")
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=10)
+    assert refused.value.code == 422
+    assert json.loads(refused.value.read())["code"] == "invalid_value"
 
 
 def test_watch_prints_the_messages_of_the_socket(url: str) -> None:

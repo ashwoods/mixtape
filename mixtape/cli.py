@@ -378,10 +378,16 @@ def _pair(text: str) -> tuple[str, Any]:
         raise typer.BadParameter(f"{text!r} is not NAME=VALUE or NAME:=JSON")
     if not name.endswith(":"):
         return name, value
-    try:
-        return name[:-1], json.loads(value)
+    try:  # JSON has no NaN or infinity, though Python's json reads them
+        return name[:-1], json.loads(value, parse_constant=_finite, parse_float=_finite)
     except ValueError as exc:
         raise typer.BadParameter(f"{text!r} has no JSON after ':=': {exc}") from None
+
+
+def _finite(text: str) -> float:
+    if not math.isfinite(value := float(text)):
+        raise ValueError(f"{text} is not a finite number")
+    return value
 
 
 def _pair_text(text: str) -> str:
@@ -1060,6 +1066,8 @@ async def _play(
                 timer = loop.call_later(timeout, expire)
             if http is None:
                 await player.play_until_eos()
+                if timer is not None:  # it came first: the teardown is not the timeout's
+                    timer.cancel()
             else:
                 async with _serving(player, *http, verbose, interrupted):
                     await interrupted.wait()
@@ -1099,7 +1107,8 @@ async def _play(
             timer.cancel()
         if stream is not None and printer is not None and interrupts < 2:
             stream.close()  # the teardown has closed it: the events it queued still print
-            await printer
+            with contextlib.suppress(BrokenPipeError):  # `| head`: the reader has gone
+                await printer
         for task in (pump, stopping, printer):
             if task is not None:
                 task.cancel()

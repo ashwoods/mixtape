@@ -157,12 +157,13 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
     def element_values(element: ElementSpec, names: list[str]) -> dict[str, Any]:
         return read_values(player, {name: element.properties[name].path for name in names})
 
-    @app.get("/api/elements/{el}")
+    # `:path`: an element's name can have a slash, which a client sends as %2F
+    @app.get("/api/elements/{el:path}")
     async def get_element(el: str) -> dict[str, Any]:
         element = element_spec(el)
         return element_values(element, [n for n, p in element.properties.items() if p.readable])
 
-    @app.patch("/api/elements/{el}")
+    @app.patch("/api/elements/{el:path}")
     async def patch_element(el: str, request: Request) -> dict[str, Any]:
         element = element_spec(el)
         values = await _json_object(request)

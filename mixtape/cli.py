@@ -631,6 +631,8 @@ async def _play(
                 try:
                     await player.set(path, value)
                 except UnknownNameError as exc:
+                    if str(exc) != f"Unknown property {path!r}":
+                        raise  # ambiguous or not exposed: it says what to use instead
                     raise UnknownNameError(f"{exc}: {_known(player, path)}") from None
             if http is None:
                 await player.play_until_eos()

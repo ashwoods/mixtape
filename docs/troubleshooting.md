@@ -11,7 +11,8 @@ Make the venv from a Python that has it, with `--system-site-packages`. This com
 succeed with the Python you start from, and print nothing:
 
 ```console
-$ python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst; Gst.IteratorError'
+$ python3 -c 'import gi; gi.require_version("Gst", "1.0"); \
+    from gi.repository import Gst; Gst.IteratorError'
 ```
 
 Homebrew's Python is `$(brew --prefix)/bin/python3` and Ubuntu's and Debian's is `/usr/bin/python3`. Then

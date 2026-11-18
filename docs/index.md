@@ -58,7 +58,8 @@ nothing, with the Python you start from (Homebrew's is `$(brew --prefix)/bin/pyt
 and Debian's is `/usr/bin/python3`):
 
 ```console
-$ python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst; Gst.IteratorError'
+$ python3 -c 'import gi; gi.require_version("Gst", "1.0"); \
+    from gi.repository import Gst; Gst.IteratorError'
 ```
 
 If it prints `ModuleNotFoundError: No module named 'gi'`, see

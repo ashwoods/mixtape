@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Run every check: ruff lint, ruff format, mypy and pytest.
 #
+#   scripts/check [--lint] [--tests] [--docs] [PYTEST_ARGS...]
+#
+# --lint runs ruff and mypy, --tests the tests but the documentation's, --docs the commands
+# of the documentation and its build; with none of them, all three. The rest goes to pytest,
+# which runs on up to 4 workers (`-n 0` for one).
+#
 # PyGObject (`gi`) and GStreamer's Python overrides come from the system
 # (Homebrew on macOS, apt on Debian/Ubuntu), not from PyPI, so the venv is
 # built on the Python that has them, with its site-packages visible.
@@ -8,6 +14,20 @@
 # UV_PROJECT_ENVIRONMENT when set (Docker), .venv otherwise.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+lint=0 tests=0 docs=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --lint) lint=1 ;;
+    --tests) tests=1 ;;
+    --docs) docs=1 ;;
+    *) break ;;
+  esac
+  shift
+done
+if (( !lint && !tests && !docs )); then
+  lint=1 tests=1 docs=1
+fi
 venv="${UV_PROJECT_ENVIRONMENT:-.venv}"
 [[ "$venv" = /* ]] || venv="$PWD/$venv"
 
@@ -44,7 +64,20 @@ if ! has_gst "$venv/bin/python"; then
   echo "uv sync replaced $venv with a Python that has no gi; remove it and run again." >&2
   exit 1
 fi
-uv run --no-sync ruff check
-uv run --no-sync ruff format --check
-uv run --no-sync mypy
-uv run --no-sync pytest "$@"
+if (( lint )); then
+  uv run --no-sync ruff check
+  uv run --no-sync ruff format --check
+  uv run --no-sync mypy
+fi
+
+docs_tests=(tests/test_doc_samples.py tests/test_docs.py)
+selection=()
+if (( tests && !docs )); then
+  for path in "${docs_tests[@]}"; do selection+=("--ignore=$path"); done
+elif (( docs && !tests )); then
+  selection=("${docs_tests[@]}")
+fi
+if (( tests || docs )); then
+  # loadgroup: the tests of one xdist_group (the x264 encodes) run one after another
+  uv run --no-sync pytest -n auto --maxprocesses 4 --dist loadgroup ${selection[@]+"${selection[@]}"} "$@"
+fi

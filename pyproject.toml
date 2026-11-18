@@ -66,10 +66,13 @@ dev = [
     "mixtape[http]",
     { include-group = "docs" },
     "mypy",
-    "pytest",
+    # <9.2 until a pytest-xdist after 3.8.0: on 9.2 its --dist loadgroup runs the tests of one
+    # xdist_group on several workers (pytest-dev/pytest-xdist#1407)
+    "pytest<9.2",
     "pytest-asyncio",
     "pytest-mock",
     "pytest-timeout",
+    "pytest-xdist",  # scripts/check runs the tests on several workers
     "ruff",
 ]
 

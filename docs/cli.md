@@ -74,11 +74,14 @@ the other video sinks appear.
 ### Ctrl-C
 
 The first Ctrl-C (or SIGTERM) sends an EOS and stops cleanly, so a recorder finishes its
-file, and `mixtape run` exits 0:
+file, and `mixtape run` exits 0. In these blocks `kill -INT` stands in for the Ctrl-C, once the
+sink has opened its file: a command a script starts with `&` ignores SIGINT until `mixtape run`
+handles it, which it does before the pipeline starts:
 
 ```console
-$ mixtape run "videotestsrc is-live=true ! fakesink" &
-$ sleep 2
+$ rm -f /tmp/out.raw
+$ mixtape run "videotestsrc is-live=true ! filesink location=/tmp/out.raw" &
+$ until [ -e /tmp/out.raw ]; do sleep 0.1; done
 $ kill -INT $!
 $ wait $!; echo "exit status $?"
 Interrupt: stopping (EOS)…
@@ -87,11 +90,14 @@ exit status 0
 
 A pipeline whose streaming thread hangs never carries the EOS to its sinks. It gets 5 s for
 the EOS and 5 s to stop, and then `mixtape run` exits 1 and names the elements that are still
-changing state. Here `identity` sleeps for 30 s on each buffer:
+changing state. Here `identity` sleeps for 30 s on each buffer, and `sleep 1` gives the first
+buffer the time to reach it once the pipeline starts:
 
 ```console
-$ mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &
-$ sleep 2
+$ rm -f /tmp/out.raw
+$ mixtape run "videotestsrc ! identity sleep-time=30000000 ! filesink location=/tmp/out.raw" &
+$ until [ -e /tmp/out.raw ]; do sleep 0.1; done
+$ sleep 1
 $ kill -INT $!
 $ wait $!; echo "exit status $?"
 Interrupt: stopping (EOS)…
@@ -103,8 +109,10 @@ A second Ctrl-C does not wait for that: it stops at once and exits 130. A third 
 the process, as it would without `mixtape`.
 
 ```console
-$ mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &
-$ sleep 2
+$ rm -f /tmp/out.raw
+$ mixtape run "videotestsrc ! identity sleep-time=30000000 ! filesink location=/tmp/out.raw" &
+$ until [ -e /tmp/out.raw ]; do sleep 0.1; done
+$ sleep 1
 $ kill -INT $!
 $ sleep 1
 $ kill -INT $!

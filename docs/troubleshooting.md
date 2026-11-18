@@ -69,7 +69,7 @@ server on the port; it stops the server on its last line:
 
 ```console
 $ python3 -m http.server 8047 --bind 127.0.0.1 > /dev/null 2>&1 &
-$ sleep 1
+$ until curl -s 127.0.0.1:8047 > /dev/null; do sleep 0.1; done
 $ mixtape run --http 8047 "videotestsrc ! fakesink"; echo "exit status $?"; kill $!
 error: 127.0.0.1:8047 is in use (is another mixtape run --http running?): choose another port with --http PORT
 exit status 1

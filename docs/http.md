@@ -270,7 +270,7 @@ another address says so, as anyone who can reach the port can control the player
 
 ```console
 $ mixtape run --http 0.0.0.0:8047 "videotestsrc is-live=true ! fakesink" 2>&1 &
-$ sleep 2
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ kill -INT $!
 $ wait $!
 warning: serving on 0.0.0.0 without authentication: anyone who can reach it can control the player

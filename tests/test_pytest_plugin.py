@@ -98,7 +98,10 @@ def test_each_test_gets_a_report_and_the_session_an_index(pytester: pytest.Pytes
         assert queue["n"] == buffers
         worst = test["metrics"]["element.latency"]
         assert worst["unit"] == "ns" and worst["p95"]["subject"].startswith("queue")
-        assert worst["p95"]["value"] == queue["p95"] and worst["max"]["value"] == queue["max"]
+        assert worst["p95"]["value"] == queue["p95"]
+        # the queue holds the buffers, but on a busy machine a preempted element can have the max
+        (subject, stats), *_ = sorted(latency.items(), key=lambda item: -item[1]["max"])
+        assert worst["max"] == {"subject": subject, "value": stats["max"]}, (worst, latency)
         assert test["metrics"]["process.cpu"]["mean"]["subject"] == "process"
     # a test that ran no pipeline is listed, with no folder
     assert tests["test_suite.py::test_no_pipeline"]["folder"] is None

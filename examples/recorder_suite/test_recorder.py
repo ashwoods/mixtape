@@ -30,7 +30,7 @@ def record(path: Path, width: int, height: int) -> None:
     )
     pipeline.set_state(Gst.State.PLAYING)
     ended = Gst.MessageType.EOS | Gst.MessageType.ERROR
-    message = pipeline.get_bus().timed_pop_filtered(30 * Gst.SECOND, ended)
+    message = pipeline.get_bus().timed_pop_filtered(60 * Gst.SECOND, ended)
     pipeline.set_state(Gst.State.NULL)
     assert message is not None and message.type == Gst.MessageType.EOS
 

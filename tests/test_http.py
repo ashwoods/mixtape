@@ -218,9 +218,13 @@ async def test_websocket(served: Served) -> None:
         # a command is a task: the events stream while `play` waits for its state change
         await ws.send(json.dumps({"id": "p", "command": "play"}))
         seen = await until(ws, lambda m: m["type"] == "reply")
-        states = [m for m in seen if m["type"] == "state"]
-        assert states and states[0]["old"] == "null" and "pending" in states[0]
         assert seen[-1] == {"type": "reply", "id": "p", "result": None}
+        # on a busy machine the pipeline can preroll before set_state returns, which is then
+        # SUCCESS, not ASYNC: play does not wait, and its reply can come before the bus's events
+        if not any(m["type"] == "state" for m in seen):
+            seen += await until(ws, lambda m: m["type"] == "state")
+        states = [m for m in seen if m["type"] == "state"]
+        assert states[0]["old"] == "null" and "pending" in states[0]
         seen = await until(ws, lambda m: m["type"] == "position" and m["position"] is not None)
         assert seen[-1]["position"] >= 0
 

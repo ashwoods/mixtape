@@ -16,19 +16,12 @@ SAMPLES: list[Sample] = [
         "^mixtape run -v ",
         expect=("No such file",),
     ),
-    run(PAGE, "ctrl-c", '^mixtape run "videotestsrc is-live=true', exact=True),
-    run(
-        PAGE,
-        "ctrl-c-hang",
-        '^mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &\n'
-        "sleep 2\nkill -INT $!\nwait",
-        exact=True,
-    ),
+    run(PAGE, "ctrl-c", 'mixtape run "videotestsrc is-live=true ! filesink', exact=True),
+    run(PAGE, "ctrl-c-hang", "done\nsleep 1\nkill -INT $!\nwait", exact=True),
     run(
         PAGE,
         "ctrl-c-twice",
-        '^mixtape run "videotestsrc ! identity sleep-time=30000000 ! fakesink" &\n'
-        "sleep 2\nkill -INT $!\nsleep 1",
+        "done\nsleep 1\nkill -INT $!\nsleep 1",
         exact=True,
     ),
     # --- inspect

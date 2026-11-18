@@ -125,10 +125,12 @@ the producer first, or start both at once.
 --8<-- "examples/proxy_link.py:order"
 ```
 
-A producer that ends sends its EOS through the link, and the buffers before it are all there.
-This producer is not live, so it waits for the consumer; a live one does not, and a buffer it
-pushes before the consumer is playing can be lost (the first one went missing in 4 of 30
-runs on one machine):
+A producer that ends sends its EOS through the link, and the buffers before it are all there,
+once `proxysrc` is active: `proxysink` drops what it pushes before then. Playing both at once
+does not say which one starts first, and on a busy machine the first buffers went missing in
+about half the runs, so the consumer's pipeline goes to PAUSED first. This producer is not
+live, so it then waits for the consumer; a live one does not, and a buffer it pushes before the
+consumer is playing can be lost (the first one went missing in 4 of 30 runs on one machine):
 
 ```python
 --8<-- "examples/proxy_link.py:eos"
@@ -158,8 +160,8 @@ description has none. The producer has to be listening before the consumer start
 
 Each process is a `mixtape run --http`, with its own control page and its own `perf`. Run the
 two commands in two terminals; the block below runs both in one shell, asks each process for
-the pads its `perf` measured, and stops them in its last command. Their own output, the address each one serves,
-goes to `/dev/null`:
+the pads its `perf` measured, once the frames have reached the consumer's last pad, and stops
+them in its last command. Their own output, the address each one serves, goes to `/dev/null`:
 
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 24, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
@@ -190,7 +192,7 @@ $ mixtape run --http 8102 --feature perf \
     "unixfdsrc name=feed socket-path=$dir/cam.sock ! videoconvert name=conv ! fakesink" \
     > /dev/null 2>&1 &
 $ consumer=$!
-$ sleep 3
+$ until curl -s 127.0.0.1:8102/api/properties | grep -q '"conv:src"'; do sleep 0.2; done
 $ for port in 8101 8102; do echo "port $port:"; \
     curl -s 127.0.0.1:$port/api/properties | grep -o '"[a-z]*:src"' | sort -u; done; \
     kill $producer $consumer; wait; rm -r $dir

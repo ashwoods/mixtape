@@ -13,10 +13,12 @@ set -euo pipefail
 
 mirrors=/etc/apt/apt-mirrors.txt
 
+# apt-get goes on downloading for minutes after a TERM, so the download is killed 10 s
+# later; the install, where dpkg runs, only gets the TERM.
 apt_get() { # LIMIT ARGS...
   local limit=$1
   shift
-  sudo timeout "$limit" apt-get -yq -o Acquire::Retries=3 -o Acquire::http::Timeout=30 "$@"
+  sudo timeout --kill-after=10s "$limit" apt-get -yq -o Acquire::Retries=3 -o Acquire::http::Timeout=30 "$@"
 }
 
 drop_mirror() {
@@ -31,11 +33,15 @@ drop_mirror() {
 # A good mirror sends 7 MB/s: CI's 65 MB take 10 s, and the Rust build's 150 MB of dev
 # packages under a minute.
 for attempt in 1 2 3; do
-  if apt_get 2m update && apt_get 2m install --download-only --no-install-recommends "$@"; then
-    apt_get 10m install --no-install-recommends "$@"
+  status=0
+  apt_get 2m update && apt_get 2m install --download-only --no-install-recommends "$@" ||
+    status=$?
+  if ((status == 0)); then
+    sudo timeout 10m apt-get -yq install --no-install-recommends "$@"
     exit 0
   fi
-  echo "::warning::apt-install: attempt $attempt failed or ran out of time"
+  # 124: out of time; 137: killed after it
+  echo "::warning::apt-install: attempt $attempt failed with status $status"
   drop_mirror
 done
 echo "apt-install: giving up after 3 attempts" >&2

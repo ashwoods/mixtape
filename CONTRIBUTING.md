@@ -74,7 +74,7 @@ $ docker compose run --rm test
 ```
 
 The image has only Ubuntu's own GStreamer packages, without the Rust plugins, so the tests that
-need them skip there. CI builds the plugins and runs everything.
+need them skip there. CI's `rs` job, which builds them, and its macOS job run everything.
 
 ## gst-c-crash
 

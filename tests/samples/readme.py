@@ -1,6 +1,6 @@
 """The samples of README.md: see tests/doc_samples.py."""
 
-from tests.doc_samples import Sample, not_run, output, run
+from tests.doc_samples import RUST_TRACERS, Sample, not_run, output, run
 
 PAGE = "README.md"
 
@@ -20,6 +20,7 @@ SAMPLES: list[Sample] = [
         hangs=True,
         timeout=10,
         exact=True,
+        elements=RUST_TRACERS,  # perf's warning of a missing one is in the output
     ),
     not_run(PAGE, "check", "^scripts/check", "runs this test suite"),
 ]

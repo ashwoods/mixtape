@@ -18,7 +18,9 @@ SAMPLES: list[Sample] = [
         "scripts/build-rs-plugins ~/.cache/gst-rs-plugins",
         "builds gst-plugins-rs with cargo, which takes minutes; CI runs it",
     ),
-    run(PAGE, "exists", "gst-inspect-1.0 --exists webrtcsink", exact=True),
+    run(
+        PAGE, "exists", "gst-inspect-1.0 --exists webrtcsink", exact=True, elements=("webrtcsink",)
+    ),
     # the host publishes until it is interrupted, and says nothing
     run(
         PAGE,

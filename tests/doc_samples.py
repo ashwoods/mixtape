@@ -38,9 +38,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mixtape.perf import RUST
+
 ROOT = Path(__file__).resolve().parent.parent
 PAGES = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
 AUTO = "auto"
+# perf warns, on stderr, of each of these tracers that GStreamer lacks (gst-plugins-rs has them): a
+# sample or test that compares the output of a run with perf needs all of them
+RUST_TRACERS = tuple(RUST)
 
 
 # --- the blocks in the pages ------------------------------------------------------------------

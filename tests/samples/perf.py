@@ -6,7 +6,7 @@ the CPU, and the fast one is tens of milliseconds."""
 
 import re
 
-from tests.doc_samples import Sample, not_run, run
+from tests.doc_samples import RUST_TRACERS, Sample, not_run, run
 
 PAGE = "perf.md"
 ENCODER = ("x264enc",)
@@ -123,7 +123,7 @@ SAMPLES: list[Sample] = [
         PAGE,
         "live",
         "--feature perf --http 8047",
-        elements=ENCODER,
+        elements=(*ENCODER, *RUST_TRACERS),  # perf's warning of a missing one is in the output
         hangs=True,
         timeout=10,
         expect=("Serving on http://127.0.0.1:8047",),

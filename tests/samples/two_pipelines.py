@@ -1,6 +1,6 @@
 """The samples of two-pipelines.md: see tests/doc_samples.py."""
 
-from tests.doc_samples import Sample, prints, run
+from tests.doc_samples import RUST_TRACERS, Sample, prints, run
 
 PAGE = "two-pipelines.md"
 
@@ -41,5 +41,6 @@ SAMPLES: list[Sample] = [
         PAGE,
         "two-players",
         "examples/two_players.py",
+        elements=RUST_TRACERS,  # perf's warning of a missing one is in the output
     ),
 ]

@@ -7,14 +7,16 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
 from mixtape.player import ensure_init
+from tests.doc_samples import RUST_TRACERS
 from tests.examples import run_example
 
 ensure_init()
 
 
 def needs(*elements: str) -> pytest.MarkDecorator:
-    missing = [name for name in elements if Gst.ElementFactory.find(name) is None]
-    return pytest.mark.skipif(bool(missing), reason=f"needs the GStreamer elements {missing}")
+    """Skip without these elements or tracers: both are features of the registry."""
+    missing = [name for name in elements if Gst.Registry.get().lookup_feature(name) is None]
+    return pytest.mark.skipif(bool(missing), reason=f"needs the GStreamer features {missing}")
 
 
 @needs("intervideosink", "intervideosrc")
@@ -48,6 +50,7 @@ def test_proxy_link_shares_the_base_time_and_starts_in_order() -> None:
     ]
 
 
+@needs(*RUST_TRACERS)  # perf's warning of a missing one is in the output
 @pytest.mark.timeout(90)
 @pytest.mark.covers("two_players:serve", "two_players:perf", "two_players:main")
 def test_two_players_in_one_process_share_the_tracers() -> None:

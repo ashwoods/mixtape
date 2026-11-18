@@ -2,6 +2,7 @@
 initialises, so each suite runs in a subprocess of its own."""
 
 import json
+import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,14 @@ import pytest
 from mixtape.pytest_plugin import _folder_name
 
 pytestmark = pytest.mark.timeout(90)  # each starts a pytest, and GStreamer, of its own
+
+NO_QUEUE_LEVELS = subprocess.run(
+    ["gst-inspect-1.0", "--exists", "queue-levels"], capture_output=True
+).returncode
+needs_queue_levels = pytest.mark.skipif(
+    bool(NO_QUEUE_LEVELS),
+    reason="needs the GStreamer tracer queue-levels (gst-plugins-rs)",
+)
 
 PLAIN = '''
 import gi
@@ -277,6 +286,7 @@ def test_no_budget():
 )
 
 
+@needs_queue_levels  # test_generous has a budget on queue.fill
 def test_a_budget_fails_the_test_that_is_over_it(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(test_suite=BUDGETS)
     result, out = measure(pytester, "--junitxml=junit.xml")

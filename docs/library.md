@@ -167,6 +167,41 @@ $ mixtape inspect examples/testcard.py:Testcard | grep 'show('
 See [Command line](cli.md) for what else `mixtape run` and `mixtape inspect` do with a class,
 and [HTTP API](http.md) for the control page it gets.
 
+### Commands that cannot run { #commands-that-cannot-run }
+
+A command can say when it can run. `@command(when=check)` takes a function that is called with
+the player (the feature, for a command of a [feature](#write-a-feature)). It is sync, and
+returns `True` when the command can run, or the reason it cannot, as a string. `False` gives the
+generic reason `'name' cannot run now`. A check that raises makes its command unavailable, with
+`'name' could not be checked:` and the exception's message. A check should be quick and change
+nothing.
+
+[`player.unavailable()`](reference.md#mixtape.Player.unavailable) is the map of the commands that
+cannot run now, `{name: reason}`; it is in `describe().unavailable` too, so in `mixtape inspect
+--json` and `GET /api/model`. [`invoke`](reference.md#mixtape.Player.invoke) refuses such a
+command with a [`CommandError`](reference.md#mixtape.exceptions.CommandError) that has the
+reason, which is a 409 in the [HTTP API](http.md#errors). Calling the method yourself does not
+check.
+
+The player checks again after every event it publishes, `invoke` and successful `set`, once
+per turn of the loop, and publishes a
+[`CommandsChanged`](reference.md#mixtape.events.CommandsChanged) event with the new map when it
+differs from the last one. For a condition that it cannot see, such as a timer, call
+[`player.update_commands()`](reference.md#mixtape.Player.update_commands) on the loop, or from
+another thread `player.call_soon_threadsafe(player.update_commands)`.
+
+The built-in commands use it. `play`, `pause` and `stop` cannot run while a state change is
+stuck. `eos` needs a playing pipeline that is not at its EOS, and `seek` a paused or playing
+pipeline that answers a seeking query. The action signals of the elements are always available.
+This `Recorder` can finish only after it started:
+
+```python
+--8<-- "examples/lib_available.py:available"
+```
+
+The [control page](http.md#the-control-page) disables the transport buttons, the seek bar and the
+*Run* button of a command that cannot run, with the reason.
+
 ## When it goes wrong
 
 Everything that can fail has an exception, all of them subclasses of
@@ -237,6 +272,7 @@ ends when the player is torn down, or when you call its `close()`.
 | [`Position`](reference.md#mixtape.events.Position) | `position`, `duration` | either changed, in seconds; only for `events(position=True)` |
 | [`GraphChanged`](reference.md#mixtape.events.GraphChanged) | `graph` | the pipeline's elements, pads, links or caps changed |
 | [`ModelChanged`](reference.md#mixtape.events.ModelChanged) | `model` | the exposed elements or their keys changed |
+| [`CommandsChanged`](reference.md#mixtape.events.CommandsChanged) | `unavailable` | the commands that [cannot run](#commands-that-cannot-run) changed |
 | [`Message`](reference.md#mixtape.events.Message) | `message` | any bus message, after the specific event for it |
 
 They are frozen dataclasses, so they work with `match`. This program reads a short stream,

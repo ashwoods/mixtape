@@ -40,6 +40,7 @@ SAMPLES: list[Sample] = [
             '{"detail":"EOS needs a playing pipeline that is not at its EOS"} 409',
         ),
     ),
+    run(PAGE, "unavailable", "examples/lib_available.py:Recorder", exact=True),
     run(PAGE, "pipeline-error", "missing.mp4", exact=True),
     prints(
         PAGE,

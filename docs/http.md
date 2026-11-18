@@ -48,7 +48,8 @@ alone; in a terminal of yours you would start it once, as above. They use the ad
 ![The control page of the Demo player](images/control-page.png)
 
 - At the top, the player's name and state, the transport (play, pause, stop and an EOS), the
-  position and whether the page is connected.
+  position and whether the page is connected. The transport buttons, the seek bar and the *Run*
+  button of a command are disabled while the command cannot run, with the reason.
 - The pipeline graph: the elements and the links between them, drawn dashed when the element is
   not exposed. Click an element to jump to its properties and hover a link for its caps.
 - A section for each exposed element, with a control for each of its properties: a switch, a
@@ -66,7 +67,7 @@ new pads, links and caps, without a reload. With the `perf` feature (see
 
 | Route | What it does |
 |---|---|
-| `GET /api/model` | the player's `describe()`: its commands, properties and elements, as JSON (see `mixtape inspect --json`) |
+| `GET /api/model` | the player's `describe()`: its commands, properties and elements, as JSON (see `mixtape inspect --json`), with `unavailable`: the commands that cannot run now, with the reason |
 | `GET /api/graph` | its `graph()`: the elements and the links between them, with their caps |
 | `POST /api/commands/<name>` | runs a command with the JSON object in the body as its arguments, which is optional, and returns `{"result": ...}` |
 | `GET /api/elements/<element>` | the readable properties of an exposed element, as `{name: value}` |
@@ -140,7 +141,7 @@ refused, with what is wrong with it. The status says whose fault it is:
 |---|---|
 | 404 | an unknown element, property or command name |
 | 422 | a value that does not fit the property or the arguments of a command, a body that is not a JSON object, or a read-only property |
-| 409 | a command that cannot do what was asked now, such as an EOS while the pipeline is not playing |
+| 409 | a command that cannot do what was asked now, such as an EOS while the pipeline is not playing, or that [cannot run](library.md#commands-that-cannot-run) |
 | 500 | the pipeline failed: `detail` has the element and its message |
 | 403 | the `Host` or `Origin` of the request is refused (see [Security](#security)) |
 
@@ -159,6 +160,22 @@ $ curl -s -X POST 127.0.0.1:8047/api/commands/eos -w ' %{http_code}\n'; kill -IN
 {"detail":"'state' is read-only"} 422
 {"detail":"Invalid arguments for 'seek': position: Input should be greater than or equal to 0","errors":[{"type":"greater_than_equal","loc":["position"],"msg":"Input should be greater than or equal to 0","input":-1}]} 422
 {"detail":"EOS needs a playing pipeline that is not at its EOS"} 409
+```
+
+A command that says when it can run is refused with a 409 and its reason while it cannot, and
+`unavailable` in the model lists those commands. This `Recorder`, from
+[Writing an application](library.md#commands-that-cannot-run), can finish only after it started:
+
+```console
+$ mixtape run --http 8047 examples/lib_available.py:Recorder 2>/dev/null &
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s 127.0.0.1:8047/api/model | grep -o '"unavailable":{[^}]*}'
+$ curl -s -X POST 127.0.0.1:8047/api/commands/finish -w ' %{http_code}\n'
+$ curl -s -X POST 127.0.0.1:8047/api/commands/start > /dev/null
+$ curl -s -X POST 127.0.0.1:8047/api/commands/finish -w ' %{http_code}\n'; kill -INT $!
+"unavailable":{"finish":"Not recording"}
+{"detail":"Not recording"} 409
+{"result":null} 200
 ```
 
 A pipeline that cannot play does not stop the server. Its error is printed when it happens, and
@@ -195,6 +212,7 @@ Then come the events, as they happen:
 | `error`, `warning` | a message on the bus | `source`, `message`, `debug` |
 | `graph` | the pipeline's shape changes | the new `graph` |
 | `model` | the exposed elements change | the new `model`, and the `values` of the elements it adds |
+| `commands` | the commands that [cannot run](library.md#commands-that-cannot-run) change | `unavailable`, `{name: reason}` for each command that cannot run now |
 
 The client sends `{"id": 1, "command": "play", "args": {}}` to run a command, and
 `{"id": 2, "set": {"vol.volume": 0.5}}` to set properties, which are applied in order. It

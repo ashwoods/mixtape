@@ -60,6 +60,11 @@ def test_the_events_of_a_short_stream() -> None:
     ]
 
 
+@pytest.mark.covers("lib_available:available")
+def test_a_command_that_cannot_run_is_listed_refused_and_published() -> None:
+    assert lines("lib_available.py") == ["{'finish': 'Not recording'}", "Not recording", "{}"]
+
+
 @pytest.mark.covers("lib_handler:handler")
 def test_a_handler_runs_until_it_is_removed() -> None:
     assert lines("lib_handler.py") == ["a stream started", "done"]

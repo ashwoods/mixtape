@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unknown property 'src.patern': did you mean 'src.pattern'?`.
 - The WebRTC example takes `--stun URL`, a STUN server for peers behind NAT (none by default).
 - The docs site has an `llms.txt`.
+- `@command(when=check)` says when a command can run: `check(self)` returns `True`, or the
+  reason it cannot. `Player.unavailable()` lists the commands that cannot run, `describe()`,
+  `mixtape inspect --json` and `GET /api/model` have it as `unavailable`, and `invoke` refuses
+  such a command with a `CommandError` (409 over HTTP) that has the reason. The player
+  publishes a `CommandsChanged` event, sent by the WebSocket as a `commands` message, when the
+  list changes; `Player.update_commands()` checks again for a condition it cannot see. The
+  control page disables the commands that cannot run. `play`, `pause` and `stop` cannot run
+  while a state change is stuck, `eos` needs a playing pipeline that is not at its EOS, and
+  `seek` a paused or playing pipeline that answers a seeking query.
 
 ### Changed
 - `perf` keeps 4 MiB of the debug log of each thread instead of 1 MiB: a WebRTC call logged

@@ -53,6 +53,11 @@ SAMPLES: list[Sample] = [
     ),
     prints(
         PAGE,
+        "available",
+        "examples/lib_available.py",
+    ),
+    prints(
+        PAGE,
         "handler",
         "examples/lib_handler.py",
     ),

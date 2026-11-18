@@ -82,8 +82,10 @@ The folder has more than the summary:
 
 `summary.json` also has `lost`: how many times the debug log dropped lines before `perf` read
 them. When it is not 0, some tracer records are missing from the numbers, and `mixtape run` logs
-a warning with the count at the end. It has a `format_version` too, 1: a reader takes a document
-without one as 1, and it changes only when a field is renamed or removed.
+a warning with the count at the end (on a pipeline that pushes as fast as it can, expect it:
+see [The cost on a fast pipeline](#the-cost-on-a-fast-pipeline)). It has a `format_version` too,
+1: a reader takes a document without one as 1, and it changes only when a field is renamed or
+removed.
 
 `perf` reads GStreamer's debug log itself and passes on the lines that are not its tracers':
 to stderr, or to the file `GST_DEBUG_FILE` names (`%p` is the process id, `-` is stdout), so
@@ -283,6 +285,26 @@ The rule is the same for the `tracers` feature and for `gst:NAME`. The tracers a
 process, not one per player, so one player at a time can measure: two players with `perf` in one
 process each record both pipelines ([Two pipelines](two-pipelines.md#what-mixtape-does-across-two-players)
 has an example). Run them in two processes to measure them apart.
+
+## The cost on a fast pipeline
+
+On a pipeline that pushes as fast as it can, `perf` adds a lot of CPU, most of it system time.
+This is a known cost of the tracers, not of your setup. The three `gst-plugins-rs` tracers
+that `perf` reads (`queue-levels`, `buffer-lateness` and `pad-push-timings`) write their log
+with unbuffered writes, several per record, so their cost grows with the number of buffers. On
+`audiotestsrc num-buffers=20000 ! queue ! audioconvert ! identity ! queue ! fakesink sync=false`,
+about 320,000 records, they took about 9 s of CPU; the run took 0.3 s without tracers.
+`mixtape run` with `perf` costs about as much as `gst-launch-1.0` with the same tracers, so the
+cost is the tracers', not mixtape's. It is in `gst-plugins-rs` 0.15.4, which Homebrew installs and
+`scripts/build-rs-plugins` builds, measured on macOS with GStreamer 1.28.9. mixtape does not work
+around it yet.
+
+The core tracers' records (`latency`, `stats`) go to the debug log instead. On such a pipeline the
+log of a busy thread can outgrow the 4 MiB ring per thread that `perf` reads it from, and `lost`
+in `summary.json` is then not 0 (see [Record it](#record-it)): `pad.interval` and the other
+metrics of the core tracers are missing records. That run lost about half of its `pad.interval`
+records. A live pipeline, or one with `sync=true`, makes records at its real rate, far fewer per
+second, so neither problem is likely there.
 
 ## The recorder as a test suite
 

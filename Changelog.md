@@ -92,6 +92,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process each measure both pipelines with `perf`, and share the checkpoints of `leaks`.
 - The API reference has one heading per object, without the repeated section headings, and its
   docstrings link the names they mention.
+- The `perf` docs say that on a pipeline that pushes as fast as it can, the `gst-plugins-rs`
+  tracers cost a lot of CPU, mostly system time, and the core tracers' records can outgrow the
+  debug log, so `lost` is not 0.
 
 ## 0.8.0 (2026-11-17)
 

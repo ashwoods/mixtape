@@ -1,0 +1,29 @@
+# mixtape
+
+> mixtape is a Python GStreamer application framework, pre-alpha. It runs a pipeline from a
+> `gst-launch-1.0` description (`mixtape run`) and gives it a control page, a REST and WebSocket
+> API and live metrics, or is subclassed as an asyncio `Player` to build an application.
+
+PyGObject and GStreamer come from the system (Homebrew or apt), not from PyPI: install mixtape
+into a venv made with `--system-site-packages` from the Python that has them. These pages
+describe mixtape 0.8.
+
+## Docs
+
+- [Overview](https://shashi.to/mixtape/): what mixtape is, how to install it, a first pipeline
+- [Writing an application](https://shashi.to/mixtape/library/): subclass `Player`, declare properties and commands with `prop()` and `@command`, read events, write a `Feature`
+- [Measuring performance](https://shashi.to/mixtape/perf/): the `perf` feature, recording a run, comparing two runs, the recorder as a test suite
+- [Command line](https://shashi.to/mixtape/cli/): `mixtape run`, `mixtape inspect`, `--set`, `--http`, `--feature`, Ctrl-C and exit statuses
+- [HTTP API](https://shashi.to/mixtape/http/): the REST and WebSocket endpoints, the control page, serving from your own code
+- [API reference](https://shashi.to/mixtape/reference/): `Player`, `Feature`, `prop`, `command`, the events, the exceptions, `serve` and `create_app`
+- [Troubleshooting](https://shashi.to/mixtape/troubleshooting/): each heading is an error message, with its fix
+
+## Examples
+
+- [A WebRTC client](https://shashi.to/mixtape/webrtc/): a `Player` that makes video calls with webrtcsink and webrtcsrc
+- [Two pipelines](https://shashi.to/mixtape/two-pipelines/): the elements that link one pipeline to another, in one process or across two, and what mixtape does for two players
+
+## Optional
+
+- [Changelog](https://shashi.to/mixtape/changelog/): what changed in each release
+- [Source](https://github.com/ashwoods/mixtape): the repository, with the examples/ the docs run

@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The WebRTC example without a signalling server exits with an error instead of waiting.
 - The docs say that the `perf` and `leaks` tracers are one per process: two players measuring
   in one process each get the samples of both.
+- The API reference has one heading per object, without the repeated section headings, and its
+  docstrings link the names they mention.
 
 ## 0.8.0 (2026-11-17)
 

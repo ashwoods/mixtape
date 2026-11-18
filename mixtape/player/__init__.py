@@ -3,10 +3,8 @@
 import asyncio
 import concurrent.futures
 import contextlib
-import ctypes
 import inspect
 import logging
-import threading
 import warnings
 from collections import Counter
 from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
@@ -53,6 +51,8 @@ from ..model import (
     validation_reasons,
 )
 from ..spec import GraphSpec, LinkSpec, NodeSpec, PlayerSpec
+from .state import StateMachine
+from .util import _retrying
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +63,6 @@ def ensure_init() -> None:
     """Initialise GStreamer, once."""
     if not Gst.is_initialized():
         Gst.init(None)
-
-
-def _retrying[T](iterate: Callable[[], Iterable[T]]) -> list[T]:
-    """The items of a GStreamer iterator, walked again when it RESYNCs: the bin or element
-    changed under it, from a streaming thread."""
-    while True:
-        try:
-            return list(iterate())
-        except Gst.IteratorError:
-            continue
 
 
 def _description_elements(bin: Gst.Bin) -> Iterator[Gst.Element]:
@@ -95,40 +85,6 @@ def _real_peer(pad: Gst.Pad) -> Gst.Pad | None:
         else:
             return peer
     return None
-
-
-def _in_thread[T](
-    fn: Callable[..., T], *args: object, after: concurrent.futures.Future[Any] | None = None
-) -> concurrent.futures.Future[T]:
-    """Call `fn(*args)` on a daemon thread, once `after` is done: a call blocked in
-    GStreamer (a hung streaming thread holds its locks) blocks neither the loop nor the exit."""
-    future: concurrent.futures.Future[T] = concurrent.futures.Future()
-
-    def run() -> None:
-        if after is not None:
-            concurrent.futures.wait([after])
-        if future.set_running_or_notify_cancel():
-            try:
-                future.set_result(fn(*args))
-            except BaseException as exc:
-                future.set_exception(exc)
-
-    threading.Thread(target=run, name="mixtape", daemon=True).start()
-    return future
-
-
-type _Changed = tuple[Gst.State, Gst.StateChangeReturn]  # the state left, what set_state returned
-
-_kept: set[Gst.Pipeline] = set()
-"""The pipelines `teardown` left outside NULL, kept on purpose for the life of the process:
-GStreamer cannot free an element that has not stopped, and says so with a CRITICAL. Python
-may free module globals at exit, before or after the pipeline's other holders, so the set holds
-one more reference, which nobody drops."""
-ctypes.pythonapi.Py_IncRef(ctypes.py_object(_kept))
-
-
-def _names(elements: Iterable[Gst.Element]) -> str:
-    return ", ".join(element.get_name() for element in elements)
 
 
 def _invalid(what: str, exc: ValidationError) -> InvalidValueError:
@@ -210,17 +166,7 @@ class Player:
         self.pipeline = pipeline
         self._loop: asyncio.AbstractEventLoop | None = None
         self._fd: int | None = None
-        self._error: PlayerPipelineError | None = None
-        self._changing: concurrent.futures.Future[_Changed] | None = None  # the last one
-        self._changing_to: Gst.State | None = None  # and its state
-        self._stuck: concurrent.futures.Future[_Changed] | None = None
-        self._target = Gst.State.NULL  # what the caller asked for, to decide bus policy
-        self._live = False
-        self._buffering = False
-        self._eos = False  # the pipeline reached EOS and has not gone down since
-        self._state_waiters: list[tuple[Gst.State, asyncio.Future[None]]] = []
-        self._eos_waiters: list[asyncio.Future[None]] = []
-        self._reports: list[Callable[[], None]] = []  # the errors that wait for their NULL
+        self._machine = StateMachine(self)  # the only owner of the pipeline's state
         self._handlers: dict[object, tuple[Gst.MessageType, MessageCallback]] = {}
         self._events = events.Broadcast()
         self._position_task: asyncio.Task[None] | None = None  # while a position stream is open
@@ -339,7 +285,7 @@ class Player:
     def error(self) -> PlayerPipelineError | None:
         """The first error since the last change to another state than NULL, which stopped
         the pipeline, until the next such change"""
-        return self._error
+        return self._machine.error
 
     @property
     def enabled_features(self) -> Mapping[str, Feature]:
@@ -379,9 +325,7 @@ class Player:
             self._events = events.Broadcast()  # and its subscribers with it
             self._position_task = self._last_position = None
             self._commands_flush = None
-            self._state_waiters.clear()  # their futures died with it
-            self._eos_waiters.clear()
-            self._reports.clear()
+            self._machine.forget()  # their futures died with it
             self._disconnect_relinks()  # connected again below
         if self._loop is loop:
             return
@@ -431,26 +375,9 @@ class Player:
     def _teardown(self, *, null: bool) -> None:
         self._disconnect_notify()
         self._disconnect_relinks()
-        if null:
-            try:
-                self._raise_if_stuck()
-            except PlayerSetStateError as exc:
-                logger.warning("%s: leaving it", exc)
-                null = False
-        if null:
-            call = self._change(Gst.State.NULL)
-            try:
-                _, ret = call.result(self.state_timeout)
-            except TimeoutError:
-                logger.warning("%s: leaving it", self._mark_stuck(Gst.State.NULL, call))
-            else:
-                if ret == Gst.StateChangeReturn.FAILURE:
-                    logger.warning("%s", self._failed(Gst.State.NULL))
-        if self.state != Gst.State.NULL:
-            _kept.add(self.pipeline)
+        self._machine.teardown_null(null=null)
         self._detach_features()
-        self._target = Gst.State.NULL
-        self._live = self._buffering = self._eos = False
+        self._machine.reset()
         loop, fd = self._loop, self._fd
         self._loop = self._fd = None
         if self._position_task is not None and loop is not None and not loop.is_closed():
@@ -459,23 +386,15 @@ class Player:
         if self._commands_flush is not None:
             self._commands_flush.cancel()
             self._commands_flush = None
-        waiters = [future for _, future in self._state_waiters] + self._eos_waiters
-        self._state_waiters.clear()
-        self._eos_waiters.clear()
+        waiters = self._machine.take_waiters()
         if loop is not None and not loop.is_closed():
             if fd is not None:
                 loop.remove_reader(fd)
-            for report in list(self._reports):  # an error is told before the end, stopped or not
-                report()
-            torn_down = PlayerSetStateError("The player was torn down")
-            for future in waiters:
-                if not future.done():
-                    future.set_exception(torn_down)
-                    future.exception()  # mark it retrieved: nobody may be awaiting it
+            self._machine.end_waits(waiters)
             self._events.close()
         else:
             self._events = events.Broadcast()  # its subscribers died with the loop
-        self._reports.clear()
+        self._machine.clear_reports()
 
     async def __aenter__(self) -> Self:
         self.setup()
@@ -520,79 +439,29 @@ class Player:
     async def set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
         """Set the pipeline state, returning once the change is complete."""
         self.setup()
-        self._raise_if_stuck()  # a refused change changes nothing
-        self._interrupt_waits(state)
-        self._target = state
-        self._buffering = False  # the caller's state wins over buffering's pause
-        queued = self._changing is not None and not self._changing.done()
-        if not queued and self.state == state and self.pending == Gst.State.VOID_PENDING:
-            return Gst.StateChangeReturn.SUCCESS
-        if state != Gst.State.NULL:
-            self._error = None  # started again: the error is history
-        error = self._error
-        future = asyncio.get_running_loop().create_future()
-        waiter = (state, future)
-        self._state_waiters.append(waiter)
-        try:
-            call = self._change(state)
-            change = asyncio.wrap_future(call)
-            downward = state in (Gst.State.NULL, Gst.State.READY)
-            bounded = downward or queued  # one behind a change that hangs hangs too
-            done, _ = await asyncio.wait([change], timeout=self.state_timeout if bounded else None)
-            if not done:
-                raise self._mark_stuck(state, call)
-            old, ret = change.result()
-            if state == Gst.State.NULL and ret != Gst.StateChangeReturn.FAILURE:
-                self._published_null(old)
-            if downward:
-                self._eos = False  # going down flushes the stream
-            if state == Gst.State.NULL:
-                self._live = False
-            elif ret == Gst.StateChangeReturn.NO_PREROLL:
-                self._live = True
-            if ret == Gst.StateChangeReturn.ASYNC:
-                await future
-            elif ret == Gst.StateChangeReturn.FAILURE:
-                failed: MixTapeError = self._failed(state)  # before a NULL resets them
-                self._drain()  # the element's ERROR is more useful than a bare failure
-                if self._error is not error and self._error is not None:
-                    failed = self._error  # and the error set the pipeline to NULL
-                elif downward:
-                    self._target = self.state
-                elif self._changing is call:  # else the change asked after it decides
-                    # GstBin leaves a failed start half way up: stop it, as an error does
-                    self._target = Gst.State.NULL
-                    self._live = self._buffering = self._eos = False
-                    self._after(self._change(Gst.State.NULL), Gst.State.NULL)
-                if not downward:
-                    await self._queued_null()
-                raise failed
-            return ret
-        finally:
-            with contextlib.suppress(ValueError):  # teardown may have cleared it
-                self._state_waiters.remove(waiter)
+        return await self._machine.set_state(state)
 
     async def ready(self) -> Gst.StateChangeReturn:
         return await self.set_state(Gst.State.READY)
 
-    @command(when=lambda self: self._stuck_reason() or True)
+    @command(when=lambda self: self._machine.stuck_reason() or True)
     async def pause(self) -> Gst.StateChangeReturn:
         """Pause the pipeline."""
         return await self.set_state(Gst.State.PAUSED)
 
-    @command(when=lambda self: self._stuck_reason() or True)
+    @command(when=lambda self: self._machine.stuck_reason() or True)
     async def play(self) -> Gst.StateChangeReturn:
         """Play the pipeline."""
         return await self.set_state(Gst.State.PLAYING)
 
-    @command(when=lambda self: self._stuck_reason() or True)
+    @command(when=lambda self: self._machine.stuck_reason() or True)
     async def stop(self, eos: bool = False, timeout: float | None = 5.0) -> None:
         """Set the pipeline to NULL, after an EOS when `eos` and it is playing.
 
         A paused pipeline cannot carry the EOS to its sinks (waiting for it blocks), and
         one at its EOS already sends no second one: both stop at once."""
         self.setup()
-        if eos and self.state == Gst.State.PLAYING and not self._eos:
+        if eos and self.state == Gst.State.PLAYING and not self._machine.at_eos:
             try:
                 await self.send_eos(timeout)
             except TimeoutError:
@@ -604,48 +473,31 @@ class Player:
         else:
             await self.set_state(Gst.State.NULL)
 
-    @command(when=lambda self: self._eos_refusal() or True)
+    @command(when=lambda self: self._machine.eos_refusal() or True)
     async def eos(self, timeout: float | None = 5.0) -> None:
         """Send an EOS event and wait for the EOS message it causes, while playing, for up to
         `timeout` seconds: a streaming thread that hangs never carries it to the sinks."""
         self.setup()
-        self._raise_if_stuck()
-        if (refusal := self._eos_refusal()) is not None:
+        self._machine.raise_if_stuck()
+        if (refusal := self._machine.eos_refusal()) is not None:
             raise CommandError(refusal)
         try:
             await self.send_eos(timeout)
         except TimeoutError as exc:
             raise CommandError(f"No EOS within {timeout:g} s") from exc
 
-    @command(when=lambda self: self._seek_refusal() or True)
+    @command(when=lambda self: self._machine.seek_refusal() or True)
     def seek(self, position: NonNegativeFloat) -> None:
         """Seek to a position in seconds, flushing."""
         flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT
         if not self.pipeline.seek_simple(Gst.Format.TIME, flags, int(position * Gst.SECOND)):
             raise CommandError(f"The pipeline could not seek to {position} s")
-        self._eos = False  # the flush clears it: the stream goes on
+        self._machine.flushed()  # the flush clears it: the stream goes on
 
     async def send_eos(self, timeout: float | None = None) -> None:
         """Send an EOS event and wait for the EOS message it causes."""
         self.setup()
-        future = asyncio.get_running_loop().create_future()
-        self._eos_waiters.append(future)
-
-        async def send_and_wait() -> None:
-            # A source blocked on a full downstream holds its lock, and send_event waits for
-            # it: send from a thread so the loop (and a second Ctrl-C) stays responsive.
-            sent = asyncio.wrap_future(_in_thread(self.pipeline.send_event, Gst.Event.new_eos()))
-            await asyncio.wait([sent, future], return_when=asyncio.FIRST_COMPLETED)
-            if future.done():  # a stop or an error interrupts a send that is blocked
-                return future.result()
-            if not sent.result():
-                raise MixTapeError("The pipeline did not handle the EOS event")
-            await future
-
-        try:
-            await asyncio.wait_for(send_and_wait(), timeout)
-        finally:
-            self._discard_eos_waiter(future)
+        await self._machine.send_eos(timeout)
 
     async def play_until_eos(self) -> None:
         """Play and return on the next EOS; raise
@@ -653,180 +505,14 @@ class Player:
 
         A pipeline still at the EOS of an earlier run restarts from READY."""
         self.setup()
-        if self._eos:
+        if self._machine.at_eos:
             await self.ready()
-        future = asyncio.get_running_loop().create_future()
-        self._eos_waiters.append(future)  # before playing, a short stream may end meanwhile
+        future = self._machine.eos_waiter()  # before playing, a short stream may end meanwhile
         try:
             await self.play()
             await future
         finally:
-            self._discard_eos_waiter(future)
-
-    def _change(self, state: Gst.State) -> concurrent.futures.Future[_Changed]:
-        """Set the pipeline state on a thread, after the changes asked before: its result is
-        the state the change left and what `set_state` returned."""
-
-        def change() -> _Changed:
-            return self.state, self.pipeline.set_state(state)
-
-        self._changing = _in_thread(change, after=self._changing)
-        self._changing_to = state
-        return self._changing
-
-    def _stuck_reason(self) -> str | None:
-        """Why no change can be made while one that timed out is still blocked, else None."""
-        if self._stuck is not None and not self._stuck.done():
-            return f"The pipeline is stuck changing state{self._changing_in()}"
-        self._stuck = None
-        return None
-
-    def _raise_if_stuck(self) -> None:
-        """Fail at once while a change that timed out is still blocked."""
-        if (reason := self._stuck_reason()) is not None:
-            raise PlayerSetStateError(reason)
-
-    def _eos_refusal(self) -> str | None:
-        """Why `eos` cannot run now, else None: paused, the EOS blocks on the prerolled sinks
-        (and so would a stop after it); in NULL it waits for the next play; at EOS no second
-        one comes."""
-        if (reason := self._stuck_reason()) is not None:
-            return reason
-        if self.state != Gst.State.PLAYING or self._eos:
-            return "EOS needs a playing pipeline that is not at its EOS"
-        return None
-
-    def _seek_refusal(self) -> str | None:
-        """Why `seek` cannot run now, else None: the pipeline has to be paused or playing
-        (in NULL, a source may say it can seek) and to answer that it can."""
-        if (reason := self._stuck_reason()) is not None:
-            return reason  # no query to a pipeline whose change is blocked
-        if self.state not in (Gst.State.PAUSED, Gst.State.PLAYING):
-            return "Seeking needs a paused or playing pipeline"
-        query = Gst.Query.new_seeking(Gst.Format.TIME)
-        if not self.pipeline.query(query) or not query.parse_seeking()[1]:
-            return "The pipeline cannot seek"
-        return None
-
-    def _changing_in(self) -> str:
-        """`: name, … still changing state` for the elements a change waits for, if any: a
-        thread blocked in GStreamer may hold the pipeline's own lock instead."""
-        elements = [e for e in _retrying(self.pipeline.iterate_recurse) if e.get_state(0)[2]]
-        leaves = [e for e in elements if not isinstance(e, Gst.Bin)] or elements
-        return f": {_names(leaves)} still changing" if leaves else ""
-
-    def _mark_stuck(
-        self, state: Gst.State, call: concurrent.futures.Future[_Changed]
-    ) -> PlayerSetStateError:
-        """Call the player stuck until the last change queued finishes, and do what
-        `set_state` would have once `call` does: its error is returned."""
-        error = self._stuck_error(state)
-        self._stuck = self._changing
-        self._after(call, state)
-        self._commands_changed()
-        return error
-
-    def _after(self, call: concurrent.futures.Future[_Changed], state: Gst.State) -> None:
-        """Once `call`, a change to `state` nobody awaits, finishes: warn when it fails to
-        stop the pipeline, or update the player when it took it down."""
-        loop = self._loop
-
-        def finished(call: concurrent.futures.Future[_Changed]) -> None:
-            old, ret = call.result()
-            if ret == Gst.StateChangeReturn.FAILURE:
-                if state == Gst.State.NULL:
-                    logger.warning("%s", self._failed(state))  # and unflushes the bus
-            elif loop is not None:
-                with contextlib.suppress(RuntimeError):  # the loop closed meanwhile
-                    loop.call_soon_threadsafe(self._went_down, loop, call, state, old)
-
-        call.add_done_callback(finished)
-
-    def _went_down(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        call: concurrent.futures.Future[_Changed],
-        state: Gst.State,
-        old: Gst.State,
-    ) -> None:
-        """A change nobody awaits finished: when it went down, do what `set_state` does
-        then; the NULL it reached is news only when no change came after it (a later one's
-        bus messages tell its own story, and whether it is live)."""
-        if self._loop is not loop or state not in (Gst.State.NULL, Gst.State.READY):
-            return
-        self._eos = False  # going down flushed the stream, whatever came after
-        if state == Gst.State.NULL and self._changing is call:
-            self._live = False
-            self._published_null(old)
-
-    def _stuck_error(self, state: Gst.State) -> PlayerSetStateError:
-        return PlayerSetStateError(
-            f"Could not set the pipeline to {state.value_nick} within "
-            f"{self.state_timeout:g} s{self._changing_in()}"
-        )
-
-    def _failed(self, state: Gst.State) -> PlayerSetStateError:
-        """The error of a failed change, naming the elements that failed it when they still
-        say so. An element that fails a change up without posting an ERROR may not be named:
-        GstBin undoes the change on every child, which resets what the failed one returns,
-        and it posts no message (only a tracer hook, which Python cannot get, sees it)."""
-        if state == Gst.State.NULL and self.state != Gst.State.NULL:
-            self.bus.set_flushing(False)  # GstPipeline flushes it for NULL, even when it fails
-        failure = Gst.StateChangeReturn.FAILURE
-        elements = _retrying(self.pipeline.iterate_recurse)
-        failed = [e for e in elements if e.get_state(0)[0] == failure]
-        leaves = [e for e in failed if not isinstance(e, Gst.Bin)] or failed
-        culprits = f": {_names(leaves)} failed" if leaves else ""
-        return PlayerSetStateError(f"Could not set the pipeline to {state.value_nick}{culprits}")
-
-    def _set_null(self) -> concurrent.futures.Future[_Changed] | None:
-        """Set the pipeline to NULL after an error, on a thread after the changes on their
-        way, so a change the error ended does not run after it: a streaming thread that hangs
-        may block it. The change that stops it, or None while the player is stuck."""
-        if self._stuck is not None and not self._stuck.done():
-            return None
-        changing = self._changing
-        if changing is not None and not changing.done() and self._changing_to == Gst.State.NULL:
-            return changing  # a stop on its way takes care of itself
-        call = self._change(Gst.State.NULL)
-        self._after(call, Gst.State.NULL)
-        return call
-
-    async def _queued_null(self) -> None:
-        """Wait up to `state_timeout` for the NULL a failed start or its error queued, if it
-        is the last change: the start fails once the pipeline is stopped, or stuck."""
-        changing = self._changing
-        if changing is not None and self._changing_to == Gst.State.NULL and not changing.done():
-            done, _ = await asyncio.wait(
-                [asyncio.wrap_future(changing)], timeout=self.state_timeout
-            )
-            if not done:
-                self._stuck = changing  # as `_mark_stuck`: its `_after` does the rest
-                self._commands_changed()
-
-    def _published_null(self, old: Gst.State) -> None:
-        """Publish the `StateChanged` to NULL the bus cannot: it flushes its messages on
-        the way down (unless `auto-flush-bus` is off)."""
-        if old != Gst.State.NULL and self.pipeline.get_auto_flush_bus():
-            self._publish(events.StateChanged(old, Gst.State.NULL, Gst.State.VOID_PENDING))
-            self._shape_changed()
-
-    def _interrupt_waits(self, state: Gst.State) -> None:
-        """Fail the waits a change to `state` ends: other targets, and EOS on NULL."""
-        futures = [future for target, future in self._state_waiters if target != state]
-        if state == Gst.State.NULL:
-            futures += self._eos_waiters
-        error = PlayerSetStateError(f"Interrupted by a change to {state.value_nick}")
-        for future in futures:
-            if not future.done():
-                future.set_exception(error)
-                future.exception()  # mark it retrieved: nobody may be awaiting it
-
-    def _discard_eos_waiter(self, future: asyncio.Future[None]) -> None:
-        if not future.get_loop().is_closed():  # a wait abandoned with its loop ends later
-            future.cancel()
-        with contextlib.suppress(ValueError):  # teardown may have cleared it
-            self._eos_waiters.remove(future)
+            self._machine.discard_eos_waiter(future)
 
     # -- the model: properties and commands -- #
 
@@ -1417,19 +1103,19 @@ class Player:
     def _handle(self, message: Gst.Message) -> None:
         kind = message.type
         if kind == Gst.MessageType.ERROR:
-            self._on_error(message)
+            self._machine.on_error(message)
         elif kind == Gst.MessageType.EOS:
-            self._on_eos()
+            self._machine.on_eos()
         elif kind == Gst.MessageType.STATE_CHANGED:
-            self._on_state_changed(message)
+            self._machine.on_state_changed(message)
         elif kind == Gst.MessageType.WARNING:
             self._on_warning(message)
         elif kind == Gst.MessageType.CLOCK_LOST:
-            self._on_clock_lost()
+            self._machine.on_clock_lost()
         elif kind == Gst.MessageType.LATENCY:
             self.pipeline.recalculate_latency()
         elif kind == Gst.MessageType.BUFFERING:
-            self._on_buffering(message)
+            self._machine.on_buffering(message)
         elif kind == Gst.MessageType.QOS:
             logger.debug("QoS from %s", message.src.get_name())
         self._publish(events.Message(message))
@@ -1440,103 +1126,8 @@ class Player:
                 except Exception:
                     logger.exception("Message handler %r failed", callback)
 
-    def _on_error(self, message: Gst.Message) -> None:
-        gerror, debug = message.parse_error()
-        source = message.src.get_name() if message.src else "unknown"
-        error = PlayerPipelineError(source, gerror.message, debug, gerror)
-        if self._error is None:  # the first is the cause: basesrc follows one with its own
-            self._error = error
-        logger.error("Error from element %s: %s (%s)", source, gerror.message, debug)
-        self._target = Gst.State.NULL
-        self._live = self._buffering = self._eos = False
-        waiters = [future for _, future in self._state_waiters] + self._eos_waiters
-        self._state_waiters.clear()  # the error's: an EOS or state still on the bus before the
-        self._eos_waiters.clear()  # NULL flushes it does not end them (basesrc posts an EOS)
-        call = self._set_null()
-
-        def report() -> None:
-            """Fail the waits the error ended, not those asked after it, and publish it."""
-            for future in waiters:
-                if not future.done():
-                    future.set_exception(error)
-                    future.exception()  # mark it retrieved: nobody may be awaiting it
-            self._publish(events.Error(error))
-
-        if call is None:
-            report()  # stuck: no NULL to wait for
-        else:
-            self._report_after(call, report)
-
-    def _report_after(
-        self, call: concurrent.futures.Future[_Changed], report: Callable[[], None]
-    ) -> None:
-        """Run `report` once on the loop when `call`, the NULL an error queued, finishes, or
-        after `state_timeout` with the player stuck; and in `teardown`, if it comes first."""
-        loop = asyncio.get_running_loop()
-
-        def once() -> None:
-            if once in self._reports:
-                self._reports.remove(once)
-                timer.cancel()
-                report()
-
-        def timed_out() -> None:
-            if not call.done():
-                self._stuck = self._changing  # as `_queued_null`: its `_after` does the rest
-                self._commands_changed()
-            once()
-
-        def finished(_: concurrent.futures.Future[_Changed]) -> None:
-            with contextlib.suppress(RuntimeError):  # the loop closed meanwhile
-                loop.call_soon_threadsafe(once)
-
-        timer = loop.call_later(self.state_timeout, timed_out)
-        self._reports.append(once)
-        call.add_done_callback(finished)  # after `_after`'s: the NULL is published first
-
-    def _on_eos(self) -> None:
-        if self._reports:  # the end of a stream an error ended, on the bus before the NULL
-            return
-        logger.info("EOS")
-        self._eos = True
-        for future in self._eos_waiters:
-            if not future.done():
-                future.set_result(None)
-        self._publish(events.Eos())
-
-    def _on_state_changed(self, message: Gst.Message) -> None:
-        if message.src != self.pipeline:
-            return
-        old, new, pending = message.parse_state_changed()
-        logger.debug("State changed from %s to %s", old.value_nick, new.value_nick)
-        if pending == Gst.State.VOID_PENDING:
-            _, state, still_pending = self.pipeline.get_state(0)  # the message may be stale
-            for target, future in self._state_waiters:
-                if target == new == state and still_pending == pending and not future.done():
-                    future.set_result(None)
-        self._publish(events.StateChanged(old, new, pending))
-        self._shape_changed()  # a missed signal shows by the next state at the latest
-
     def _on_warning(self, message: Gst.Message) -> None:
         gerror, debug = message.parse_warning()
         source = message.src.get_name() if message.src else "unknown"
         logger.warning("Warning from element %s: %s (%s)", source, gerror.message, debug)
         self._publish(events.Warning(source, gerror.message, debug))
-
-    def _on_clock_lost(self) -> None:
-        if self._target == Gst.State.PLAYING:
-            logger.info("Clock lost, restarting the clock selection")
-            self._change(Gst.State.PAUSED)  # on a thread, as every change
-            self._change(Gst.State.PLAYING)
-
-    def _on_buffering(self, message: Gst.Message) -> None:
-        if self._live:
-            return
-        percent = message.parse_buffering()
-        if percent < 100 and not self._buffering and self._target == Gst.State.PLAYING:
-            self._buffering = True
-            self._change(Gst.State.PAUSED)
-        elif percent == 100 and self._buffering:
-            self._buffering = False
-            if self._target == Gst.State.PLAYING:
-                self._change(Gst.State.PLAYING)

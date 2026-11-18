@@ -56,6 +56,14 @@ def test_two_clients_in_one_process_each_receive_the_other() -> None:
     ]
 
 
+def test_a_client_without_a_signalling_server_exits_with_an_error() -> None:
+    """It went on waiting after the error, until Ctrl-C."""
+    server = f"ws://127.0.0.1:{_free_port()}"
+    out = run_example("webrtc_client.py", "--server", server, timeout=20)
+    assert out.returncode == 1, out.stdout
+    assert f"No signalling server at {server}: start a client with --serve" in out.stdout
+
+
 def _wait_for_port(port: int, host: subprocess.Popen[str]) -> None:
     """Wait for the host's signalling server: the guest's signaller connects only once."""
     deadline = time.monotonic() + 20

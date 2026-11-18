@@ -26,11 +26,19 @@ from mixtape.exceptions import CommandError, PlayerPipelineError
 SERVER = "ws://127.0.0.1:8443"
 
 
-def publisher(name: str, *, server: str = SERVER, serve: bool = False, camera: bool = False) -> str:
-    """The pipeline description of a client: its source, sent by webrtcsink to whoever calls."""
+def publisher(
+    name: str,
+    *,
+    server: str = SERVER,
+    serve: bool = False,
+    camera: bool = False,
+    stun: str | None = None,
+) -> str:
+    """The pipeline description of a client: its source, sent by webrtcsink to whoever calls.
+    Without a `stun` server (`stun://host:port`) the peers must reach each other directly."""
     source = "autovideosrc" if camera else "videotestsrc is-live=true"
     sink = f'webrtcsink name=out meta="meta,name={name}" signaller::uri={server}'
-    sink += " stun-server=NULL congestion-control=disabled"  # all on this machine
+    sink += f" stun-server={stun or 'NULL'} congestion-control=disabled"
     if serve:  # this client also runs the signalling server
         url = urlsplit(server)
         sink += f" run-signalling-server=true signalling-server-host={url.hostname}"
@@ -50,6 +58,7 @@ class Client(Player):
 
     description = publisher("client")
     sink = "fakesink sync=false"  # what the remote video goes to: autovideosink shows it
+    stun: str | None = None  # the STUN server of a call, as `publisher` takes it
 
     def __init__(self, pipeline: Gst.Pipeline, **kwargs: Any) -> None:
         super().__init__(pipeline, **kwargs)
@@ -179,7 +188,7 @@ class Client(Player):
             raise CommandError(f"no client {peer!r} publishes: {list(self.producers.values())}")
         self.hangup()
         self._remote = found[0]
-        src = "webrtcsrc name=in stun-server=NULL"
+        src = f"webrtcsrc name=in stun-server={self.stun or 'NULL'}"
         src += f" signaller::uri={self._signaller.props.uri} signaller::producer-peer-id={found[0]}"
         call = self._call = Gst.parse_bin_from_description(
             f"{src} ! videoconvert name=convert ! {self.sink} name=display", False
@@ -292,12 +301,14 @@ async def run(args: argparse.Namespace) -> None:
         async with asyncio.timeout(TIMEOUT):
             await demo(args.server, args.frames)
         return
-    description = publisher(args.name, server=args.server, serve=args.serve, camera=args.camera)
+    description = publisher(
+        args.name, server=args.server, serve=args.serve, camera=args.camera, stun=args.stun
+    )
     async with (Host if args.serve else Client).from_description(description) as client:
-        client.sink = args.sink
+        client.sink, client.stun = args.sink, args.stun
         await client.play()
-        if args.call is None:
-            await asyncio.Event().wait()  # publish until interrupted
+        if args.call is None:  # publish until interrupted, or until the pipeline fails
+            await until(client, lambda: False)  # no signalling server, for one
         async with asyncio.timeout(TIMEOUT):
             print(await talk(client, args.call or None, args.frames))
 
@@ -311,6 +322,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--serve", action="store_true", help="also run the signalling server")
     parser.add_argument(
         "--camera", action="store_true", help="publish the camera, not a test pattern"
+    )
+    parser.add_argument(
+        "--stun",
+        metavar="URL",
+        help="a STUN server, stun://host:port, for peers behind NAT (default: none)",
     )
     parser.add_argument(
         "--sink", default=Client.sink, help="where the remote video goes (default: %(default)s)"
@@ -337,6 +353,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except PlayerPipelineError as exc:
         print(f"error: {exc}")
+        if "Connection refused" in str(exc):
+            print(f"No signalling server at {args.server}: start a client with --serve first")
         return 1
     except KeyboardInterrupt:
         return 130

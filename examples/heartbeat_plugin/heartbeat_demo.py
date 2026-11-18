@@ -43,5 +43,6 @@ async def main() -> None:
         # > heartbeat needs a pipeline with a sink
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 # --8<-- [end:demo]

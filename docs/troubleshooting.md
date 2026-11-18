@@ -11,7 +11,7 @@ Make the venv from a Python that has it, with `--system-site-packages`. This com
 succeed with the Python you start from, and print nothing:
 
 ```console
-$ python3 -c 'import gi'
+$ python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst; Gst.IteratorError'
 ```
 
 Homebrew's Python is `/opt/homebrew/bin/python3` and Ubuntu's is `/usr/bin/python3`. Then
@@ -19,10 +19,12 @@ Homebrew's Python is `/opt/homebrew/bin/python3` and Ubuntu's is `/usr/bin/pytho
 
 ## error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: see https://shashi.to/mixtape/troubleshooting/ { #mixtape-needs-pygobject }
 
-`mixtape run` and `mixtape inspect` could not import PyGObject or GStreamer's bindings, so they
-stopped with exit status 1. The cause and the fix are those of
-[the `gi` error above](#no-module-named-gi): install GStreamer and PyGObject on the system, and
-make the venv from a Python that has them.
+`mixtape run` and `mixtape inspect` could not import PyGObject, GStreamer or gst-python's
+overrides, so they stopped with exit status 1. gst-python is the part that makes GStreamer's
+classes usable from Python: Homebrew's `gstreamer` includes it, and on Ubuntu it is
+`python3-gst-1.0`. The cause and the fix are those of
+[the `gi` error above](#no-module-named-gi): install GStreamer, PyGObject and gst-python on the
+system, and make the venv from a Python that has them.
 
 ## no element "x264enc" { #no-element-x264enc }
 

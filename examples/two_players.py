@@ -69,5 +69,6 @@ async def main() -> None:
         # > mic's perf counted buffers of: ['cam:src', 'mic:src', 'q:src']
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 # --8<-- [end:main]

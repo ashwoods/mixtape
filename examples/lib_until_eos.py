@@ -18,5 +18,6 @@ async def main() -> None:
             # > run 2: playing at the end of the stream
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 # --8<-- [end:until_eos]

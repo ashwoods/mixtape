@@ -1,7 +1,9 @@
 import asyncio
 import json
+import math
 import queue
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -18,9 +20,10 @@ from pydantic import BaseModel
 from websockets.exceptions import InvalidStatus
 from websockets.typing import Origin
 
-from mixtape import Player, command
+from mixtape import Player, command, prop
 from mixtape.exceptions import MixTapeError
 from mixtape.interfaces.http import Listening, serve
+from mixtape.interfaces.http import ws as ws_module
 from mixtape.interfaces.http.security import check_headers
 from tests.players import Feat, Recorder
 
@@ -77,6 +80,8 @@ async def test_model_and_page(served: Served) -> None:
     ]
     page = await served.client.get("/")
     assert page.status_code == 200 and "/api/events" in page.text
+    assert page.headers["x-frame-options"] == "DENY"  # no other site may frame it
+    assert page.headers["content-security-policy"] == "frame-ancestors 'none'"
 
 
 @pytest.mark.asyncio
@@ -296,6 +301,157 @@ async def test_a_disconnect_cancels_the_pending_commands(served: Served) -> None
         await asyncio.sleep(0.2)
     await asyncio.sleep(0.2)
     assert not served.player._eos_waiters  # the cancelled command discarded its waiter
+
+
+class Odd(Player):
+    """Values JSON has no numbers for, a long one and a command that fails."""
+
+    text = ""
+
+    @prop
+    def top(self) -> float:
+        return math.nan
+
+    @prop
+    def stats(self) -> dict[str, list[float]]:
+        return {"x": [math.inf, -math.inf]}
+
+    @prop
+    def long(self) -> str:
+        return self.text
+
+    @command
+    def ratio(self) -> dict[str, float]:
+        return {"x": math.nan}
+
+    @command
+    def broken(self) -> None:
+        raise RuntimeError("a bug")
+
+
+@pytest.mark.asyncio
+async def test_nan_and_infinities_are_null_everywhere(Gst: Any) -> None:
+    player = Odd.from_description("fakesink")
+    nulls = {"top": None, "stats": {"x": [None, None]}}
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        async with httpx.AsyncClient(base_url=listening.url) as client:
+            properties = (await client.get("/api/properties")).json()
+            assert {path: properties[path] for path in nulls} == nulls
+            response = await client.post("/api/commands/ratio")
+            assert response.json() == {"result": {"x": None}}
+        async with websockets.connect(f"ws://127.0.0.1:{listening.port}/api/events") as ws:
+            values = (await snapshot(ws))["values"]  # an infinity once closed the socket here
+            assert {path: values[path] for path in nulls} == nulls
+            player.notify("stats")  # once logged and dropped
+            seen = await until(ws, lambda m: m["type"] == "property")
+            assert seen[-1]["value"] == nulls["stats"]
+            await ws.send(json.dumps({"id": 1, "command": "ratio"}))  # once a 500
+            assert (await until(ws, lambda m: m["type"] == "reply"))[-1]["result"] == {"x": None}
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_error_is_json(Gst: Any) -> None:
+    player = Odd.from_description("fakesink")
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        async with httpx.AsyncClient(base_url=listening.url) as client:
+            response = await client.post("/api/commands/broken")
+    assert (response.status_code, response.json()) == (500, {"detail": "Internal error"})
+
+
+@pytest.mark.asyncio
+async def test_a_burst_of_events_reaches_a_client_that_reads(Gst: Any) -> None:
+    """More events in one go than the buffer holds: it once dropped the client."""
+    player = Odd.from_description("fakesink")
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        async with websockets.connect(f"ws://127.0.0.1:{listening.port}/api/events") as ws:
+            await snapshot(ws)
+            for _ in range(ws_module.SEND_BUFFER * 2):
+                player.notify("long")
+            for _ in range(ws_module.SEND_BUFFER * 2):
+                assert (await until(ws, lambda m: m["type"] == "property"))[-1]["path"] == "long"
+            await ws.send(json.dumps({"id": 1, "command": "ratio"}))  # and it is still served
+            assert (await until(ws, lambda m: m["type"] == "reply"))[-1]["id"] == 1
+
+
+CLOSED_1013 = b"\x88\x02" + (1013).to_bytes(2)  # a close frame: 1013, try again later
+
+
+async def raw_client(
+    player: Player, port: int
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """A WebSocket client with a small receive buffer, which reads only what a test reads."""
+    sock = socket.socket()
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    sock.setblocking(False)
+    await asyncio.get_running_loop().sock_connect(sock, ("127.0.0.1", port))
+    reader, writer = await asyncio.open_connection(sock=sock)
+    writer.write(
+        b"GET /api/events HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n"
+        b"Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        b"Sec-WebSocket-Version: 13\r\n\r\n"
+    )
+    await reader.readuntil(b"\r\n\r\n")  # accepted: it gets its stream
+    for _ in range(100):
+        if player._events._streams:
+            break
+        await asyncio.sleep(0.01)
+    assert player._events._streams
+    return reader, writer
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_reads_too_slowly_is_dropped(
+    Gst: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Else what it has not read yet waits for it in memory, more and more."""
+    monkeypatch.setattr(ws_module, "SEND_GRACE", 0.2)
+    player = Odd.from_description("fakesink")
+    player.text = "x" * 10_000
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        reader, writer = await raw_client(player, listening.port)
+        streams = player._events._streams
+        closed = CLOSED_1013
+
+        async def read_slowly() -> bytes:  # about 400 kB/s
+            received = b""
+            while not received.endswith(closed):
+                received += await reader.read(4096)
+                await asyncio.sleep(0.01)
+            return received
+
+        reading = asyncio.create_task(read_slowly())
+        for _ in range(2000):  # 10 kB every 2 ms, 5 MB/s
+            player.notify("long")
+            await asyncio.sleep(0.002)
+            if not streams:
+                break
+        assert not streams  # the server gave up on it
+        assert len(await asyncio.wait_for(reading, 10)) < 3_000_000
+        writer.close()
+
+
+@pytest.mark.asyncio
+async def test_a_flood_drops_a_client_that_does_not_read(
+    Gst: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Within its grace, and with no event after the flood: a stalled page held 300 MB."""
+    monkeypatch.setattr(ws_module, "SEND_BYTES", 1_000_000)
+    player = Odd.from_description("fakesink")
+    player.text = "x" * 10_000
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        reader, writer = await raw_client(player, listening.port)
+        streams = player._events._streams
+        for _ in range(300):  # 3 MB in one go
+            player.notify("long")
+        for _ in range(100):
+            if not streams:
+                break
+            await asyncio.sleep(0.01)
+        assert not streams  # well before SEND_GRACE
+        received = b""
+        while not received.endswith(CLOSED_1013):
+            received += await asyncio.wait_for(reader.read(65536), 5)
+        writer.close()
 
 
 class Point(BaseModel):

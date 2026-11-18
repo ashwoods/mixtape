@@ -53,7 +53,8 @@ TARGET_HELP = (
     "TARGET is a pipeline description, as one quoted string or as its words, or a player "
     "class that has a description of its own: module:Class (a module in the current folder "
     "or on sys.path) or path/to/file.py:Class (a file: its folder is put on sys.path). A "
-    "player class takes no further words."
+    "player class takes no further words. Its module is imported, which runs its code: "
+    "keep what it does when run under `if __name__ == '__main__':`."
 )
 FEATURE_HELP = (
     "enable a feature with its options, e.g. leaks,interval=1; repeatable; a value has commas "
@@ -101,7 +102,15 @@ app.add_typer(perf_app, name="perf", short_help="work with what the perf feature
 Verbose = Annotated[
     int, typer.Option("-v", "--verbose", count=True, show_default=False, help=VERBOSE_HELP)
 ]
-Target = Annotated[list[str], typer.Argument(metavar="TARGET", hidden=True)]
+
+
+def _target(words: list[str]) -> list[str]:
+    if not "".join(words).strip():  # `run ""`: words, but none to build from
+        raise typer.BadParameter("it is empty")
+    return words
+
+
+Target = Annotated[list[str], typer.Argument(metavar="TARGET", hidden=True, callback=_target)]
 ExposeAll = Annotated[
     bool, typer.Option("--expose-all", help="expose every element, not only the named ones")
 ]
@@ -365,8 +374,10 @@ def _gst_available() -> bool:
         import gi
 
         gi.require_version("Gst", "1.0")  # raises ValueError without GStreamer
-        from gi.repository import Gst  # noqa: F401
-    except (ImportError, ValueError):
+        from gi.repository import Gst
+
+        Gst.IteratorError  # noqa: B018  # from gst-python's overrides, which mixtape needs too
+    except (ImportError, ValueError, AttributeError):
         return False
     return True
 

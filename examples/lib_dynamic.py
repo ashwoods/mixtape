@@ -37,5 +37,6 @@ async def main() -> None:
         # > played
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 # --8<-- [end:build]

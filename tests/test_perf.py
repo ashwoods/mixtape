@@ -432,9 +432,11 @@ def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
     # the report: one page with all it needs, which fetches nothing
     report = (out / "report.html").read_text()
     assert "uPlot" in report and "function renderGraph(" in report
+    banner = "/*! https://github.com/leeoniya/uPlot (v1.6.32) */"  # its MIT credit, a comment
+    assert banner in report
     assert '"element.latency"' in report and "queue0" in report  # the run, inlined
     assert "default-src 'none'" in report
-    assert not re.search(r"https?://|\b(src|href)\s*=|@import|url\(", report)
+    assert not re.search(r"https?://|\b(src|href)\s*=|@import|url\(", report.replace(banner, ""))
 
 
 def test_a_short_last_window_has_no_rates(tmp_path: Path) -> None:

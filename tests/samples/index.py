@@ -7,7 +7,7 @@ PAGE = "index.md"
 SAMPLES: list[Sample] = [
     not_run(PAGE, "brew", "brew install gstreamer", "installs system packages"),
     not_run(PAGE, "apt", "sudo apt install python3-gi", "installs system packages"),
-    run(PAGE, "gi", "python3 -c 'import gi'"),
+    run(PAGE, "gi", "python3 -c 'import gi; gi.require_version("),
     not_run(PAGE, "venv", "python3 -m venv", "creates a venv and installs packages"),
     not_run(PAGE, "clone", "git clone", "clones the repository the tests run in"),
     run(PAGE, "first-run", 'mixtape run "videotestsrc num-buffers=60', exact=True),

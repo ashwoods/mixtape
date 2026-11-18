@@ -13,8 +13,6 @@ from typing import Any
 
 from .metrics import units_script
 
-UPLOT_BANNER = "/*! https://github.com/leeoniya/uPlot (v1.6.32) */"
-
 POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'"
 
 
@@ -39,8 +37,6 @@ def write(folder: Path) -> Path:
 
 def render(summary: dict[str, Any], windows: list[dict[str, Any]]) -> str:
     """The page of a run."""
-    # uPlot's banner names its home: keep the credit, without a URL on the page
-    uplot = _read("vendor/uplot/uPlot.iife.min.js").replace(UPLOT_BANNER, "/*! uPlot v1.6.32 */")
     # every `<` escaped, not just `</`: a `<!--<script` in a name would keep the data's script
     # element open past its end tag, swallowing the code after it
     data = json.dumps({"summary": summary, "windows": windows}, separators=(",", ":"))
@@ -48,7 +44,7 @@ def render(summary: dict[str, Any], windows: list[dict[str, Any]]) -> str:
     styles = (_read("vendor/uplot/uPlot.min.css"), _read("interfaces/http/mixtape.css"))
     scripts = (
         _read("interfaces/http/graph.js"),
-        uplot,
+        _read("vendor/uplot/uPlot.iife.min.js"),  # whole, with its banner: MIT keeps the credit
         units_script(),
         _read("interfaces/http/perf.js"),
         _read("interfaces/http/report.js"),

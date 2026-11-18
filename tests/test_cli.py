@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -351,6 +352,24 @@ def test_without_pygobject_a_command_that_needs_it_says_so(how: str, command: st
         "error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: "
         "see https://shashi.to/mixtape/troubleshooting/\n"
     )
+
+
+def test_without_gst_python_overrides_inspect_says_so(
+    Gst: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PyGObject and GStreamer without gst-python: it once failed with a traceback."""
+    monkeypatch.delattr(Gst, "IteratorError")
+    assert main(["inspect", "fakesink"]) == 1
+    assert capsys.readouterr().err == cli.NO_GST + "\n"
+
+
+@pytest.mark.parametrize("command", ["run", "inspect"])
+@pytest.mark.parametrize("target", ["", " "])
+def test_an_empty_target_is_bad_usage(
+    command: str, target: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main([command, target]) == 2
+    assert capsys.readouterr().err.startswith("error: invalid value for 'TARGET': it is empty\n")
 
 
 def test_an_unrelated_import_error_is_not_blamed_on_pygobject() -> None:

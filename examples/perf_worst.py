@@ -31,5 +31,6 @@ def main(folder: Path) -> None:
         print(f"{name:<18}{subject:<10}{p95:>8}{high:>8}")
 
 
-main(Path(sys.argv[1]))
+if __name__ == "__main__":
+    main(Path(sys.argv[1]))
 # --8<-- [end:worst]

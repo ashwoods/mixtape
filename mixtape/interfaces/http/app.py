@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import FastAPI, Request, Response, WebSocket
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from ...exceptions import InvalidValueError, MixTapeError, UnknownNameError
@@ -20,7 +19,7 @@ from ...player import Player
 from .errors import describe_error
 from .security import check_headers, is_loopback
 from .values import read_values, set_values
-from .ws import serve_events
+from .ws import jsonable, serve_events
 
 STATIC = {
     "mixtape.css": ("interfaces/http/mixtape.css", "text/css"),
@@ -32,6 +31,10 @@ STATIC = {
 """The files the page loads besides itself, by name: where they are in the package, and their
 type. The perf report inlines the same files. `metrics.js` is the exception: it is generated,
 from the metrics `perf` measures."""
+
+NO_FRAMING = {"X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'"}
+"""On every response: another site must not frame the page, whose own requests would pass the
+Host and Origin checks, and trick a click into a command."""
 
 
 async def _json_object(request: Request) -> dict[str, Any]:
@@ -60,13 +63,21 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
         status, body = describe_error(exc)
         return JSONResponse(body, status_code=status)
 
+    @app.exception_handler(Exception)
+    async def internal_error(request: Request, exc: Exception) -> JSONResponse:
+        # JSON as every other error, worded as the WebSocket's; uvicorn logs the traceback
+        return JSONResponse({"detail": "Internal error"}, status_code=500, headers=NO_FRAMING)
+
     @app.middleware("http")
     async def guard(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         if (problem := check_headers(request.headers, loopback=loopback)) is not None:
-            return JSONResponse({"detail": problem}, status_code=403)
-        return await call_next(request)
+            response: Response = JSONResponse({"detail": problem}, status_code=403)
+        else:
+            response = await call_next(request)
+        response.headers.update(NO_FRAMING)
+        return response
 
     @app.get("/", include_in_schema=False)
     async def index() -> HTMLResponse:
@@ -93,10 +104,10 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
 
     for command in spec.commands.values():
 
-        def make_route(name: str) -> Callable[[Request], Awaitable[dict[str, Any]]]:
-            async def invoke(request: Request) -> dict[str, Any]:
+        def make_route(name: str) -> Callable[[Request], Awaitable[JSONResponse]]:
+            async def invoke(request: Request) -> JSONResponse:
                 result = await player.invoke(name, **await _json_object(request))
-                return {"result": jsonable_encoder(result)}
+                return JSONResponse({"result": jsonable(result)})
 
             return invoke
 
@@ -128,11 +139,11 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
         )
 
     @app.post("/api/commands/{name}", include_in_schema=False)
-    async def invoke_other(name: str, request: Request) -> dict[str, Any]:
+    async def invoke_other(name: str, request: Request) -> JSONResponse:
         """A command with no route of its own: one that came with a later element (its action
         signals), or none, which is the player's `Unknown command 'name'`, 404."""
         result = await player.invoke(name, **await _json_object(request))
-        return {"result": jsonable_encoder(result)}
+        return JSONResponse({"result": jsonable(result)})
 
     def element_spec(key: str) -> ElementSpec:
         element = player.describe().elements.get(key)

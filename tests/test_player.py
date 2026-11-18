@@ -74,9 +74,9 @@ def test_from_description_needs_no_loop():
 
 def test_from_description_defaults_to_the_class_description():
     class Card(Player):
-        description = "videotestsrc name=src ! fakesink"
+        description = "videotestsrc name=src ! fakesink name=sink"
 
-    assert sorted(e.get_name() for e in Card.from_description().elements) == ["fakesink0", "src"]
+    assert sorted(e.get_name() for e in Card.from_description().elements) == ["sink", "src"]
     with pytest.raises(PlayerDescriptionError, match="Player has no description"):
         Player.from_description()
 

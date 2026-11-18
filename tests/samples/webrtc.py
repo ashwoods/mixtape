@@ -5,8 +5,15 @@ from tests.doc_samples import Sample, not_run, run
 PAGE = "webrtc.md"
 
 
+# webrtcsink's codec discovery opens a VideoToolbox session (vtenc_h264, vtenc_h265) on macOS,
+# and on a virtual Mac without Apple's scaler, as GitHub's macOS runners are, macOS itself prints
+# this line on stderr (CI run 44379800678). It is not mixtape's, and not seen on a real Mac.
+MACOS_VM_NOISE = "IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver"
+
+
 def silent(out: str) -> None:
-    assert out.strip() == "", f"it printed:\n{out}"
+    lines = [line for line in out.splitlines() if line.strip() != MACOS_VM_NOISE]
+    assert "".join(lines).strip() == "", f"it printed:\n{out}"
 
 
 SAMPLES: list[Sample] = [

@@ -6,8 +6,12 @@ the same commands, properties and control page that a [`Player`](library.md) you
 - `mixtape run` plays a pipeline until it ends,
 - `mixtape inspect` prints what a player exposes, without playing,
 - `mixtape perf compare` compares two [perf](perf.md) runs,
+- `mixtape get`, `set`, `call` and `watch` [control a player](#client) that `run --http` serves,
+  from another terminal or a script,
 - `--set` sets properties before playing, `--http` adds the [control page](http.md), and
-  `--feature` adds [features](#features) such as tracers.
+  `--feature` adds [features](#features) such as tracers,
+- `--timeout` stops a run after a time, and `--json` and `--events jsonl` give a program
+  [output it can read](#script-it-json).
 
 The commands on these pages run from a checkout of mixtape, as [the first page](index.md#install)
 says. `python3 -m mixtape` does the same as `mixtape`, and `mixtape --version` prints the
@@ -126,6 +130,23 @@ Interrupt: stopping now (Ctrl-C again to kill)…
 WARNING mixtape.player: Could not set the pipeline to null within 5 s: identity0 still changing: leaving it
 exit status 130
 ```
+
+### Stop after a time { #timeout }
+
+`--timeout SECONDS` stops the pipeline `SECONDS` after it started, the way a first Ctrl-C does:
+with an EOS, so a recorder finishes its file. `mixtape run` then exits 124, as `timeout(1)`
+does, so a script can tell a run that was stopped from one that ended by itself:
+
+```console
+$ mixtape run "videotestsrc is-live=true ! fakesink" --timeout 1; echo "exit status $?"
+Timeout: stopping (EOS)…
+exit status 124
+```
+
+A pipeline that reaches its EOS first exits 0, and one that fails before the time is up exits 1,
+as without `--timeout`. A Ctrl-C before the time is up is a first Ctrl-C, and exits 0. After the
+timeout, a Ctrl-C stops at once and exits 130, as a second one does. With `--http`, the timeout
+stops the server too.
 
 ## Inspect a player { #inspect-a-player }
 
@@ -320,8 +341,179 @@ screenshot, the REST and WebSocket API behind the page, and what to know before 
 another address.
 
 An EOS or a pipeline error does not end `mixtape run --http`: errors are printed, and the page
-can play again. The first Ctrl-C sends an EOS, stops, and exits 0. A port that is taken exits 1:
-see [Troubleshooting](troubleshooting.md#port-in-use).
+can play again. The first Ctrl-C sends an EOS, stops, and exits 0, and `--timeout` does the same
+and exits 124. A port that is taken exits 1: see [Troubleshooting](troubleshooting.md#port-in-use).
+
+### Wait until it listens { #http-ready }
+
+`Serving on` is a notice for a person, on stderr. A program that starts the server waits for
+something it can read: with `--json`, `mixtape run` prints `{"url": "http://127.0.0.1:PORT"}` as a
+line of stdout once the server listens, and nothing else on stdout. The pipeline starts playing
+right after. The port `0` asks the system for a free one, and the line says which. Here the run
+stops itself after a second, with `--timeout`, and the port is the system's choice, so yours
+will differ:
+
+```console
+$ mixtape run --http 0 --json --timeout 1 "videotestsrc is-live=true ! fakesink"; echo "exit status $?"
+{"url": "http://127.0.0.1:52613"}
+exit status 124
+```
+
+In a script, redirect that line to a file and wait for the file, then use the port it names (or
+the one you chose) with [`mixtape get`, `set`, `call` and `watch`](#client).
+
+## Script it: JSON { #script-it-json }
+
+A person reads `error: ` lines and notices. A script or an agent reads JSON. Two options of
+`mixtape run` give it that: `--json` for the errors, and `--events jsonl` for what the player
+does.
+
+### Errors { #json-errors }
+
+`--json` makes an error one line of JSON on stderr, `{"error": {"code", "message", "hint"}}`,
+with the same exit status as the text. `code` is the stable name to match on, one of the
+[error codes](#error-codes); `message` is for a person; `hint` is a string, or `null` when there
+is none. The notices, `Interrupt: stopping (EOS)…` and `Serving on …`, are dropped, and a
+warning is `{"warning": {"code", "message"}}`. `inspect --json`, `perf compare --json` and the
+[client commands](#client) print their errors this way too. Here a property name has a typo, and
+the hint names the close ones:
+
+```console
+$ mixtape run --json --set src.patern=1 "videotestsrc name=src num-buffers=3 ! fakesink"; echo "exit status $?"
+{"error": {"code": "unknown_name", "message": "Unknown property 'src.patern'", "hint": "did you mean 'src.pattern'?"}}
+exit status 2
+```
+
+Without `--json` the same error is `error: unknown property 'src.patern': did you mean
+'src.pattern'?`. With `--http`, `--json` also prints [the URL](#http-ready).
+
+### Events as JSON lines { #events-jsonl }
+
+`--events jsonl` prints one JSON object per line on stdout, in the shapes that the WebSocket
+`/api/events` of the [HTTP API](http.md#events-the-websocket) sends. First come the model, the
+values and the graph, before the pipeline plays and after `--set`, so the values are the ones it
+starts with. Then comes every event, up to the final `eos` and `state` lines. The `state`,
+`position` and `commands` lines are not the same in every run, so this keeps the lines that are,
+and the value that `--set` gave. The player waits while its stdout is not read, so a consumer that
+stops reading stalls it:
+
+```console
+$ mixtape run --events jsonl --set src.pattern=ball "videotestsrc name=src num-buffers=30 ! fakesink" \
+    | grep -o -E '^\{"type": "(model|values|graph|eos)"|"src.pattern": "[a-z]*"'
+{"type": "model"
+{"type": "values"
+"src.pattern": "ball"
+{"type": "graph"
+{"type": "eos"
+```
+
+## Control a running player: `get`, `set`, `call`, `watch` { #client }
+
+These four commands talk to a player that `mixtape run --http` serves, from another terminal or
+a script. `URL` is a full URL or `[HOST:]PORT`, and `HOST` defaults to `127.0.0.1`.
+
+- `mixtape get URL [PATH]...` prints property values. With one `PATH` it prints the bare value,
+  and with several, or none (every readable property), one `path = value` line each.
+- `mixtape set URL PATH=VALUE|PATH:=JSON...` sets properties, in order, and stops at the first
+  one that the server refuses: those before it stay set.
+- `mixtape call URL [NAME [ARG]...]` runs a command and prints its result as JSON, and nothing
+  for `null`. Without `NAME` it lists the commands, as `inspect` does, then those that cannot
+  run now, with the reason.
+- `mixtape watch URL` prints what the WebSocket `/api/events` sends, one JSON object per line, as
+  [`--events jsonl`](#events-jsonl) does, until the server closes it.
+
+A `PATH` is a name that [`mixtape inspect`](#inspect-a-player) prints: `gain`, `vol.volume`. In
+`k=v` the value is a string, which the server converts and validates as it does for
+[`--set`](#set-properties); `k:=JSON` is a JSON value, such as `vol.mute:=true` or
+`timeout:=null` (`NaN` and `Infinity` are not JSON: a usage error). `--json` prints the result as JSON (for `get`, `{path: value}`; for `set`, the
+values as the server reads them back; for `call`, `{"result": …}`) and the errors as
+[JSON](#json-errors).
+
+`get`, `set` and `call` need neither GStreamer, PyGObject nor the `http` extra: they use only the
+standard library, so they work on a machine that has none of them. `watch` needs the `http`
+extra. Each command has a `--help`.
+
+The server of these blocks plays a live source. It starts in the background, and the commands
+wait for the line of [`--json`](#http-ready) before they use it:
+
+```console
+$ rm -f /tmp/ready
+$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready &
+$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape get 8047 vol.volume
+$ mixtape set 8047 vol.volume=0.5 vol.mute:=true
+$ mixtape get 8047 vol.volume vol.mute
+$ kill -INT $!
+1.0
+vol.volume = 0.5
+vol.mute = true
+```
+
+A command's result is JSON, so a string has its quotes, where `get` prints it as it is. The
+`shout` command of the `Demo` player takes `word` as a string and `times` as a JSON number:
+
+```console
+$ rm -f /tmp/ready
+$ mixtape run --http 8047 --json examples/demo.py:Demo > /tmp/ready &
+$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape call 8047 | grep shout
+$ mixtape call 8047 shout word=hi times:=3
+$ kill -INT $!
+  shout(word: string, times: integer = 2)                 Repeat a word.
+"hihihi"
+```
+
+`watch` prints until the server closes the connection, then exits 0. This one runs for 3 s, and
+keeps the lines of the first messages and of the last event:
+
+```console
+$ rm -f /tmp/ready
+$ mixtape run --http 8047 --json --timeout 3 "audiotestsrc is-live=true ! fakesink" > /tmp/ready &
+$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape watch 8047 | grep -o -E '^\{"type": "(model|values|graph|eos)"'
+{"type": "model"
+{"type": "values"
+{"type": "graph"
+{"type": "eos"
+```
+
+### When the server refuses { #client-errors }
+
+The server's refusals come with their [code](#error-codes) and hint, as `run` prints them, and
+the exit status says whose fault it was: 2 when the server refuses a name or a value (404, 422),
+1 when it cannot do what was asked now (409, 500). Here a name has a typo, a value is out of
+range, and `eos` needs a playing pipeline, which this one is not once it is paused:
+
+```console
+$ rm -f /tmp/ready
+$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready &
+$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape get 8047 vol.volum; echo "exit status $?"
+$ mixtape set 8047 vol.volume=11; echo "exit status $?"
+$ mixtape call 8047 pause
+$ mixtape call 8047 eos; echo "exit status $?"
+$ mixtape call 8047 | tail -2
+$ kill -INT $!
+error: unknown property 'vol.volum': did you mean 'vol.volume'?
+exit status 2
+error: invalid value for 'vol.volume': Input should be less than or equal to 10
+exit status 2
+error: EOS needs a playing pipeline that is not at its EOS
+exit status 1
+Unavailable now:
+  eos  EOS needs a playing pipeline that is not at its EOS
+```
+
+A server that cannot be reached, or that does not answer as mixtape does, exits 1:
+
+```console
+$ mixtape get 8047 vol.volume; echo "exit status $?"
+error: cannot reach http://127.0.0.1:8047: [Errno 61] Connection refused: is `mixtape run --http PORT` running there?
+exit status 1
+```
+
+The reason after the URL is the system's, so it reads `[Errno 111]` on Linux.
+[Troubleshooting](troubleshooting.md#cannot-reach) has the fix.
 
 ## Features
 
@@ -437,14 +629,15 @@ $ mixtape inspect --feature gst:queue-levels "videotestsrc ! fakesink" | grep "w
 
 `pipeline-snapshot` has `snapshot`, which writes the pipelines' dot files. A structure that a
 tracer's signal returns, such as the counters of a custom tracer, comes back as JSON. Commands
-are called with the control page or the [HTTP API](http.md), so here with `curl`:
+are called with the control page, the [HTTP API](http.md) or [`mixtape call`](#client), so here
+with `mixtape call`:
 
 ```console
-$ mixtape run --http 8047 --feature gst:queue-levels \
-    "videotestsrc is-live=true ! queue name=q ! fakesink" 2>/dev/null &
-$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-$ curl -s -X POST 127.0.0.1:8047/api/commands/gst:queue-levels.write-log \
-    -d '{"arg1": "/tmp/q.csv"}' > /dev/null
+$ rm -f /tmp/ready
+$ mixtape run --http 8047 --json --feature gst:queue-levels \
+    "videotestsrc is-live=true ! queue name=q ! fakesink" > /tmp/ready 2>/dev/null &
+$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape call 8047 gst:queue-levels.write-log arg1=/tmp/q.csv
 $ kill -INT $!
 $ cut -d, -f2 /tmp/q.csv | sort -u
 q
@@ -500,6 +693,40 @@ Options:
 `added`, `removed` and `compared` (how many values were compared). From 0.8, keys are only added,
 never renamed or removed.
 
+## Error codes { #error-codes }
+
+Every error has a `code`, a stable name that a program matches on. It is the `code` of the
+[`--json`](#json-errors) error lines, and of the bodies and WebSocket replies of the
+[HTTP API](http.md#errors), which also have the `hint`. The library's codes are those of
+`mixtape.exceptions`, and the command line has a few of its own:
+
+| Code | HTTP status | When |
+|------|-------------|------|
+| `unknown_name` | 404 | a property, element or command that does not exist or is not exposed; the `hint` says `did you mean 'a' or 'b'?` when names are close |
+| `invalid_value` | 422 | a value or an argument that does not fit its type or range |
+| `not_readable` | 422 | a property that cannot be read |
+| `not_writable` | 422 | a property that is read-only or construct-only |
+| `command_failed` | 409 | a command that cannot do what was asked now, or that [cannot run](library.md#commands-that-cannot-run) |
+| `state_change_failed` | 409 | the pipeline could not change state |
+| `pipeline_error` | 500 | an element of the pipeline failed: the message has its name |
+| `internal` | 500 | a bug of mixtape, or a command result that cannot be encoded as JSON |
+| `forbidden` | 403 | the `Host` or `Origin` of a request is refused: HTTP only, see [Security](http.md#security) |
+| `invalid_description` | | a pipeline description that GStreamer cannot parse |
+| `feature_error` | | a [feature](#features) that does not exist, or cannot be configured or enabled |
+| `model_error` | | the base of the errors of properties and commands (`unknown_name`, `invalid_value`, `feature_error`…): no error has it by itself today |
+| `usage` | | bad usage of the command line: a wrong option or value |
+| `bad_target` | | a target that cannot be loaded: a file or a class that does not exist or is not a player, or two folders `perf compare` cannot compare |
+| `missing_extra` | | `--http` or `watch` without the [`http` extra](http.md) |
+| `no_gstreamer` | | [PyGObject or GStreamer is missing](troubleshooting.md#mixtape-needs-pygobject) |
+| `address_in_use` | | the address of `--http` is [taken](troubleshooting.md#port-in-use) |
+| `listen_failed` | | `--http` cannot listen for another reason |
+| `connection_failed` | | a [client command](#client) cannot reach the player, or its connection broke |
+| `bad_response` | | the server of a client command does not answer as mixtape does |
+| `timeout` | | the server of a client command did not answer within 30 s: it may still be doing it, and the `hint` says to read its values with `mixtape get` |
+
+A warning has a code too: `unauthenticated` is `--http` on an address other than loopback, which
+nobody has to authenticate to.
+
 ## Exit status
 
 | Status | `mixtape run` | `mixtape inspect` | `mixtape perf compare` |
@@ -507,4 +734,14 @@ never renamed or removed.
 | 0 | EOS, or after a first Ctrl-C | the model was printed | nothing got slower |
 | 1 | a pipeline error, `--http` cannot listen, or [PyGObject or GStreamer is missing](troubleshooting.md#mixtape-needs-pygobject) | [PyGObject or GStreamer is missing](troubleshooting.md#mixtape-needs-pygobject) | a regression |
 | 2 | bad usage, or a target or feature that cannot be loaded | bad usage, or a target that cannot be loaded | a folder that cannot be compared, or bad usage |
+| 124 | [`--timeout`](#timeout) stopped it | | |
 | 130 | a second Ctrl-C | Ctrl-C | Ctrl-C |
+
+The [client commands](#client) share theirs:
+
+| Status | `mixtape get`, `set` and `call` | `mixtape watch` |
+|--------|---------------------------------|------------------|
+| 0 | it worked | the server closed the connection |
+| 1 | the server cannot be reached, does not answer in time or as mixtape does, or it cannot do it now (409, 500, 403) | the same |
+| 2 | bad usage, or the server refuses a name or a value (404, 422) | the same, or the `http` extra is missing |
+| 130 | Ctrl-C | Ctrl-C |

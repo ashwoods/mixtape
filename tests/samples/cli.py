@@ -1,8 +1,16 @@
 """The samples of cli.md: see tests/doc_samples.py."""
 
+import re
+
 from tests.doc_samples import Sample, on, run
 
 PAGE = "cli.md"
+
+
+def url_line_then_124(out: str) -> None:
+    """The system chooses the port of `--http 0`: any one does."""
+    assert re.fullmatch(r'\{"url": "http://127\.0\.0\.1:\d+"\}\nexit status 124\n?', out), out
+
 
 SAMPLES: list[Sample] = [
     run(PAGE, "help", "^mixtape --help", exact=True),
@@ -24,6 +32,7 @@ SAMPLES: list[Sample] = [
         "done\nsleep 1\nkill -INT $!\nsleep 1",
         exact=True,
     ),
+    run(PAGE, "timeout", '^mixtape run "videotestsrc is-live=true ! fakesink" --t', exact=True),
     # --- inspect
     run(PAGE, "inspect-demo", "^mixtape inspect examples/demo.py:Demo", exact=True),
     run(
@@ -64,6 +73,31 @@ SAMPLES: list[Sample] = [
         timeout=6,
         exact=True,
     ),
+    run(
+        PAGE,
+        "http-ready",
+        "^mixtape run --http 0 --json --timeout 1",
+        check=url_line_then_124,
+        check_shown=True,
+    ),
+    # --- script it
+    run(PAGE, "json-error", "^mixtape run --json --set src.patern=1", exact=True),
+    run(PAGE, "events-jsonl", "^mixtape run --events jsonl --set src.pattern=ball", exact=True),
+    # --- client
+    run(PAGE, "client-get-set", "mixtape set 8047 vol.volume=0.5", exact=True),
+    run(PAGE, "client-call", "mixtape call 8047 | grep shout", exact=True),
+    run(PAGE, "client-watch", "mixtape watch 8047", exact=True),
+    run(PAGE, "client-errors", "mixtape get 8047 vol.volum;", exact=True),
+    run(
+        PAGE,
+        "client-unreachable",
+        "^mixtape get 8047 vol.volume; echo",
+        # the reason after the URL is the system's: [Errno 61] on macOS, 111 on Linux
+        expect=(
+            "error: cannot reach http://127.0.0.1:8047: [Errno ",
+            "] Connection refused: is `mixtape run --http PORT` running there?\nexit status 1",
+        ),
+    ),
     # --- features
     run(PAGE, "unknown-feature", "^mixtape inspect --feature nope", exact=True),
     run(PAGE, "leaks", "^mixtape inspect --feature leaks,interval=0.5", exact=True),
@@ -98,7 +132,7 @@ SAMPLES: list[Sample] = [
     run(
         PAGE,
         "gst-write-log",
-        "^mixtape run --http 8047 --feature gst:queue-levels",
+        "^rm -f /tmp/ready\nmixtape run --http 8047 --json --feature gst:queue-levels",
         elements=("queue-levels",),
         exact=True,
     ),

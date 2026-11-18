@@ -80,3 +80,34 @@ exit status 1
 `lsof -i :8047` names the process that holds the port. The [command line](cli.md#the-http-option)
 page has the options of `--http`, and the port `0` of [`serve()`](http.md#in-code) asks for a
 free one.
+
+## error: cannot reach http://127.0.0.1:8047: [Errno 61] Connection refused: is `mixtape run --http PORT` running there? { #cannot-reach }
+
+`mixtape get`, `set`, `call` or `watch` found nothing listening at that address, and exited 1, with
+the code `connection_failed`. The reason after the URL is the system's: `[Errno 111]` on Linux.
+The player is not running, or it listens on another port or host. Start it with
+`mixtape run --http PORT`, and give the client the address it printed (`Serving on …`, or
+`{"url": …}` with `--json`). Here the first command finds no server, and the last, once one runs,
+works:
+
+```console
+$ mixtape get 8047 vol.volume; echo "exit status $?"
+$ rm -f /tmp/ready
+$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready &
+$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape get 8047 vol.volume; kill -INT $!
+error: cannot reach http://127.0.0.1:8047: [Errno 61] Connection refused: is `mixtape run --http PORT` running there?
+exit status 1
+1.0
+```
+
+If the address answers but is not mixtape's, the error is `did not answer as mixtape does`
+(`bad_response`): the port belongs to another server. The [client
+commands](cli.md#client) have the rest.
+
+## mixtape run exits with status 124 { #timeout-124 }
+
+`mixtape run --timeout SECONDS` stopped the pipeline when the time was up, with an EOS as a first
+Ctrl-C does, and exits 124, as `timeout(1)` does. It is not a failure of the pipeline: one that
+fails earlier exits 1, and one that ends earlier exits 0. Raise the time, or leave `--timeout`
+out. [Stop after a time](cli.md#timeout) has the details.

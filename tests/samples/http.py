@@ -40,6 +40,7 @@ SAMPLES: list[Sample] = [
             'EOS needs a playing pipeline that is not at its EOS","code":"command_failed"',
         ),
     ),
+    run(PAGE, "hint", "-d '{\"volum\": 1}'", exact=True),
     run(PAGE, "unavailable", "examples/lib_available.py:Recorder", exact=True),
     run(PAGE, "pipeline-error", "missing.mp4", exact=True),
     prints(

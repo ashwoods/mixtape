@@ -36,6 +36,11 @@ Serving on http://127.0.0.1:8047
 What ends it, and what happens on an EOS, an error or Ctrl-C, is on the
 [command line](cli.md#the-http-option) page.
 
+To control a player that `mixtape run --http` serves from a shell or a script without `curl`,
+`mixtape get`, `set`, `call` and `watch` use this API: see
+[Control a running player](cli.md#client). `--json` makes `run` print the
+[URL once it listens](cli.md#http-ready), which a script can wait for.
+
 The commands below, which call the API with `curl`, start the server in the background, silence
 its messages, wait until it answers, and stop it on their last line. That way each of them runs
 alone; in a terminal of yours you would start it once, as above. They use the address
@@ -134,8 +139,11 @@ $ curl -s -X POST 127.0.0.1:8047/api/commands/shout -d '{"word": "hi", "times": 
 
 ### Errors
 
-An error is `{"detail": "...", "errors": [...]}`, where `errors` is there for a value that was
-refused, with what is wrong with it. The status says whose fault it is:
+An error is `{"detail": "...", "errors": [...], "code": "...", "hint": ...}`, where `errors` is
+there for a value that was refused, with what is wrong with it. `code` is the stable name of the
+error, to match on: the [error codes](cli.md#error-codes) are the same ones that `--json`
+prints on the command line. `hint` is a string, or `null` when there is none: for an unknown
+name it is `did you mean 'a' or 'b'?` with the close names. The status says whose fault it is:
 
 | Status | When |
 |---|---|
@@ -160,6 +168,19 @@ $ curl -s -X POST 127.0.0.1:8047/api/commands/eos -w ' %{http_code}\n'; kill -IN
 {"detail":"'state' is read-only","code":"not_writable","hint":null} 422
 {"detail":"Invalid arguments for 'seek': position: Input should be greater than or equal to 0","errors":[{"type":"greater_than_equal","loc":["position"],"msg":"Input should be greater than or equal to 0","input":-1}],"code":"invalid_value","hint":null} 422
 {"detail":"EOS needs a playing pipeline that is not at its EOS","code":"command_failed","hint":null} 409
+```
+
+A name that is not there gets a 404 whose `hint` names the close ones, so a client can correct a
+typo without listing the model:
+
+```console
+$ mixtape run --http 8047 \
+    "audiotestsrc is-live=true ! volume name=vol ! fakesink name=sink" 2>/dev/null &
+$ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
+$ curl -s -X PATCH 127.0.0.1:8047/api/elements/vol -d '{"volum": 1}' -w ' %{http_code}\n'
+$ curl -s -X POST 127.0.0.1:8047/api/commands/pausee -w ' %{http_code}\n'; kill -INT $!
+{"detail":"Unknown property 'volum' of element 'vol'","code":"unknown_name","hint":"did you mean 'volume'?"} 404
+{"detail":"Unknown command 'pausee'","code":"unknown_name","hint":"did you mean 'pause' or 'seek'?"} 404
 ```
 
 A command that says when it can run is refused with a 409 and its reason while it cannot, and
@@ -218,8 +239,8 @@ Then come the events, as they happen:
 The client sends `{"id": 1, "command": "play", "args": {}}` to run a command, and
 `{"id": 2, "set": {"vol.volume": 0.5}}` to set properties, which are applied in order. It
 answers each with `{"type": "reply", "id": 1, "result": ...}`, or with `"error": {"status":
-404, "detail": "..."}` instead of `result`, where the status is the one the REST API would
-return. A command that takes time, like `play`, does not stop the events from streaming, and
+404, "detail": "...", "code": "unknown_name", "hint": null}` instead of `result`, which is the
+body the REST API would return, with its `status`. A command that takes time, like `play`, does not stop the events from streaming, and
 its reply comes when it is done.
 
 This program connects, and sends a `set`, a command that does not exist and a `play`. The

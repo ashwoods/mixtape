@@ -33,8 +33,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list of `{"side", "test", "lost"}` for sessions or `{"side", "lost"}` for runs, with `side`
   `"base"` or `"new"`; the text has a "Lost log lines" section. A lossy run is marked, never
   failed: the exit status stays 0, 1 or 2. Fields are still only added.
+- `mixtape run --timeout SECONDS` stops the run with an EOS, as a first Ctrl-C does, and exits
+  124 (as `timeout(1)`); with `--http` it stops serving too. A second Ctrl-C still exits 130, and
+  a pipeline error before the time is up still exits 1.
+- `mixtape run --events jsonl` prints the model, the values and the graph, then every event, one
+  JSON object per line on stdout, in the shapes that the WebSocket `/api/events` sends.
+- `mixtape run --json` prints an error as one JSON line on stderr, `{"error": {"code",
+  "message", "hint"}}`, and drops the notices; with `--http` it prints `{"url": "http://…"}` on
+  stdout once the server listens, so `--http 0` (any free port) is scriptable. `inspect --json` and
+  `perf compare --json` print their errors this way too.
+- Every error has a stable `code`: the library's (`unknown_name`, `invalid_value`, `not_readable`,
+  `not_writable`, `command_failed`, `state_change_failed`, `pipeline_error`, `internal`,
+  `model_error`, `invalid_description`, `feature_error`) and the command line's own (`usage`,
+  `bad_target`, `missing_extra`, `no_gstreamer`, `address_in_use`, `listen_failed`,
+  `connection_failed`, `bad_response`, `timeout`). The HTTP error bodies and the WebSocket error replies have
+  `code` and `hint` (`forbidden` is HTTP only), `null` when there is no hint; the existing fields
+  are unchanged. An unknown name gets a `did you mean` hint.
+- `mixtape get`, `set`, `call` and `watch` control a player that `mixtape run --http` serves, as
+  `[HOST:]PORT` or a URL: `PATH=VALUE` is a string that the server converts, `PATH:=JSON` a JSON
+  value. They exit 2 when the server refuses a name or a value, and 1 when it cannot be reached or
+  cannot do it. `get`, `set` and `call` use only the standard library: they need neither
+  GStreamer nor the `http` extra. `watch` needs the extra.
 
 ### Changed
+- The result of a command is encoded with pydantic's `to_jsonable_python`, not FastAPI's
+  `jsonable_encoder`, as the `command.result` schema says. A `timedelta` is an ISO 8601 duration
+  (`"PT1.5S"`) and a `Decimal` a string. A command that returns an object pydantic cannot
+  serialize (a plain object, a `Gst.Caps` or a `Gst.Structure`) gets a 500 `internal` error.
 - `perf compare` of a document with a newer `format_version`, or without the fields it reads,
   is a usage error (exit status 2).
 - `--mixtape-perf` with `pytest-xdist` workers (`-n` above 0) is a usage error: the workers

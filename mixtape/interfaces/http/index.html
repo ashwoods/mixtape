@@ -138,7 +138,8 @@ input[type=checkbox] { accent-color: var(--accent); margin: 0; }
 }
 .btn:hover { background: var(--hover); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 500; }
-.btn.primary:hover { filter: brightness(1.08); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn:disabled { opacity: .45; cursor: default; }
 .btn.busy::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
 
 /* -- commands -- */
@@ -146,6 +147,8 @@ input[type=checkbox] { accent-color: var(--accent); margin: 0; }
 .cmd > .n { flex-direction: column; align-items: flex-start; gap: 0; padding-top: 4px; }
 .cmd .cn { font: 600 12px var(--mono); }
 .cmd .cdesc { color: var(--muted); font-size: 12px; }
+.cmd .why { color: var(--faint); font-size: 12px; font-style: italic; }
+.cmd .why:empty { display: none; }
 .cmd > .c { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .pf { display: inline-flex; align-items: center; gap: 6px; }
 .pf > span { font: 12px var(--mono); color: var(--muted); }
@@ -540,6 +543,8 @@ let allRows = [], sideRows = [], sections = [];
 let elsBox = null;             // where the element sections are
 let sideNodes = [];            // the commands and the player's own properties, before elsBox
 let pendingState = null, atEos = false, seekHold = false;
+let unavailable = {};          // command name → why it cannot run now, as the player says
+let cmdRows = new Map();       // command name → its Run button and the line saying why not
 const ui = { filter: "", modified: false, open: new Map() };
 let perfView = null;           // the perf feature's measures on the graph and in charts (perf.js)
 
@@ -576,7 +581,7 @@ function setConn(state) {
   document.body.classList.toggle("offline", state !== "live");
   document.getElementById("main").inert = state !== "live";
   document.getElementById("transport").inert = state !== "live";
-  document.getElementById("seek").disabled = state !== "live";
+  updateCommands();
 }
 
 function connect() {
@@ -604,6 +609,7 @@ function onMessage(m) {
       applyModel(m.model);
       for (const [p, v] of Object.entries(m.values || {})) setValue(p, v);
       break;
+    case "commands": unavailable = m.unavailable; updateCommands(); break;
     case "graph": applyGraph(m.graph); break;
     case "values":
       retry = 0;
@@ -696,12 +702,12 @@ function buildTransport() {
   for (const [name, label] of TRANSPORT) {
     const c = model.commands[name];
     if (!c || !c.builtin) continue;
-    seg.append(h("button", { class: "tbtn", "data-cmd": name, "aria-pressed": "false", title: c.description,
+    seg.append(h("button", { class: "tbtn", "data-cmd": name, "aria-pressed": "false", "data-desc": c.description,
       onclick: (e) => transport(e.currentTarget, name) }, svg(ICONS[name]), h("span", { class: "label", text: label })));
   }
   const eos = model.commands.eos;
   box.replaceChildren(seg.childElementCount ? seg : "",
-    eos && eos.builtin ? h("button", { class: "tbtn ghost", "data-cmd": "eos", title: "Send end-of-stream and wait for it",
+    eos && eos.builtin ? h("button", { class: "tbtn ghost", "data-cmd": "eos", "data-desc": "Send end-of-stream and wait for it",
       onclick: (e) => transport(e.currentTarget, "eos") }, h("span", { text: "EOS" })) : "");
   document.getElementById("seek").hidden = true;
 }
@@ -726,14 +732,28 @@ function updateTransport() {
   pill.replaceChildren(state || "—", ...(pendingState ? [h("span", { class: "arrow", text: "→" }), pendingState] : []));
   pill.title = pendingState ? `State: ${state}, changing to ${pendingState}` : `State: ${state}`;
   document.getElementById("eos").hidden = !atEos;
-  const eosButton = document.querySelector('#transport [data-cmd="eos"]');
-  if (eosButton) eosButton.disabled = state !== "playing" || atEos;
   const target = pendingState || state;
   for (const [name, , st] of TRANSPORT) {
     const b = document.querySelector(`#transport [data-cmd="${name}"]`);
     if (b) b.setAttribute("aria-pressed", String(st ? target === st : target === "null" || target === "ready"));
   }
   if (model) document.title = `${model.name} · ${state || "…"} — mixtape`;
+}
+
+/** Disable what the player says cannot run now, with the reason, in place. */
+function updateCommands() {
+  for (const b of document.querySelectorAll("#transport [data-cmd]")) {
+    const why = unavailable[b.dataset.cmd];
+    b.disabled = !!why;
+    b.title = why || b.dataset.desc;
+  }
+  const seek = document.getElementById("seek");
+  seek.disabled = document.getElementById("conn").dataset.state !== "live" || !!unavailable.seek;
+  seek.title = unavailable.seek || "";
+  for (const [name, row] of cmdRows) {
+    row.button.disabled = !!unavailable[name];
+    row.why.textContent = unavailable[name] || "";
+  }
 }
 
 function updateTime() {
@@ -867,7 +887,7 @@ function commandRow(c) {
   const button = h("button", { class: "btn primary", type: "button", text: "Run" });
 
   run = async () => {
-    if (button.classList.contains("busy")) return;
+    if (button.classList.contains("busy") || button.disabled) return;
     const args = {};
     for (const f of fields) {
       f.ctl.el.classList && f.ctl.el.classList.remove("bad");
@@ -898,10 +918,12 @@ function commandRow(c) {
     }
   };
   button.addEventListener("click", run);
+  const why = h("span", { class: "why" });
+  cmdRows.set(c.name, { button, why });
 
   return h("div", { class: "row cmd" },
     h("div", { class: "n" }, h("span", { class: "cn", text: c.name }),
-      c.description ? h("span", { class: "cdesc", text: c.description }) : null),
+      c.description ? h("span", { class: "cdesc", text: c.description }) : null, why),
     h("div", { class: "c" }, fields.map((f) => f.el), button),
     h("div", { class: "d" }, out));
 }
@@ -1054,6 +1076,8 @@ function applyModel(m) {
   const commandsChanged = toJSON(m.commands) !== toJSON(model.commands);
   model = m;
   if (commandsChanged) buildSide(m);  // an exposed element's action signals came or went
+  unavailable = m.unavailable || {};
+  updateCommands();
   const elements = Object.entries(m.elements);
   if (!sections.length || !elements.length) {  // to or from "No element is exposed"
     sections = [];
@@ -1091,6 +1115,7 @@ function applyModel(m) {
 function buildSide(m) {
   const main = document.getElementById("main");
   for (const node of sideNodes) node.remove();
+  cmdRows = new Map();
   const commands = Object.values(m.commands).filter((c) => !(c.builtin && ["play", "pause", "stop", "eos", "seek"].includes(c.name)));
   const ownProps = Object.values(m.properties).filter((p) => !p.builtin && p.path !== PERF_SUMMARY);
   const start = allRows.length;
@@ -1110,6 +1135,7 @@ function buildSide(m) {
 
 function build(m) {
   model = m;
+  unavailable = m.unavailable || {};
   aliasTarget = new Map(Object.values(m.properties).filter((p) => p.target).map((p) => [p.path, p.target]));
   rowsByPath = new Map(); allRows = []; sections = [];
   document.getElementById("name").textContent = m.name;
@@ -1129,7 +1155,7 @@ function build(m) {
   buildSide(m);
   buildElements(els, m);
   for (const row of allRows) row.update();
-  updateTransport(); updateTime(); applyFilter();
+  updateTransport(); updateCommands(); updateTime(); applyFilter();
   renderGraph();
 }
 

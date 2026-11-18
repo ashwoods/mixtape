@@ -5,6 +5,6 @@
     }
   },
   "lander": {
-    "checks": ["scripts/check"]
+    "checks": ["scripts/check --lint", ["scripts/check --tests", "scripts/check --docs"]]
   }
 }

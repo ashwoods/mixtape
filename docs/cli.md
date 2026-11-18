@@ -29,6 +29,10 @@ Options:
 Commands:
   run      run a pipeline until EOS or an error, like gst-launch-1.0 -e
   inspect  show the commands, properties and elements a player exposes
+  get      print property values of a player that `run --http` serves
+  set      set properties of a player that `run --http` serves
+  call     run a command of a player that `run --http` serves
+  watch    print the events of a player that `run --http` serves
   perf     work with what the perf feature measured
 ```
 

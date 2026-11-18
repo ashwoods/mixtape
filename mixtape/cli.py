@@ -31,10 +31,11 @@ if TYPE_CHECKING:
     from typer._click.core import Context
     from typer._click.formatting import HelpFormatter
 
+    from .client import ClientError
     from .events import EventStream
     from .exceptions import MixTapeError, PlayerPipelineError
     from .interfaces.messages import EventEncoder
-    from .model import CommandSpec, PropSpec
+    from .model import PropSpec
     from .player import Player
 
 logger = logging.getLogger("mixtape")
@@ -357,6 +358,285 @@ def inspect(
     return _inspect(target, as_json, expose_all, feature or [])
 
 
+# -- the client of `run --http`: get, set, call, watch -- #
+
+
+def _server_url(text: str) -> str:
+    if text.startswith(("http://", "https://")):
+        return text.rstrip("/")
+    try:
+        host, port = _http_address(text)
+    except typer.BadParameter:
+        raise typer.BadParameter(f"{text!r} is not a URL or [HOST:]PORT") from None
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+
+
+def _pair(text: str) -> tuple[str, Any]:
+    """The name and value of `NAME=VALUE`, whose value is a string, or of `NAME:=JSON`."""
+    name, sep, value = text.partition("=")
+    if not sep or name in ("", ":"):
+        raise typer.BadParameter(f"{text!r} is not NAME=VALUE or NAME:=JSON")
+    if not name.endswith(":"):
+        return name, value
+    try:
+        return name[:-1], json.loads(value)
+    except ValueError as exc:
+        raise typer.BadParameter(f"{text!r} has no JSON after ':=': {exc}") from None
+
+
+def _pair_text(text: str) -> str:
+    _pair(text)  # refused at once, as a usage error
+    return text
+
+
+ServerUrl = Annotated[
+    str,
+    typer.Argument(
+        metavar="URL",
+        parser=_server_url,
+        show_default=False,
+        help="the player, as `mixtape run --http` serves it: its URL, or [HOST:]PORT "
+        "(HOST defaults to 127.0.0.1)",
+    ),
+]
+VALUE_FORMS = (
+    "VALUE is a string, which the server converts as it does those of `run --set`; "
+    "{name}:=JSON gives a JSON value instead: {example}."
+)
+CLIENT_STATUS = (
+    "1 when the server cannot be reached, does not answer as mixtape or cannot do it, "
+    "130 on Ctrl-C."
+)
+
+
+def _client_failed(exc: ClientError) -> int:
+    """Print what the server or the client refused, and return the exit code: 2 for a name or
+    a value (404, 422), as `run` exits for a bad --set, else 1."""
+    _fail(exc.message, exc.code, exc.hint)
+    return EXIT_USAGE if exc.status in (404, 422) else EXIT_ERROR
+
+
+def _shown(value: Any) -> str:
+    """A value as text: a string as it is, for `$(mixtape get …)`, others as JSON."""
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+@app.command(
+    "get",
+    cls=_Command,
+    short_help="print property values of a player that `run --http` serves",
+    help="Print the values of the properties at PATH, of a player that `mixtape run --http` "
+    "serves: with one PATH its bare value, with several or none (every readable property) "
+    "one `path = value` line each. A PATH is one that `mixtape inspect` lists: a property "
+    "of the player (state) or of an element (vol.volume).",
+    epilog="Examples:\n\n\b\n"
+    "  mixtape get 8047\n"
+    "  mixtape get 8047 vol.volume\n"
+    "\n"
+    f"Exit status: 0 on success, 2 on bad usage or a property it does not have, {CLIENT_STATUS}",
+)
+def client_get(
+    ctx: typer.Context,
+    url: ServerUrl,
+    paths: Annotated[
+        list[str] | None,
+        typer.Argument(
+            metavar="PATH",
+            show_default=False,
+            help="a property, as `mixtape inspect` lists it; without any, every readable one",
+        ),
+    ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="print one JSON object {path: value}, and errors as JSON"),
+    ] = False,
+    verbose: Verbose = 0,
+) -> int:
+    from .client import Client, ClientError
+
+    global _as_json
+    _as_json = as_json
+    _start(ctx, verbose, needs_gst=False)
+    client = Client(url)
+    try:
+        values = client.get(paths or client.paths())
+    except ClientError as exc:
+        return _client_failed(exc)
+    if as_json:
+        _print_json(values)
+    elif paths and len(paths) == 1:
+        print(_shown(values[paths[0]]))
+    else:
+        for path, value in values.items():
+            print(f"{path} = {_shown(value)}")
+    return 0
+
+
+@app.command(
+    "set",
+    cls=_Command,
+    short_help="set properties of a player that `run --http` serves",
+    help="Set the properties of a player that `mixtape run --http` serves, in order, and stop "
+    "at the first the server refuses: those before it stay set. A PATH is one that "
+    f"`mixtape inspect` lists. {VALUE_FORMS.format(name='PATH', example='vol.mute:=true')}",
+    epilog="Examples:\n\n\b\n"
+    "  mixtape set 8047 vol.volume=0.5\n"
+    "  mixtape set 8047 vol.mute:=true\n"
+    "\n"
+    "Exit status: 0 on success, 2 on bad usage or a property or value it refuses, "
+    f"{CLIENT_STATUS}",
+)
+def client_set(
+    ctx: typer.Context,
+    url: ServerUrl,
+    assignments: Annotated[
+        list[str],
+        typer.Argument(
+            metavar="PATH=VALUE",
+            parser=_pair_text,
+            show_default=False,
+            help="a property, as `mixtape inspect` lists it, and its value: PATH=VALUE or "
+            "PATH:=JSON",
+        ),
+    ],
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="print the values as the server reads them back, as one JSON object "
+            "{path: value}, and errors as JSON",
+        ),
+    ] = False,
+    verbose: Verbose = 0,
+) -> int:
+    from .client import Client, ClientError
+
+    global _as_json
+    _as_json = as_json
+    _start(ctx, verbose, needs_gst=False)
+    try:
+        values = Client(url).set([_pair(text) for text in assignments])
+    except ClientError as exc:
+        return _client_failed(exc)
+    if as_json:
+        _print_json(values)
+    return 0
+
+
+@app.command(
+    "call",
+    cls=_Command,
+    short_help="run a command of a player that `run --http` serves",
+    help="Run the command NAME of a player that `mixtape run --http` serves, with its "
+    "arguments as NAME=VALUE, and print its result as JSON (nothing for null). Without NAME, "
+    "list the commands, and those that cannot run now with why. "
+    + VALUE_FORMS.format(name="NAME", example="eos:=true, times:=3, timeout:=null"),
+    epilog="Examples:\n\n\b\n"
+    "  mixtape call 8047\n"
+    "  mixtape call 8047 pause\n"
+    "  mixtape call 8047 stop eos:=true timeout:=null\n"
+    "\n"
+    "Exit status: 0 on success, 2 on bad usage or a command or argument it refuses, "
+    f"{CLIENT_STATUS}",
+)
+def client_call(
+    ctx: typer.Context,
+    url: ServerUrl,
+    name: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="NAME", show_default=False, help="the command; without it, list them"
+        ),
+    ] = None,
+    args: Annotated[
+        list[str] | None,
+        typer.Argument(
+            metavar="ARG",
+            parser=_pair_text,
+            show_default=False,
+            help="an argument of the command: NAME=VALUE or NAME:=JSON",
+        ),
+    ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help='print {"result": …}, or the commands and the reasons of those that cannot '
+            "run as the model has them, and errors as JSON",
+        ),
+    ] = False,
+    verbose: Verbose = 0,
+) -> int:
+    from .client import Client, ClientError
+
+    global _as_json
+    _as_json = as_json
+    _start(ctx, verbose, needs_gst=False)
+    client = Client(url)
+    try:
+        if name is None:
+            _list_commands(client.model(), as_json)
+            return 0
+        result = client.call(name, dict(_pair(text) for text in args or ()))
+    except ClientError as exc:
+        return _client_failed(exc)
+    if as_json:
+        _print_json({"result": result})
+    elif result is not None:
+        print(json.dumps(result))
+    return 0
+
+
+def _list_commands(model: dict[str, Any], as_json: bool) -> None:
+    """Print the commands of a model as `inspect` does, then those that cannot run now."""
+    unavailable = model.get("unavailable", {})
+    if as_json:
+        _print_json({"commands": model["commands"], "unavailable": unavailable})
+        return
+    commands = model["commands"].values()
+    rows = [_command_row(c["name"], c["parameters"], c["description"]) for c in commands]
+    print(_table(rows, cap=64))
+    if unavailable:
+        print("\nUnavailable now:")
+        print(_table([[name, reason] for name, reason in unavailable.items()]))
+
+
+@app.command(
+    "watch",
+    cls=_Command,
+    short_help="print the events of a player that `run --http` serves",
+    help="Print what the WebSocket /api/events of a player that `mixtape run --http` serves "
+    "sends, one JSON object per line as `run --events jsonl` prints them: the model, the "
+    "values and the graph, then every event, until the server closes it.",
+    epilog="Examples:\n\n\b\n"
+    "  mixtape watch 8047\n"
+    "\n"
+    "Exit status: 0 once the server closes the connection, 2 on bad usage or without the "
+    f"http extra, {CLIENT_STATUS}",
+)
+def client_watch(
+    ctx: typer.Context,
+    url: ServerUrl,
+    as_json: Annotated[bool, typer.Option("--json", help="print errors as JSON on stderr")] = False,
+    verbose: Verbose = 0,
+) -> int:
+    from .client import ClientError, watch
+
+    global _as_json
+    _as_json = as_json
+    _start(ctx, verbose, needs_gst=False)
+    try:
+        importlib.import_module("websockets")
+    except ImportError:
+        _fail("watch needs the http extra", "missing_extra", "pip install 'mixtape[http]'")
+        return EXIT_USAGE
+    try:
+        asyncio.run(watch(url))
+    except ClientError as exc:
+        return _client_failed(exc)
+    return 0
+
+
 @perf_app.command(
     "compare",
     cls=_Command,
@@ -434,7 +714,8 @@ def _usage_error(exc: Any, argv: Sequence[str]) -> None:
     # an option that misses its value is refused before its command has a context: its words
     words = [arg for arg in argv if not arg.startswith("-")][:2]
     named = " ".join(words if words == ["perf", "compare"] else words[:1])
-    fallback = f"mixtape {named}" if named in ("run", "inspect", "perf compare") else "mixtape"
+    commands = ("run", "inspect", "get", "set", "call", "watch", "perf compare")
+    fallback = f"mixtape {named}" if named in commands else "mixtape"
     path = ctx.command_path if ctx is not None else fallback
     if _as_json:
         _fail(message, "usage", f"'{path} --help' shows the usage")
@@ -612,7 +893,8 @@ def _inspect(words: Sequence[str], as_json: bool, expose_all: bool, features: Se
         print(f"Features: {', '.join(spec.features)}")
     if spec.commands:
         print("\nCommands:")
-        print(_table([_command_row(c) for c in spec.commands.values()], cap=64))
+        rows = [_command_row(c.name, c.parameters, c.description) for c in spec.commands.values()]
+        print(_table(rows, cap=64))
     print("\nProperties:")
     print(_table([_prop_row(player, p, p.path) for p in spec.properties.values()]))
     for element in spec.elements.values():
@@ -637,15 +919,17 @@ def _table(rows: list[list[str]], cap: int = 32) -> str:
     return "\n".join(f"  {line}".rstrip() for line in lines)
 
 
-def _command_row(command: CommandSpec) -> list[str]:
-    required = set(command.parameters.get("required", ()))
+def _command_row(name: str, parameters: dict[str, Any], description: str | None) -> list[str]:
+    """A command's row: its signature, from the JSON Schema of its `parameters`, and what it
+    does. Of a `CommandSpec`, or of its JSON as a client reads it from the model."""
+    required = set(parameters.get("required", ()))
     params = []
-    for name, schema in command.parameters.get("properties", {}).items():
-        text = f"{name}: {_type(schema, keep_null=True)}"
-        if name not in required:
+    for param, schema in parameters.get("properties", {}).items():
+        text = f"{param}: {_type(schema, keep_null=True)}"
+        if param not in required:
             text += f" = {_value(schema.get('default'))}"
         params.append(text)
-    return [f"{command.name}({', '.join(params)})", command.description or ""]
+    return [f"{name}({', '.join(params)})", description or ""]
 
 
 def _prop_row(player: Player, prop: PropSpec, name: str) -> list[str]:

@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.1 (unreleased)
+
+### Added
+- `Player.from_description()` without a description builds the class's own `description`:
+  `Testcard.from_description()`.
+- `mixtape run --set` of a property the player does not have suggests the closest ones it has:
+  `unknown property 'src.patern': did you mean 'src.pattern'?`.
+- The WebRTC example takes `--stun URL`, a STUN server for peers behind NAT (none by default).
+- The docs site has an `llms.txt`.
+
+### Changed
+- `perf` keeps 4 MiB of the debug log of each thread instead of 1 MiB: a WebRTC call logged
+  more than 1 MiB on one thread between two reads and lost tracer records.
+
+### Fixed
+- `perf` gives a window shorter than half the interval, such as the one a run ends with, no CPU
+  use or rates: a few milliseconds of CPU looked large in it, and `perf compare` of two runs of
+  the same code listed them as regressions.
+- `POST /api/commands/NAME` of an unknown command answers 404 `Unknown command 'NAME'`, as the
+  WebSocket does, instead of `Not Found`; the commands of an element added later, its action
+  signals, now work over REST too.
+- `perf` no longer warns that it has no record of the creation of elements it would have seen
+  but whose lines the debug log lost.
+- The CLI says it needs PyGObject only when `gi` or GStreamer is missing, not on any
+  ImportError.
+- The WebRTC example without a signalling server exits with an error instead of waiting.
+- The docs say that the `perf` and `leaks` tracers are one per process: two players measuring
+  in one process each get the samples of both.
+
 ## 0.8.0 (2026-11-17)
 
 ### Added

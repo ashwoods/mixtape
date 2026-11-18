@@ -135,7 +135,10 @@ class Perf(Feature):
         if not added:
             return
         self._names |= added
-        for name in await asyncio.to_thread(Collector.get().unknown, added):
+        unknown = await asyncio.to_thread(Collector.get().unknown, added)  # reads the log
+        if self._recorder is not None and self._recorder.lost:
+            return  # the lines lost may have had their creation: the reader warned of those
+        for name in unknown:
             logger.warning(
                 "perf has no record of the creation of %r, added to the pipeline after it "
                 "started: it was made before perf set up the debug log, so its measures "

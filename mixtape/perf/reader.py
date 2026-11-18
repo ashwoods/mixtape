@@ -22,8 +22,10 @@ from .parse import TracerLog
 
 logger = logging.getLogger(__name__)
 
-RING = 1 << 20
-"""Bytes the ring buffer logger keeps of each thread"""
+RING = 4 << 20
+"""Bytes the ring buffer logger keeps of each thread. A WebRTC call (`examples/webrtc_client.py`,
+320x240) has a thread log up to 1.6 MB of tracer records between two reads, which a ring of
+1 MiB lost; each read copies every ring whole, so a bigger one costs a little more each time"""
 TIMEOUT = 5
 """Seconds without a line after which the logger forgets the ring of a thread"""
 POLL = 0.25

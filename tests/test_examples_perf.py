@@ -27,12 +27,10 @@ def clean_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in SCRUBBED}
 
 
-def pytest_run(*args: str, encoder: str | None = None) -> subprocess.CompletedProcess[str]:
+def pytest_run(*args: str) -> subprocess.CompletedProcess[str]:
     """Run the suite of examples/recorder_suite in a pytest of its own, as the page does."""
     env = clean_env()
     env["PYTEST_ADDOPTS"] = "--timeout=60"  # not the 20 s per test of this project's ini
-    if encoder is not None:
-        env["RECORDER_ENCODER"] = encoder
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "examples/recorder_suite", *args],
         cwd=ROOT,
@@ -91,18 +89,15 @@ def test_perf_after_gstreamer_is_initialised_is_refused() -> None:
     assert "before anything else initialises GStreamer" in out.stdout
 
 
+# The slow encoder breaking the budget is perf.md's budget-fails sample (tests/samples/perf.py),
+# which asserts the budget's message and that the 360p test, with no budget, passes. Running it
+# here too took over 60 s on a busy machine (two x264 slow-preset recordings, one thread).
 @needs_recorder
-@pytest.mark.timeout(150)  # two pytest_run
+@pytest.mark.timeout(90)
 @pytest.mark.covers("test_recorder:recorder", "test_recorder:budgets")
-def test_recorder_suite_passes_its_budgets_and_a_slow_encoder_breaks_them(tmp_path: Path) -> None:
+def test_recorder_suite_passes_its_budgets(tmp_path: Path) -> None:
     fast = pytest_run("--mixtape-perf", str(tmp_path / "fast"))
     assert fast.returncode == 0, fast.stdout
     index = json.loads((tmp_path / "fast" / "index.json").read_text())
     assert [t["outcome"] for t in index["tests"]] == ["passed", "passed"]
     assert all(t["folder"] for t in index["tests"])
-
-    slow = pytest_run("--mixtape-perf", str(tmp_path / "slow"), encoder="speed-preset=slow")
-    assert slow.returncode == 1, slow.stdout
-    assert "perf budget: pipeline.latency p95 is" in slow.stdout
-    assert "on src→sink, over 500 ms" in slow.stdout
-    assert "1 failed, 1 passed" in slow.stdout  # the 360p test has no budget

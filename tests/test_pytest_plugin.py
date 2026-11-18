@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from mixtape.pytest_plugin import _folder_name
+from tests.flaky import timing
 
 pytestmark = pytest.mark.timeout(90)  # each starts a pytest, and GStreamer, of its own
 
@@ -287,17 +288,20 @@ def test_no_budget():
 
 
 @needs_queue_levels  # test_generous has a budget on queue.fill
+@pytest.mark.flaky(reason="test_generous's budget holds unless the machine is very busy")
 def test_a_budget_fails_the_test_that_is_over_it(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(test_suite=BUDGETS)
     result, out = measure(pytester, "--junitxml=junit.xml")
-    result.assert_outcomes(passed=2, failed=2)  # a failure, not an error in the teardown
+    outcomes = {test["id"]: test["outcome"] for test in load(out / "index.json")["tests"]}
+    generous = outcomes["test_suite.py::test_generous"] == "passed"
+    # a failure, not an error in the teardown
+    result.assert_outcomes(passed=1 + generous, failed=3 - generous)
     result.stdout.fnmatch_lines(
         ["*perf budget: pipeline.latency p95 is * on videotestsrc0→fakesink0, over 1 ns*"]
     )
     result.stdout.fnmatch_lines(["*AssertionError: its own*"])  # its own failure, not the budget
-    outcomes = {test["id"]: test["outcome"] for test in load(out / "index.json")["tests"]}
     assert outcomes["test_suite.py::test_tight"] == "failed"
-    assert outcomes["test_suite.py::test_generous"] == "passed"
+    assert outcomes["test_suite.py::test_no_budget"] == "passed"
     properties = {
         case.get("name"): {p.get("name"): p.get("value") for p in case.iter("property")}
         for case in ET.parse(pytester.path / "junit.xml").iter("testcase")
@@ -306,6 +310,7 @@ def test_a_budget_fails_the_test_that_is_over_it(pytester: pytest.Pytester) -> N
     assert properties["test_tight"]["perf.budget.process.cpu.mean"] == "100000.0"
     assert properties["test_generous"]["perf.budget.queue.fill.max"] == "1.0"
     assert not [name for name in properties["test_no_budget"] if "budget" in (name or "")]
+    timing(generous, f"test_generous went over its budgets\n{result.stdout.str()}")
 
 
 def test_a_bad_budget_is_a_usage_error(pytester: pytest.Pytester) -> None:

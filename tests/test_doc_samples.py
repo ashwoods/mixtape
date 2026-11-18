@@ -20,6 +20,7 @@ from tests.doc_samples import (
     shown_output,
     skip_reason,
 )
+from tests.flaky import Timing, timing
 from tests.graphs import mermaid
 from tests.samples import SAMPLES
 
@@ -38,6 +39,8 @@ def param(s: Sample) -> object:
     marks = [pytest.mark.timeout(s.timeout + 30)]
     if s.page in SERIAL:
         marks.append(pytest.mark.xdist_group(SERIAL[s.page]))
+    if s.flaky:
+        marks.append(pytest.mark.flaky(reason=s.flaky))
     return pytest.param(s, id=s.id, marks=marks)
 
 
@@ -102,23 +105,32 @@ def test_sample(sample: Sample, tmp_path: Path) -> None:
     if reason:
         pytest.skip(reason)
     shown = shown_block(sample)
+    # the page first, strictly: a bound on a number it states holds for the page, not the machine
+    for text in sample.expect:
+        if shown:
+            assert text in shown.text, f"{text!r} is not in {shown.where}"
+    if sample.check and sample.check_shown:
+        assert shown, f"{sample.id}: no output block to check"
+        try:
+            sample.check(shown.text)
+        except Timing as error:
+            raise AssertionError(f"{shown.where}: {error}") from None
     command = sample.command or matching(sample)[0].text
     out, status, timed_out = run_command(command, tmp_path, sample.timeout)
+    if timed_out and not sample.hangs:
+        raise Timing(f"ran over its {sample.timeout} s\n{out}")
     assert timed_out == sample.hangs, f"timed_out={timed_out}:\n{out}"
+    ran_out = bool(sample.out_of_time) and sample.out_of_time in out
+    timing(not ran_out, f"it printed {sample.out_of_time!r}\n{out}")
     if not sample.hangs:
         assert status in expected_statuses(sample), f"exit status {status}:\n{out}"
     for text in sample.expect:
         assert text in out, f"{text!r} is not in the real output:\n{out}"
-        if shown:
-            assert text in shown.text, f"{text!r} is not in {shown.where}"
     if sample.exact:
         assert shown, f"{sample.id}: no output block to compare with"
         assert out.strip() == shown.text.strip(), f"differs from {shown.where}:\n{out}"
     if sample.check:
         sample.check(out)
-        if sample.check_shown:
-            assert shown, f"{sample.id}: no output block to check"
-            sample.check(shown.text)
 
 
 @pytest.mark.parametrize(

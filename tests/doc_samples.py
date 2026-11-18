@@ -155,6 +155,11 @@ class Sample:
     exact: bool = False  # the real output is the block shown
     check: Callable[[str], None] | None = None  # asserts on the real output
     check_shown: bool = False  # and on the block shown, for numbers the page states
+    # why its timings vary from run to run: the test is marked flaky, and a timing() bound of
+    # `check`, a run over `timeout` or the program printing `out_of_time` is an xfail, not a
+    # failure (tests/flaky.py); the block shown is checked strictly all the same
+    flaky: str = ""
+    out_of_time: str = ""  # what the program prints when it runs out of its own time
     only: str = ""  # "linux" or "darwin"
     needs: tuple[str, ...] = ()  # tools on PATH that must be installed
     elements: tuple[str, ...] = ()  # GStreamer elements (or tracers) that must be installed

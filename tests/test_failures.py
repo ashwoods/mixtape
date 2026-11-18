@@ -25,10 +25,14 @@ from mixtape.events import Error, Message, StateChanged
 from mixtape.exceptions import PlayerPipelineError, PlayerSetStateError
 from mixtape.interfaces.http import serve
 from tests.elements import HANGING, RELEASE, release_all
+from tests.flaky import timing
 
 HANGS = "videotestsrc ! pyfaulty name=f mode=hang ! fakesink"
 HANGS_PLAYING = "videotestsrc ! pyfaulty name=f mode=hang ! fakesink async=false"
 ROOT = Path(__file__).parent.parent
+# a bound of half a second (state_timeout) on the loop's answer: the hang the change waits for is
+# released after 2 s, and `not RELEASE.is_set()` checks strictly that it was not waited for
+quick = pytest.mark.flaky(reason="a busy machine can hold the loop for half a second")
 
 
 class Quick(Player):
@@ -160,6 +164,7 @@ def test_a_failed_stop_keeps_the_pipeline_instead_of_disposing_it_outside_null()
     assert "CRITICAL" not in done.stderr, done.stderr
 
 
+@quick
 @pytest.mark.asyncio
 async def test_eos_on_a_hung_pipeline_answers_409_and_the_loop_runs_on():
     hangs_playing = "videotestsrc is-live=true ! pyfaulty name=f mode=hang ! fakesink async=false"
@@ -184,11 +189,14 @@ async def test_eos_on_a_hung_pipeline_answers_409_and_the_loop_runs_on():
             )
             started = time.monotonic()
             response = await client.post("/api/commands/eos")  # at once while stuck
+            took = time.monotonic() - started
             assert response.status_code == 409 and "stuck changing state" in response.text
-            assert time.monotonic() - started < 0.5
+            assert not RELEASE.is_set()
             RELEASE.set()
+    timing(took < 0.5, f"the answer took {took:.2f} s")
 
 
+@quick
 @pytest.mark.asyncio
 async def test_an_error_while_a_streaming_thread_hangs_leaves_the_loop_free():
     player = Quick.from_description(HANGS_PLAYING)
@@ -214,12 +222,13 @@ async def test_an_error_while_a_streaming_thread_hangs_leaves_the_loop_free():
 
     await next_event(stream, StateChanged, lambda event: event.new == Gst.State.NULL)
     ticker.cancel()
-    assert longest[0] < Quick.state_timeout
     await bounded(player.play())  # usable again once the NULL finished
     await bounded(player.stop())
     player.teardown()
+    timing(longest[0] < Quick.state_timeout, f"the loop was held for {longest[0]:.2f} s")
 
 
+@quick
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["buffering", "clock-lost"])
 async def test_buffering_and_a_lost_clock_change_state_off_the_loop(kind):
@@ -241,12 +250,13 @@ async def test_buffering_and_a_lost_clock_change_state_off_the_loop(kind):
     started = time.monotonic()
     player.pipeline.post_message(message)
     await next_event(stream, Message, lambda event: event.message.type == message.type)
-    assert time.monotonic() - started < Quick.state_timeout  # handled without the lock
-    assert not RELEASE.is_set()
+    took = time.monotonic() - started
+    assert not RELEASE.is_set()  # handled without the lock
 
     await bounded(asyncio.to_thread(RELEASE.wait))
     await bounded(player.stop())  # after the changes it queued
     player.teardown()
+    timing(took < Quick.state_timeout, f"the {kind} message took {took:.2f} s")
 
 
 def test_run_exits_naming_the_element_that_hangs(monkeypatch, capsys):

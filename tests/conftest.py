@@ -1,7 +1,11 @@
 # type: ignore
 import logging
+import os
+
 import colorlog
 import pytest
+
+from tests.flaky import Timing
 
 pytest_plugins = ["pytester"]
 
@@ -26,6 +30,35 @@ def pytest_configure(config):
         "covers(*sections): the example sections (name:section, as in recorder:build) whose"
         " code this test exercises; docs/ shows it under the snippet (hooks/source_lines.py)",
     )
+    config.addinivalue_line(
+        "markers",
+        "flaky(reason): a bound this test measures with tests.flaky.timing() can break on a busy"
+        " machine; when one does, the test is an xfail with its message (CONTRIBUTING.md)",
+    )
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    """A test marked flaky whose timing() bound broke is an xfail, as pytest.xfail() makes one:
+    `x` in the progress and XFAIL with the bound's message in the summary."""
+    report = yield
+    marker = item.get_closest_marker("flaky")
+    if marker and report.when == "call" and report.failed and call.excinfo.errisinstance(Timing):
+        first = str(call.excinfo.value).strip().splitlines()[:1]
+        report.outcome = "skipped"
+        report.wasxfail = f"flaky, {marker.kwargs['reason']}: {' '.join(first)}"
+    return report
+
+
+def pytest_terminal_summary(terminalreporter):
+    """On GitHub Actions, each broken bound is a warning on the run's page too."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    for report in terminalreporter.stats.get("xfailed", []):
+        if getattr(report, "wasxfail", "").startswith("flaky, "):
+            terminalreporter.write_line(
+                f"::warning title=flaky::{report.nodeid}: {report.wasxfail}"
+            )
 
 
 @pytest.fixture

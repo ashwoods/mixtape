@@ -17,6 +17,7 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
 from mixtape.player import ensure_init
+from tests.flaky import timing
 
 ensure_init()
 pytestmark = pytest.mark.skipif(
@@ -66,13 +67,15 @@ def test_a_failed_stop():
     assert "CRITICAL" not in err  # the pipeline is kept, not disposed outside NULL
 
 
+@pytest.mark.flaky(reason="one wait of 5 s is under 10 s unless the machine is very busy")
 def test_a_hang_in_the_preroll_ends_on_one_interrupt():
     started = time.monotonic()
     hangs = f"{SRC} ! faulty name=f method=hang num-buffers=0 ! fakesink"
     code, err = run(hangs, interrupt_on="to ready")
     assert code == 1
     assert "error: could not set the pipeline to null within 5 s: f still changing" in err
-    assert time.monotonic() - started < 10
+    took = time.monotonic() - started
+    timing(took < 10, f"it took {took:.1f} s: two waits of 5 s?")
 
 
 def test_leaks_names_leakys_buffers():

@@ -470,7 +470,8 @@ _WHEN = "__mixtape_command_when__"
 
 type Check = Callable[[Any], bool | str]
 """When a command can run: called with its owner, the player (the feature, for a feature's
-command). True when it can, else the reason it cannot, or False for a generic one."""
+command). True when it can, else the reason it cannot as a non-empty string, or False for a
+generic one. Anything else, such as None, "" or 0, counts as a check that raises."""
 
 
 @overload
@@ -482,11 +483,13 @@ def command(method: Callable[..., Any] | None = None, /, *, when: Check | None =
     [`Feature`][mixtape.Feature], as a command.
 
     `@command(when=check)` says when it can run: `check(self)` is a sync function that returns
-    True when it can, or the reason it cannot as a string (False gives a generic reason). The
-    player lists the commands that cannot run now in [`unavailable()`][mixtape.Player.unavailable]
-    and publishes the changes as [`CommandsChanged`][mixtape.events.CommandsChanged]. `invoke`,
-    and so the command line and the HTTP API, refuses such a command with the reason; calling
-    the method yourself does not check. A check should be quick and change nothing.
+    True when it can, or the reason it cannot as a non-empty string (False gives a generic
+    reason). Any other value, such as None, "" or 0, counts as a check that raises: the command
+    is unavailable, and the first one is logged. The player lists the commands that cannot run
+    now in [`unavailable()`][mixtape.Player.unavailable] and publishes the changes as
+    [`CommandsChanged`][mixtape.events.CommandsChanged]. `invoke`, and so the command line and
+    the HTTP API, refuses such a command with the reason; calling the method yourself does not
+    check. A check should be quick and change nothing.
     """
 
     def mark(method: Callable[..., Any]) -> Callable[..., Any]:

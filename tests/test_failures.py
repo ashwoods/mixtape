@@ -17,16 +17,17 @@ import pytest
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst
+from gi.repository import GLib, Gst
 
 from mixtape import Player
 from mixtape.cli import main
-from mixtape.events import StateChanged
+from mixtape.events import Error, Message, StateChanged
 from mixtape.exceptions import PlayerPipelineError, PlayerSetStateError
 from mixtape.interfaces.http import serve
 from tests.elements import HANGING, RELEASE, release_all
 
 HANGS = "videotestsrc ! pyfaulty name=f mode=hang ! fakesink"
+HANGS_PLAYING = "videotestsrc ! pyfaulty name=f mode=hang ! fakesink async=false"
 ROOT = Path(__file__).parent.parent
 
 
@@ -42,6 +43,25 @@ def released():
 
 def bounded(awaitable):
     return asyncio.wait_for(awaitable, 5)
+
+
+async def next_event(stream, kind, where=lambda event: True):
+    async def find():
+        async for event in stream:
+            if isinstance(event, kind) and where(event):
+                return event
+        raise AssertionError(f"stream ended without a {kind.__name__}")
+
+    return await bounded(find())
+
+
+async def tick(longest: list[float]) -> None:
+    """Keep in `longest[0]` the longest the loop went without running this task."""
+    last = time.monotonic()
+    while True:
+        await asyncio.sleep(0.01)
+        now = time.monotonic()
+        longest[0], last = max(longest[0], now - last), now
 
 
 @pytest.mark.asyncio
@@ -167,6 +187,66 @@ async def test_eos_on_a_hung_pipeline_answers_409_and_the_loop_runs_on():
             assert response.status_code == 409 and "stuck changing state" in response.text
             assert time.monotonic() - started < 0.5
             RELEASE.set()
+
+
+@pytest.mark.asyncio
+async def test_an_error_while_a_streaming_thread_hangs_leaves_the_loop_free():
+    player = Quick.from_description(HANGS_PLAYING)
+    player.setup()
+    stream = player.events()
+    until_eos = asyncio.create_task(player.play_until_eos())
+    assert await asyncio.to_thread(HANGING.wait, 5)
+    longest = [0.0]
+    ticker = asyncio.create_task(tick(longest))
+    threading.Timer(2, RELEASE.set).start()  # from a thread: the loop used to wait for it
+
+    f = player.pipeline.get_by_name("f")
+    gerror = GLib.Error.new_literal(Gst.StreamError.quark(), "boom", Gst.StreamError.FAILED)
+    f.post_message(Gst.Message.new_error(f, gerror, "debug"))
+    # the NULL the error queues blocks on the hung thread: the error is raised after
+    # state_timeout, with the player stuck, and a change asked meanwhile is refused
+    with pytest.raises(PlayerPipelineError, match="boom"):
+        await bounded(until_eos)
+    assert (await next_event(stream, Error)).error is player.error
+    assert not RELEASE.is_set()
+    with pytest.raises(PlayerSetStateError, match="stuck changing state"):
+        await player.play()
+
+    await next_event(stream, StateChanged, lambda event: event.new == Gst.State.NULL)
+    ticker.cancel()
+    assert longest[0] < Quick.state_timeout
+    await bounded(player.play())  # usable again once the NULL finished
+    await bounded(player.stop())
+    player.teardown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["buffering", "clock-lost"])
+async def test_buffering_and_a_lost_clock_change_state_off_the_loop(kind):
+    player = Quick.from_description(HANGS_PLAYING)
+    player.setup()
+    stream = player.events()
+    await bounded(player.play())
+    assert await asyncio.to_thread(HANGING.wait, 5)
+    # a stop on another thread holds the pipeline's state lock until the hang ends
+    threading.Thread(target=player.pipeline.set_state, args=(Gst.State.NULL,), daemon=True).start()
+    await next_event(stream, StateChanged, lambda event: event.new == Gst.State.PAUSED)
+    threading.Timer(2, RELEASE.set).start()
+
+    message = (
+        Gst.Message.new_buffering(None, 50)
+        if kind == "buffering"
+        else Gst.Message.new_clock_lost(None, Gst.SystemClock.obtain())
+    )
+    started = time.monotonic()
+    player.pipeline.post_message(message)
+    await next_event(stream, Message, lambda event: event.message.type == message.type)
+    assert time.monotonic() - started < Quick.state_timeout  # handled without the lock
+    assert not RELEASE.is_set()
+
+    await bounded(asyncio.to_thread(RELEASE.wait))
+    await bounded(player.stop())  # after the changes it queued
+    player.teardown()
 
 
 def test_run_exits_naming_the_element_that_hangs(monkeypatch, capsys):

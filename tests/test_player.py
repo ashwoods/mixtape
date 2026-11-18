@@ -275,13 +275,69 @@ async def test_error_during_a_pending_play_reaches_the_caller():
         assert isinstance(error.gerror, GLib.Error)
         assert str(error) == "src: boom (debug)"
         assert player.error is error
-        assert (await wait_for_event(stream, Error)).error is error
         assert player.state == Gst.State.NULL
+        seen = []
+        while not isinstance(event := await wait_for_event(stream, StateChanged | Error), Error):
+            seen.append(event.new)
+        assert event.error is error
+        assert seen[-1] == Gst.State.NULL  # the Error comes once the player stopped it
 
         # the player stays attached and usable
         assert player.loop is asyncio.get_running_loop()
     gc.collect()
     assert unhandled == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sink", ["fakesink", "fakesink async=false"], ids=["async", "at-once"])
+async def test_a_state_is_published_before_the_wait_for_it_returns(sink: str):
+    # what a WebSocket's reply to `play` relies on to come after the states
+    async with Player.from_description(f"videotestsrc ! {sink}") as player:
+        stream = player.events()
+        await player.play()
+        published = []
+        while not stream._queue.empty():
+            published.append(stream._queue.get_nowait())
+        assert [e.new for e in published if isinstance(e, StateChanged)][-1] == Gst.State.PLAYING
+
+
+@pytest.mark.asyncio
+async def test_an_eos_after_an_error_does_not_end_the_wait_the_error_ended():
+    async with Player.from_description("videotestsrc name=src is-live=true ! fakesink") as player:
+        stream = player.events()
+        until_eos = asyncio.create_task(player.play_until_eos())
+        while player.state != Gst.State.PLAYING:
+            await wait_for_event(stream, StateChanged)
+        post_error(player.pipeline)  # basesrc follows a flow error with an EOS
+        player.pipeline.post_message(Gst.Message.new_eos(player.pipeline))
+        with pytest.raises(PlayerPipelineError, match="boom"):
+            await bounded(until_eos)
+        kinds = []
+        while not isinstance(event := await wait_for_event(stream, Eos | Error), Error):
+            kinds.append(type(event))
+        assert kinds == []  # the stream the error ended has no end of its own
+        assert not player._eos
+
+
+@pytest.mark.asyncio
+async def test_a_play_right_after_an_error_wins_over_the_stop_it_queued():
+    async with Player.from_description("videotestsrc name=src is-live=true ! fakesink") as player:
+        stream = player.events()
+        until_eos = asyncio.create_task(player.play_until_eos())
+        await wait_for_event(stream, StateChanged)
+        post_error(player.pipeline)  # on the loop: handled on its next turn
+
+        async def errored() -> None:
+            while player.error is None:
+                await asyncio.sleep(0)
+
+        await bounded(errored())
+        await bounded(player.play())  # at once, behind the NULL the error queued
+        assert (player.state, player.error) == (Gst.State.PLAYING, None)
+        with pytest.raises(PlayerPipelineError, match="boom"):
+            await bounded(until_eos)  # the wait the error ended, not the play after it
+        await wait_for_event(stream, Error)
+        assert (player.state, player.error) == (Gst.State.PLAYING, None)
 
 
 @pytest.mark.asyncio
@@ -372,8 +428,7 @@ async def test_pause_while_buffering_stays_paused(pipeline):
 
         await bounded(player.play())
         await buffering(50)
-        assert heading() == Gst.State.PAUSED
-        while player.state != Gst.State.PAUSED:
+        while player.state != Gst.State.PAUSED:  # changed on the worker thread
             await wait_for_event(stream, StateChanged)
         await bounded(player.pause())  # already PAUSED, by buffering
         await buffering(100)  # the user's pause wins: no resume
@@ -423,15 +478,28 @@ def test_reuse_after_the_loop_closed(pipeline):
     player.teardown()
 
 
+def test_reuse_after_a_loop_closed_without_cancelling_its_waits():
+    description = "audiotestsrc num-buffers=50 ! wavenc ! decodebin ! queue ! fakesink sync=true"
+    player = Player.from_description(description)
+    loop = asyncio.new_event_loop()
+    loop.create_task(player.play_until_eos())
+    loop.run_until_complete(asyncio.sleep(0.2))  # playing, its EOS a second away
+    loop.close()  # its waits stay: resolving one used to raise "Event loop is closed"
+    relinks = len(player._relink_ids)
+    asyncio.run(bounded(player.play_until_eos()))
+    assert len(player._relink_ids) == relinks == 1  # connected again, not once more
+    player.teardown()
+
+
 @pytest.mark.asyncio
-async def test_teardown_cancels_waiters_and_ends_events():
+async def test_teardown_fails_waiters_and_ends_events():
     player = Player.from_description(NEVER_PREROLLS)
     stream = player.events()
     task = asyncio.create_task(player.play())
     await wait_for_event(stream, StateChanged)
     player.teardown()
-    await asyncio.wait({task}, timeout=5)
-    assert task.cancelled()
+    with pytest.raises(PlayerSetStateError, match="^The player was torn down$"):
+        await bounded(task)
     assert [e async for e in stream]  # ends, after what was already published
 
     # a later await attaches again
@@ -504,6 +572,25 @@ async def test_position_events_only_for_position_streams_polled_lazily():
         assert player._position_task is None and task.done()
         await bounded(player.stop())
     assert not [e async for e in plain if isinstance(e, Position)]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_position_poll_is_logged_once_and_starts_again(caplog, monkeypatch):
+    player = FastPositions.from_description(LIVE)
+    async with player:
+        for _ in range(2):
+            player.events(position=True)
+            task = player._position_task
+            with monkeypatch.context() as patched:
+                patched.setattr(player, "_publish_position", lambda: 1 / 0)
+                await asyncio.wait({task}, timeout=5)
+            assert task.done() and player._position_task is None
+        assert caplog.text.count("Polling the position failed") == 1
+
+        stream = player.events(position=True)  # a new stream polls again
+        await bounded(player.play())
+        await wait_for_event(stream, Position)
+        assert (await wait_for_event(stream, Position)).position is not None
 
 
 @pytest.mark.asyncio
@@ -655,3 +742,16 @@ async def test_a_check_that_raises_makes_the_command_unavailable_and_is_logged_o
     for _ in range(2):
         assert player.unavailable()["boom"] == "'boom' could not be checked: division by zero"
     assert caplog.text.count("The check of the command 'boom' failed") == 1
+
+
+@pytest.mark.parametrize("verdict", [None, "", 0])
+def test_a_check_that_returns_neither_bool_nor_a_reason_is_an_error(Gst, caplog, verdict):
+    class Vague(Player):
+        @command(when=lambda self: verdict)
+        def go(self) -> None: ...
+
+    player = Vague.from_description("fakesink")
+    expected = f"'go' could not be checked: it returned {verdict!r}, not True, False or a reason"
+    for _ in range(2):
+        assert player.unavailable()["go"] == expected
+    assert caplog.text.count("The check of the command 'go' failed") == 1

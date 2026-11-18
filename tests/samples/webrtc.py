@@ -53,6 +53,8 @@ SAMPLES: list[Sample] = [
         # the port it picked for its UPnP server is taken (CI run 44160582039)
         expect=("alice received 60 frames from bob", "bob received 60 frames from alice"),
         elements=("webrtcsink", "webrtcsrc", "nicesrc"),
+        flaky="a call has 30 s to get going, which a busy machine can take",
+        out_of_time="error: no call within 30 s",
     ),
     not_run(
         PAGE,

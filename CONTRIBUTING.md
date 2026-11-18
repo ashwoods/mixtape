@@ -65,6 +65,37 @@ After that, `uv run pytest`, `uv run ruff format` and `uv run mypy` work on thei
 
 `uv run mkdocs serve` serves the documentation at http://127.0.0.1:8000 while you edit it.
 
+## Tests that may be flaky
+
+Some tests bound a measured time, latency or CPU share, and a busy machine can break the bound
+whatever the code does. Such a test is marked `@pytest.mark.flaky(reason=...)` and checks its
+bounds with `tests.flaky.timing(ok, message)`, after its other checks. A bound that does not hold
+is reported as an xfail, not a failure: `x` in the progress, and a line
+`XFAIL ... - flaky, <reason>: <message>` in the summary. On GitHub Actions it is also a warning
+annotation. Any other failure of the test still fails, and so does `timing()` in a test without
+the marker.
+
+A doc sample sets `flaky=` and `out_of_time=` on its `Sample`. The page's block is still checked
+strictly; only the run's timing bounds, a run over its timeout, or the program printing its
+out-of-time line are an xfail.
+
+These tests may be flaky:
+
+- The `record-and-read`, `compare`, `suite`, `budget-fails` and `baseline` samples of `perf.md`,
+  and `tests/test_examples_perf.py`: the latency and CPU of x264 encodes of a live source depend
+  on the load.
+- The `demo` sample of `webrtc.md` and the call tests of `tests/test_examples_webrtc.py`: a call
+  has 30 s to get going.
+- `tests/test_pytest_plugin.py::test_a_budget_fails_the_test_that_is_over_it`: the budget of
+  `test_generous`.
+- `tests/test_threads.py`: the CPU of the threads adding up to the process's within 25%.
+- `tests/test_failures.py`: the half-second bounds on the loop's answers.
+- `tests/test_gst_c_crash.py`: the hang ending within 10 s.
+
+A new test may use the mechanism only for a bound on what the machine's speed decides, never for
+the shape of an output or for behaviour. When a run shows an XFAIL `flaky` line and the machine
+is not busy, look at it: the bound may have broken because of the code.
+
 ## Without a native GStreamer
 
 Run the same checks in Docker (Ubuntu 24.04):

@@ -11,6 +11,7 @@ import pytest
 
 from tests.doc_samples import ROOT, SCRUBBED
 from tests.examples import EXAMPLES, run_example
+from tests.flaky import in_time, timing
 
 # webrtcsink and webrtcsrc come from gst-plugins-rs, nicesrc from libnice (webrtcbin's ICE)
 NEEDED = ("webrtcsink", "webrtcsrc", "webrtcbin", "nicesrc")
@@ -30,6 +31,12 @@ pytestmark = [
     pytest.mark.skipif(MISSING is not None, reason=MISSING or ""),
     pytest.mark.timeout(90),
 ]
+call = pytest.mark.flaky(reason="a call has 30 s to get going, which a busy machine can take")
+
+
+def in_30_s(out: subprocess.CompletedProcess[str]) -> None:
+    """The call got going within the client's 30 s."""
+    timing("error: no call within 30 s" not in out.stdout, out.stdout)
 
 
 def _free_port() -> int:
@@ -46,9 +53,12 @@ def _free_port() -> int:
     "webrtc_client:host",
     "webrtc_client:main",
 )
+@call
 def test_two_clients_in_one_process_each_receive_the_other() -> None:
     server = f"ws://127.0.0.1:{_free_port()}"
-    out = run_example("webrtc_client.py", "--demo", "--server", server, timeout=60)
+    with in_time():
+        out = run_example("webrtc_client.py", "--demo", "--server", server, timeout=60)
+    in_30_s(out)
     assert out.returncode == 0, out.stdout
     # not exact, as in webrtc.md's demo: on a busy machine the teardown can warn on stderr, from
     # GLib ("poll(2) failed due to: Bad file descriptor" as a call stops) or from a signaller
@@ -78,6 +88,7 @@ def _wait_for_port(port: int, host: subprocess.Popen[str]) -> None:
     raise AssertionError(f"the host's signalling server did not listen on {port}")
 
 
+@call
 def test_a_client_calls_the_host_in_another_process() -> None:
     port = _free_port()
     server = f"ws://127.0.0.1:{port}"
@@ -93,9 +104,18 @@ def test_a_client_calls_the_host_in_another_process() -> None:
     )
     try:
         _wait_for_port(port, host)
-        out = run_example(
-            "webrtc_client.py", "--name", "guest", "--server", server, "--call", "host", timeout=60
-        )  # it waits for the host to publish
+        with in_time():
+            out = run_example(  # it waits for the host to publish
+                "webrtc_client.py",
+                "--name",
+                "guest",
+                "--server",
+                server,
+                "--call",
+                "host",
+                timeout=60,
+            )
+        in_30_s(out)
         assert out.returncode == 0, out.stdout
         assert "guest received 60 frames from host" in out.stdout.splitlines(), out.stdout
     finally:

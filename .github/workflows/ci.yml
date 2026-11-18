@@ -4,11 +4,22 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:  # release.yml publishes only what passes
+
+permissions:
+  contents: read
 
 jobs:
-  check:
+  # `rs` adds the Rust plugins of gst-plugins-rs, so every test runs; `stock` has only
+  # Ubuntu's packages, so the tests that need those plugins must skip, not fail.
+  ubuntu:
+    name: Ubuntu 24.04 (${{ matrix.plugins }})
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        plugins: [rs, stock]
     steps:
       - uses: actions/checkout@v5
 
@@ -32,6 +43,7 @@ jobs:
       # plugin (webrtcsink, webrtcsrc) are not packaged for Ubuntu: build them once and
       # cache the plugins.
       - name: Cache GStreamer Rust plugins
+        if: matrix.plugins == 'rs'
         id: rs-plugins
         uses: actions/cache@v6
         with:
@@ -40,7 +52,7 @@ jobs:
 
       # The dev packages double the download, so they come only with a build.
       - name: Build GStreamer Rust plugins
-        if: steps.rs-plugins.outputs.cache-hit != 'true'
+        if: matrix.plugins == 'rs' && steps.rs-plugins.outputs.cache-hit != 'true'
         timeout-minutes: 30
         run: |
           scripts/apt-install \
@@ -51,9 +63,11 @@ jobs:
           scripts/build-rs-plugins ~/.cache/gst-rs-plugins
 
       - name: Put the Rust plugins on GST_PLUGIN_PATH
+        if: matrix.plugins == 'rs'
         run: echo "GST_PLUGIN_PATH=$HOME/.cache/gst-rs-plugins" >> "$GITHUB_ENV"
 
       - name: Check the Rust plugins load
+        if: matrix.plugins == 'rs'
         run: |
           gst-inspect-1.0 queue-levels
           gst-inspect-1.0 webrtcsink
@@ -69,3 +83,36 @@ jobs:
         run: scripts/check
         env:
           MIXTAPE_PYTHON: /usr/bin/python3
+
+      - name: The wheel, installed
+        timeout-minutes: 5
+        run: scripts/wheel-smoke
+        env:
+          MIXTAPE_PYTHON: /usr/bin/python3
+
+  # Homebrew's gstreamer has the Rust plugins, and its Python has gi.
+  macos:
+    name: macOS (Homebrew)
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install GStreamer
+        timeout-minutes: 20
+        run: |
+          brew install gstreamer libnice-gstreamer
+          gst-inspect-1.0 queue-levels
+          gst-inspect-1.0 webrtcsink
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.7"
+
+      - name: ruff, mypy, pytest
+        timeout-minutes: 20
+        run: scripts/check
+
+      - name: The wheel, installed
+        timeout-minutes: 5
+        run: MIXTAPE_PYTHON="$(brew --prefix)/bin/python3" scripts/wheel-smoke

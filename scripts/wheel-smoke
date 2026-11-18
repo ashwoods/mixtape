@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Build the wheel and try it the way a user gets it: installed into a new venv, away from the
+# checkout, on the Python that has gi and GStreamer (MIXTAPE_PYTHON, python3 by default).
+#
+#   scripts/wheel-smoke
+set -euo pipefail
+cd "$(dirname "$0")/.."
+python="${MIXTAPE_PYTHON:-python3}"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+uv build --quiet --wheel --out-dir "$tmp/dist"
+uv venv --quiet --system-site-packages --python "$python" "$tmp/venv"
+uv pip install --quiet --python "$tmp/venv/bin/python" "$tmp"/dist/*.whl
+
+cd "$tmp"
+venv/bin/python - <<'EOF'
+from pathlib import Path
+
+import mixtape
+
+package = Path(mixtape.__file__).parent
+assert package.is_relative_to(Path.cwd()), f"imported {package}, not the installed wheel"
+assert (package / "py.typed").is_file(), "no py.typed"
+assert (package / "vendor/uplot/uPlot.iife.min.js").is_file(), "no vendor/uplot"
+EOF
+venv/bin/mixtape --version
+venv/bin/mixtape inspect "videotestsrc ! fakesink" > /dev/null
+echo "wheel ok"

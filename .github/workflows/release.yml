@@ -1,6 +1,6 @@
 name: Release
 
-# Publishing a GitHub release builds the wheel and sdist from its tag, attests their
+# Publishing a GitHub release runs CI on its tag, then builds the wheel and sdist, attests their
 # provenance (`gh attestation verify <file> --repo ashwoods/mixtape`), attaches them and
 # uploads them to PyPI.
 on:
@@ -8,8 +8,14 @@ on:
     types: [published]
 
 jobs:
+  # The tag's commit passes every check first.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   dist:
+    needs: ci
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write  # attach the files to the release
       id-token: write
@@ -51,6 +57,7 @@ jobs:
   pypi:
     needs: dist
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/project/mixtape/${{ github.ref_name }}/

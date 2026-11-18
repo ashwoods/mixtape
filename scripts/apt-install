@@ -28,8 +28,10 @@ drop_mirror() {
 
 [[ -f $mirrors ]] && { echo "apt-install: mirrors:"; cat "$mirrors"; }
 
+# A good mirror sends 7 MB/s: CI's 65 MB take 10 s, and the Rust build's 150 MB of dev
+# packages under a minute.
 for attempt in 1 2 3; do
-  if apt_get 2m update && apt_get 4m install --download-only --no-install-recommends "$@"; then
+  if apt_get 2m update && apt_get 2m install --download-only --no-install-recommends "$@"; then
     apt_get 10m install --no-install-recommends "$@"
     exit 0
   fi

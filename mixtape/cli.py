@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import errno
 import importlib
 import importlib.metadata
@@ -358,9 +359,14 @@ def _usage_error(exc: Any, argv: Sequence[str]) -> None:
 
 
 def _gst_available() -> bool:
+    """Whether PyGObject and GStreamer 1.0 are there. Any other ImportError, of mixtape's own
+    modules or what they import, is not theirs to explain: it is raised where it happens."""
     try:
-        importlib.import_module("mixtape.player")  # imports gi and GStreamer
-    except (ImportError, ValueError):  # gi.require_version raises ValueError
+        import gi
+
+        gi.require_version("Gst", "1.0")  # raises ValueError without GStreamer
+        from gi.repository import Gst  # noqa: F401
+    except (ImportError, ValueError):
         return False
     return True
 
@@ -553,6 +559,23 @@ def _value(value: Any) -> str:
     return json.dumps(value)
 
 
+def _known(player: Player, path: str) -> str:
+    """The hint for a `--set` of a property the player does not have: the closest of those it
+    has, or where to see them all."""
+    spec = player.describe()
+    key, _, name = path.rpartition(".")
+    if (element := spec.elements.get(key)) is not None:  # its properties, by their own names
+        names = list(element.properties)
+        close = [f"{key}.{n}" for n in difflib.get_close_matches(name, names, n=3)]
+    else:  # a typo in the element's key, or one of the player's own properties
+        paths = [p.path for p in spec.properties.values()]
+        paths += [p.path for e in spec.elements.values() for p in e.properties.values()]
+        close = difflib.get_close_matches(path, paths, n=3)
+    if close:
+        return f"did you mean {' or '.join(map(repr, close))}?"
+    return "mixtape inspect TARGET lists them"
+
+
 async def _play(
     player: Player,
     verbose: int,
@@ -605,7 +628,10 @@ async def _play(
             pump = macos.start_pump()  # before the pipeline leaves NULL
         async with player:
             for path, value in assignments:
-                await player.set(path, value)
+                try:
+                    await player.set(path, value)
+                except UnknownNameError as exc:
+                    raise UnknownNameError(f"{exc}: {_known(player, path)}") from None
             if http is None:
                 await player.play_until_eos()
             else:
@@ -618,8 +644,6 @@ async def _play(
             raise
         return EXIT_INTERRUPTED
     except ModelError as exc:
-        if isinstance(exc, UnknownNameError) and str(exc).startswith("Unknown property"):
-            exc = UnknownNameError(f"{exc}: mixtape inspect TARGET lists them")
         _error(exc)
         return EXIT_USAGE
     except PlayerPipelineError as exc:

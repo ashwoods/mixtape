@@ -292,6 +292,10 @@ def test_errors_start_in_lower_case(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().err == (
         "error: unknown property 'src.nope': mixtape inspect TARGET lists them\n"
     )
+    assert main(["run", "--set", "src.patern=1", "videotestsrc name=src ! fakesink"]) == 2
+    assert capsys.readouterr().err == (
+        "error: unknown property 'src.patern': did you mean 'src.pattern'?\n"
+    )
     assert main(["run", "fakesink", "--feature", "nope"]) == 2
     assert capsys.readouterr().err.endswith("or gst:NAME for any GStreamer tracer\n")
 
@@ -347,6 +351,19 @@ def test_without_pygobject_a_command_that_needs_it_says_so(how: str, command: st
         "error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: "
         "see https://shashi.to/mixtape/troubleshooting/\n"
     )
+
+
+def test_an_unrelated_import_error_is_not_blamed_on_pygobject() -> None:
+    code = (
+        "import sys\n"
+        "sys.modules['mixtape.player'] = None\n"  # `import mixtape.player` raises ImportError
+        "from mixtape.cli import main\n"
+        "sys.exit(main(['inspect', 'fakesrc ! fakesink']))\n"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 1
+    assert "needs PyGObject" not in done.stderr
+    assert "Error: import of mixtape.player halted" in done.stderr, done.stderr
 
 
 def test_without_pygobject_perf_compare_works(tmp_path: Path) -> None:

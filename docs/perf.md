@@ -85,6 +85,11 @@ them. When it is not 0, some tracer records are missing from the numbers, and `m
 a warning with the count at the end. It has a `format_version` too, 1: a reader takes a document
 without one as 1, and it changes only when a field is renamed or removed.
 
+`perf` reads GStreamer's debug log itself and passes on the lines that are not its tracers':
+to stderr, or to the file `GST_DEBUG_FILE` names (`%p` is the process id, `-` is stdout), so
+that file has your categories but not the tracer records. A `GST_DEBUG_FILE` with `%r`, a
+number `perf` cannot know, gets the tracer records as well.
+
 ## The report
 
 ![The top of report.html: the pipeline graph and the charts of latency and queue fill](images/perf-report.png)
@@ -366,8 +371,8 @@ earlier one: `--mixtape-perf-baseline BASE` takes the `--mixtape-perf` folder of
 (CI keeps the one of the main branch), compares at the end as `mixtape perf compare` does,
 writes `compare.json` next to the index (the same JSON as `mixtape perf compare --json`; from
 0.8, fields are only added, never renamed or removed: `lost` is an addition), prints the result
-in its own section and fails the session, exit status 1, on a regression. Here the baseline is a session with the fast encoder,
-and the new one runs only the 360p test with the slow one:
+in its own section and fails the session, exit status 1, on a regression. Here the baseline is
+a session with the fast encoder, and the new one runs only the 360p test with the slow one:
 
 ```console
 $ pytest -q examples/recorder_suite --mixtape-perf /tmp/perf-base > /dev/null

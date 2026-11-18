@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file (`%p` is the pid, `-` is stdout), not to stderr; without it, to stderr as before. A
   `GST_DEBUG_FILE` with `%r` keeps GStreamer's default logger, which writes the tracer lines
   there as well.
+- `perf` reads the tracer records of an element or a queue whose name has a comma or a quote,
+  such as `queue name="a,b"`: they had no `element.latency`.
+- A window or a leak checkpoint that raises is logged once, and `perf`, `leaks` and the window
+  thread of `--mixtape-perf` go on with the next one instead of stopping for the rest of the run.
+- A `perf` run removes the `summary.json` and `report.html` an earlier run left in its folder, so
+  a run that does not finish shows none of an earlier one's.
+- `perf` leaves no `mixtape-perf-*` folder in the temporary folder: each read of the
+  `gst-plugins-rs` tracers' log goes to a temporary file it removes.
 - `perf` gives a window shorter than half the interval, such as the one a run ends with, no CPU
   use or rates: a few milliseconds of CPU looked large in it, and `perf compare` of two runs of
   the same code listed them as regressions.

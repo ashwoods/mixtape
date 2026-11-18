@@ -55,7 +55,10 @@ def _echo() -> TextIO | None:
         return sys.stdout
     if "%r" in path:
         return None
-    return open(path.replace("%p", str(os.getpid())), "a", encoding="utf-8", errors="replace")
+    try:
+        return open(path.replace("%p", str(os.getpid())), "a", encoding="utf-8", errors="replace")
+    except OSError:  # GStreamer could not open it either, and writes to stderr
+        return sys.stderr
 
 
 def prepare() -> None:

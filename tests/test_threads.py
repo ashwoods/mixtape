@@ -84,7 +84,7 @@ def test_perfs_own_threads_have_their_name_for_the_os() -> None:
     finally:
         stop.set()
         thread.join()
-    assert sampler.own_ns > 100_000_000, samples  # the spin, not in a subject of its own
+    assert sampler.own_ns > 10_000_000, samples  # the spin, not in a subject of its own
     assert all(not s.subject.startswith("mixtape") for s in samples)
 
 

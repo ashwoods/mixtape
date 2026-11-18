@@ -426,7 +426,7 @@ def _load_player(words: Sequence[str], expose_all: bool, features: Sequence[str]
         cls = _import_player_class(named["module"], named["attribute"])
         if cls.description is None:
             raise ValueError(f"{first} has no description to build a player from")
-        return cls.from_description(cls.description, expose_all=expose_all, features=features)
+        return cls.from_description(expose_all=expose_all, features=features)
     except (ValueError, PlayerDescriptionError, ModelError) as exc:
         _error(exc)
         return None

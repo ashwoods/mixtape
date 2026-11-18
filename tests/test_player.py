@@ -72,6 +72,15 @@ def test_from_description_needs_no_loop():
     assert len(player.elements) == 3
 
 
+def test_from_description_defaults_to_the_class_description():
+    class Card(Player):
+        description = "videotestsrc name=src ! fakesink"
+
+    assert sorted(e.get_name() for e in Card.from_description().elements) == ["fakesink0", "src"]
+    with pytest.raises(PlayerDescriptionError, match="Player has no description"):
+        Player.from_description()
+
+
 def test_init_rejects_other_types():
     with pytest.raises(TypeError):
         Player("videotestsrc ! fakesink")

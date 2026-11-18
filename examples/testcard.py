@@ -66,7 +66,7 @@ from mixtape.exceptions import InvalidValueError
 
 
 async def main() -> None:
-    async with Testcard.from_description(Testcard.description) as card:
+    async with Testcard.from_description() as card:
         spec = card.describe()
         print("commands:", ", ".join(sorted(spec.commands)))
         # > commands: eos, pause, play, seek, show, stop

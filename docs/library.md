@@ -113,7 +113,7 @@ flowchart LR
 
 What each part does:
 
-- `description` is the pipeline of the class. `Testcard.from_description(Testcard.description)`
+- `description` is the pipeline of the class. `Testcard.from_description()`
   builds it, and so do `mixtape run examples/testcard.py:Testcard` and
   `mixtape inspect examples/testcard.py:Testcard`. A subclass with its own `__init__` takes the
   pipeline and passes the keyword arguments on (`expose_all`, `features`) to `super().__init__`.

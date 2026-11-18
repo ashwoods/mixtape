@@ -240,12 +240,23 @@ class Player:
 
     @classmethod
     def from_description(
-        cls, description: str, *, expose_all: bool = False, features: Iterable[FeatureSpec] = ()
+        cls,
+        description: str | None = None,
+        *,
+        expose_all: bool = False,
+        features: Iterable[FeatureSpec] = (),
     ) -> Self:
-        """Build a player from a `gst-launch` style pipeline description.
+        """Build a player from a `gst-launch` style pipeline description, by default the
+        class's own `description`.
 
         The features are prepared first: before GStreamer is initialised, so they can set
         its environment."""
+        if description is None:
+            if cls.description is None:
+                raise PlayerDescriptionError(
+                    f"{cls.__name__} has no description: pass one to from_description"
+                )
+            description = cls.description
         resolved = list(resolve_all(features, cls.features).values())
         for feature in resolved:
             feature._prepare_once()

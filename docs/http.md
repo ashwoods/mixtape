@@ -169,11 +169,12 @@ A command that says when it can run is refused with a 409 and its reason while i
 ```console
 $ mixtape run --http 8047 examples/lib_available.py:Recorder 2>/dev/null &
 $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
-$ curl -s 127.0.0.1:8047/api/model | grep -o '"unavailable":{[^}]*}'
+$ curl -s 127.0.0.1:8047/api/model \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["unavailable"]["finish"])'
 $ curl -s -X POST 127.0.0.1:8047/api/commands/finish -w ' %{http_code}\n'
 $ curl -s -X POST 127.0.0.1:8047/api/commands/start > /dev/null
 $ curl -s -X POST 127.0.0.1:8047/api/commands/finish -w ' %{http_code}\n'; kill -INT $!
-"unavailable":{"finish":"Not recording"}
+Not recording
 {"detail":"Not recording"} 409
 {"result":null} 200
 ```

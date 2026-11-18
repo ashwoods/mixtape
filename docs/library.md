@@ -174,7 +174,8 @@ the player (the feature, for a command of a [feature](#write-a-feature)). It is 
 returns `True` when the command can run, or the reason it cannot, as a string. `False` gives the
 generic reason `'name' cannot run now`. A check that raises makes its command unavailable, with
 `'name' could not be checked:` and the exception's message. A check should be quick and change
-nothing.
+nothing. A feature's check runs only while the feature is attached: before, as in `mixtape
+inspect`, its command is unavailable because the feature is not attached.
 
 [`player.unavailable()`](reference.md#mixtape.Player.unavailable) is the map of the commands that
 cannot run now, `{name: reason}`; it is in `describe().unavailable` too, so in `mixtape inspect

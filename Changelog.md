@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `perf` keeps 4 MiB of the debug log of each thread instead of 1 MiB: a WebRTC call logged
   more than 1 MiB on one thread between two reads and lost tracer records.
+- `invoke("play")`, `"pause"` or `"stop"` while a state change is stuck raises a
+  `CommandError` instead of a `PlayerSetStateError`, as every command that cannot run does.
+  Calling `play()`, `pause()` or `stop()` still raises `PlayerSetStateError`.
 
 ### Fixed
 - `perf` gives a window shorter than half the interval, such as the one a run ends with, no CPU

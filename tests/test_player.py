@@ -588,7 +588,7 @@ async def test_handlers_survive_each_other_and_can_be_removed(pipeline, caplog):
 
 NOT_PLAYING = "EOS needs a playing pipeline that is not at its EOS"
 NOT_PAUSED = "Seeking needs a paused or playing pipeline"
-EOS_OGG = "videotestsrc num-buffers=100 ! theoraenc ! oggmux ! decodebin ! fakesink"
+OGG_PUSH = "videotestsrc num-buffers=100 ! theoraenc ! oggmux ! decodebin ! fakesink"
 
 
 @pytest.mark.asyncio
@@ -597,12 +597,15 @@ async def test_the_builtin_commands_that_cannot_run_now(Gst):
     assert player.unavailable() == {"eos": NOT_PLAYING, "seek": NOT_PAUSED}  # no loop needed
     assert player.describe().unavailable == player.unavailable()
     async with player:
+        stream = player.events()
         await bounded(player.pause())
         assert player.unavailable() == {"eos": NOT_PLAYING}
         await bounded(player.play())
         assert player.unavailable() == {}
+        while (await wait_for_event(stream, CommandsChanged)).unavailable:
+            pass  # paused, then playing: published as they come
 
-    async with Player.from_description(EOS_OGG) as player:  # an Ogg stream cannot seek paused
+    async with Player.from_description(OGG_PUSH) as player:  # an Ogg stream cannot seek paused
         await bounded(player.pause())
         assert player.unavailable() == {"eos": NOT_PLAYING, "seek": "The pipeline cannot seek"}
 
@@ -634,10 +637,12 @@ async def test_a_feature_command_is_unavailable_as_feature_name_command(Gst):
         def go(self) -> None: ...
 
     player = Player.from_description("fakesink", features=[Gated()])
-    assert player.unavailable()["gated.go"] == "'gated.go' cannot run now"
-    with pytest.raises(CommandError, match="cannot run now"):
-        await player.invoke("gated.go")
-    player.teardown()
+    # before setup, as `mixtape inspect` asks: its check would see no player
+    assert player.unavailable()["gated.go"] == "The feature is not attached to a running player"
+    async with player:
+        assert player.unavailable()["gated.go"] == "'gated.go' cannot run now"
+        with pytest.raises(CommandError, match="cannot run now"):
+            await player.invoke("gated.go")
 
 
 @pytest.mark.asyncio

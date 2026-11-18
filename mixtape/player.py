@@ -677,6 +677,8 @@ class Player:
     def _seek_refusal(self) -> str | None:
         """Why `seek` cannot run now, else None: the pipeline has to be paused or playing
         (in NULL, a source may say it can seek) and to answer that it can."""
+        if (reason := self._stuck_reason()) is not None:
+            return reason  # no query to a pipeline whose change is blocked
         if self.state not in (Gst.State.PAUSED, Gst.State.PLAYING):
             return "Seeking needs a paused or playing pipeline"
         query = Gst.Query.new_seeking(Gst.Format.TIME)
@@ -699,6 +701,7 @@ class Player:
         error = self._stuck_error(state)
         self._stuck = self._changing
         self._after(call, state)
+        self._commands_changed()
         return error
 
     def _after(self, call: concurrent.futures.Future[_Changed], state: Gst.State) -> None:
@@ -779,6 +782,7 @@ class Player:
             )
             if not done:
                 self._stuck = changing  # as `_mark_stuck`: its `_after` does the rest
+                self._commands_changed()
 
     def _published_null(self, old: Gst.State) -> None:
         """Publish the `StateChanged` to NULL the bus cannot: it flushes its messages on
@@ -879,6 +883,8 @@ class Player:
         when = bound.declared.when
         if when is None:
             return None
+        if bound.owner is not self and bound.owner.player is None:
+            return "The feature is not attached to a running player"  # before setup: inspect
         try:
             verdict = when(bound.owner)
         except Exception as exc:
@@ -1320,7 +1326,7 @@ class Player:
         current = self.unavailable()
         if current != self._commands_seen:
             self._commands_seen = current
-            self._publish(events.CommandsChanged(current))
+            self._publish(events.CommandsChanged(dict(current)))
 
     # -- events and message handlers -- #
 

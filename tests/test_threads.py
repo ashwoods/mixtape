@@ -1,10 +1,11 @@
 import sys
+import threading
 import time
 from typing import Any
 
 import pytest
 
-from mixtape.perf.threads import ThreadCpu, parse_stat
+from mixtape.perf.threads import ThreadCpu, name_thread, parse_stat
 
 pytestmark = pytest.mark.skipif(
     sys.platform not in ("linux", "darwin"), reason="threads are read on Linux and macOS"
@@ -45,6 +46,46 @@ def test_a_name_cut_in_the_middle_of_a_character_is_decoded_with_replacements() 
     stat = b"42 (" + name + b") " + fields.encode() + b" 0 0\n"
     assert parse_stat(stat, 100) == ("streaming-thr-\ufffd", 120_000_000)
     assert parse_stat(b"1 (a) b (c)) " + fields.encode() + b"\n", 100)[0] == "a) b (c)"
+
+
+def test_a_thread_that_goes_idle_counts_as_idle_and_perfs_own_threads_not_at_all() -> None:
+    sampler = ThreadCpu()
+    reads = iter(
+        [
+            {1: ("q:src", 0), 2: ("mixtape-perf-log", 0), 3: ("idle", 0)},
+            {1: ("q:src", 10**12), 2: ("mixtape-perf-log", 10**12), 3: ("idle", 0)},
+            {1: ("q:src", 10**12), 2: ("mixtape-perf-log", 3 * 10**12), 3: ("idle", 0)},
+        ]
+    )
+    sampler._read = lambda: next(reads)  # pyright: ignore[reportPrivateUsage]
+    assert sampler.sample(0) == []
+    (busy,) = sampler.sample(1)
+    (idle,) = sampler.sample(2)  # busy once: a sample in every window from then on
+    assert (busy.subject, idle.subject, idle.value) == ("q:src", "q:src", 0)
+    assert busy.value > 0
+    assert sampler.own_ns == 3 * 10**12
+
+
+def test_perfs_own_threads_have_their_name_for_the_os() -> None:
+    stop = threading.Event()
+
+    def spin() -> None:
+        name_thread()
+        while not stop.is_set():
+            pass
+
+    sampler = ThreadCpu()
+    sampler.sample(0)
+    thread = threading.Thread(target=spin, name="mixtape-perf-test")
+    thread.start()
+    try:
+        time.sleep(0.3)
+        samples = sampler.sample(1)
+    finally:
+        stop.set()
+        thread.join()
+    assert sampler.own_ns > 100_000_000, samples  # the spin, not in a subject of its own
+    assert all(not s.subject.startswith("mixtape") for s in samples)
 
 
 def test_a_thread_id_that_a_new_thread_reuses_counts_from_zero() -> None:

@@ -109,6 +109,34 @@ def test_the_rust_csvs_keep_commas_in_names_and_skip_what_is_not_a_row() -> None
     assert RUST["pad-push-timings"](lines) == [Sample(1, "pad.push", "a,b:src", 5)]
 
 
+def test_the_tracer_log_keeps_commas_and_quotes_in_names() -> None:
+    # as GStreamer 1.28 prints them for `queue name="a,b"`: with `%s`, not quoted
+    parser = TracerLog()
+    parser.record(
+        "new-element, thread-id=(guint64)1, ts=(guint64)5, ix=(uint)1, "
+        "parent-ix=(uint)4294967295, name=(string)a,b, type=(string)GstQueue, is-bin=(boolean)0;"
+    )
+    parser.record(
+        'new-pad, thread-id=(guint64)1, ix=(uint)2, parent-ix=(uint)1, name=(string)"s, '
+        "type=(string)GstPad, is-ghostpad=(boolean)0, pad-direction=(GstPadDirection)1;"
+    )
+    parser.record(
+        "element-latency, element-id=(string)0x1, element=(string)a,b, src=(string)src, "
+        "time=(guint64)7, ts=(guint64)9;"
+    )
+    parser.record(
+        'latency, src-element-id=(string)0x2, src-element=(string)"x, src=(string)src, '
+        "sink-element-id=(string)0x3, sink-element=(string)y,z, sink=(string)sink, "
+        "time=(guint64)8, ts=(guint64)10;"
+    )
+    assert parser.elements == {1: "a,b"} and parser.created == {"a,b": 5}
+    assert parser.pads == {2: '"s'}
+    assert parser.take()[0] == [
+        Sample(9, "element.latency", "a,b", 7),
+        Sample(10, "pipeline.latency", '"x→y,z', 8),
+    ]
+
+
 # -- aggregation -- #
 
 
@@ -152,7 +180,10 @@ def test_totals_have_the_statistics_of_the_whole_run() -> None:
 def test_the_artifacts_have_every_sample_window_and_the_run(tmp_path: Path) -> None:
     (tmp_path / "pad.push.csv").write_text("stale")
     (tmp_path / "notes.csv").write_text("kept")
+    (tmp_path / "summary.json").write_text("{}")  # of a run that crashed after it
+    (tmp_path / "report.html").write_text("stale")
     artifacts = Artifacts(tmp_path)
+    assert not (tmp_path / "summary.json").exists() and not (tmp_path / "report.html").exists()
     first = [Sample(1, "element.latency", "q", 10), Sample(2, "queue.fill", "q", 0.5)]
     artifacts.add(first, window(first, 0, 5))
     second = [Sample(6, "element.latency", "q", 30)]
@@ -176,6 +207,7 @@ def test_the_artifacts_have_every_sample_window_and_the_run(tmp_path: Path) -> N
     assert [(w["start"], w["end"]) for w in windows] == [(0, 5), (5, 10)]
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["pipeline"] == "p" and summary["windows"] == 2
+    assert summary["format_version"] == 1
     latency = summary["metrics"]["element.latency"]
     assert latency["unit"] == "ns" and latency["subjects"]["q"]["mean"] == 20
 
@@ -400,22 +432,27 @@ def run_env() -> dict[str, str]:
 
 
 def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
-    out = tmp_path / "out"
+    out, temp = tmp_path / "out", tmp_path / "temp"
+    temp.mkdir()
     pipeline = "videotestsrc num-buffers=30 ! video/x-raw,width=64,height=48 ! queue ! fakesink"
     done = subprocess.run(
         [sys.executable, "-m", "mixtape", "run", pipeline, "--feature", f"perf,out={out}"],
         capture_output=True,
         text=True,
         timeout=30,
-        env=run_env(),
+        env={**run_env(), "TMPDIR": str(temp)},
     )
     assert done.returncode == 0, done.stderr
     assert "GST_TRACER" not in done.stderr  # its log is read, not shown
+    assert list(temp.iterdir()) == []  # the files the rust tracers wrote to are gone
     for name in ("samples.jsonl", "windows.jsonl", "element.latency.csv", "pad.buffers.csv"):
         assert (out / name).stat().st_size > 0, name
     summary = json.loads((out / "summary.json").read_text())
     assert summary["pipeline"] == pipeline and summary["windows"] >= 1
+    assert summary["format_version"] == 1 and summary["lost"] == 0
     metrics = summary["metrics"]
+    # perf's own threads, which read the log and write the windows, are not the pipeline's
+    assert not any(s.startswith("mixtape-perf") for s in metrics["thread.cpu"]["subjects"])
     assert metrics["element.latency"]["subjects"]["queue0"]["n"] == 30
     assert metrics["pipeline.latency"]["subjects"]["videotestsrc0→fakesink0"]["n"] == 30
     assert metrics["process.cpu"]["unit"] == "%"
@@ -435,6 +472,23 @@ def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
     assert '"element.latency"' in report and "queue0" in report  # the run, inlined
     assert "default-src 'none'" in report
     assert not re.search(r"https?://|\b(src|href)\s*=|@import|url\(", report)
+
+
+def test_a_gst_debug_file_gets_the_other_lines_and_not_the_tracers(tmp_path: Path) -> None:
+    log = tmp_path / "gst-%p.log"
+    pipeline = "videotestsrc num-buffers=10 ! fakesink"
+    done = subprocess.run(
+        [sys.executable, "-m", "mixtape", "run", pipeline, "--feature", "perf"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**run_env(), "GST_DEBUG": "GST_STATES:4", "GST_DEBUG_FILE": str(log)},
+    )
+    assert done.returncode == 0, done.stderr
+    (written,) = tmp_path.glob("gst-*.log")  # GStreamer opened it, with the process id
+    text = written.read_text()
+    assert "GST_STATES" in text and "GST_TRACER" not in text
+    assert "GST_STATES" not in done.stderr
 
 
 def test_a_short_last_window_has_no_rates(tmp_path: Path) -> None:

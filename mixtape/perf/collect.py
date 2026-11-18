@@ -10,14 +10,12 @@ import atexit
 import contextlib
 import logging
 import os
-import shutil
 import sys
 import tempfile
 import threading
 import time
 from collections.abc import Iterable
-from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import gi
 
@@ -42,6 +40,22 @@ logger = logging.getLogger(__name__)
 
 CORE = ("latency(flags=element+pipeline)", "stats")
 """The core tracers it runs: what they measure goes to the `GST_TRACER` debug log only"""
+
+
+def _echo() -> TextIO | None:
+    """Where the tail writes the lines of the debug log that are not the tracers': where
+    GStreamer's default logger writes, stderr or the user's `GST_DEBUG_FILE` (`-` is stdout,
+    `%p` the process id), which GStreamer opened at its start. None for a `GST_DEBUG_FILE`
+    with a `%r`, a random number it does not tell: the default logger stays, writing the
+    tracer records there as well."""
+    path = os.environ.get("GST_DEBUG_FILE")
+    if not path:
+        return sys.stderr
+    if path == "-":
+        return sys.stdout
+    if "%r" in path:
+        return None
+    return open(path.replace("%p", str(os.getpid())), "a", encoding="utf-8", errors="replace")
 
 
 def prepare() -> None:
@@ -118,11 +132,9 @@ class Collector:
         require("perf", rust, "perf")
         active = active_tracers()
         self._rust: dict[str, Any] = {name: active[name] for name in rust}
-        self._folder = Path(tempfile.mkdtemp(prefix="mixtape-perf-"))  # the `write-log` files
         self._lock = threading.Lock()  # the subscriptions, and reading for them
         self._subscriptions: list[Subscription] = []
-        # a `GST_DEBUG_FILE` is the user's: GStreamer writes it, the tail only reads
-        self.tail = RingTail(None if os.environ.get("GST_DEBUG_FILE") else sys.stderr)
+        self.tail = RingTail(_echo())
         entries = os.environ.get("GST_DEBUG", "").split(",")
         ours = [entry for entry in entries if entry.partition(":")[0] == "GST_TRACER"]
         if not ours:  # a `GST_DEBUG` that names it wins
@@ -169,7 +181,6 @@ class Collector:
     def _close(self) -> None:
         with contextlib.suppress(Exception):
             self.tail.close()  # echoes the last lines
-        shutil.rmtree(self._folder, ignore_errors=True)
 
     def now(self) -> int:
         """Nanoseconds since GStreamer initialised."""
@@ -220,14 +231,18 @@ class Collector:
 
     def _flush_rust(self) -> list[Sample]:
         """What the gst-plugins-rs tracers measured since the last call: `write-log` writes
-        it to a file, and forgets it."""
+        it to a file, and forgets it. The file lives only as long as this call: a process that
+        is killed, and runs no `atexit`, leaves none behind."""
         samples: list[Sample] = []
         for name, tracer in self._rust.items():
-            path = self._folder / f"{name}.csv"
-            tracer.emit("write-log", str(path))  # appends, after the first time
-            with open(path, encoding="utf-8", errors="replace") as file:
-                lines = file.readlines()
-            os.truncate(path, 0)
+            fd, path = tempfile.mkstemp(prefix=f"mixtape-perf-{name}-", suffix=".csv")
+            os.close(fd)
+            try:
+                tracer.emit("write-log", path)
+                with open(path, encoding="utf-8", errors="replace") as file:
+                    lines = file.readlines()
+            finally:
+                os.unlink(path)
             samples += RUST[name](lines)
         return samples
 

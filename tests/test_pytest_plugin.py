@@ -188,13 +188,8 @@ def test_gstreamer_initialised_before_the_plugin_is_a_usage_error(
 
 
 def test_a_session_with_xdist_workers_is_a_usage_error(pytester: pytest.Pytester) -> None:
-    # pytest-xdist's option, without its workers
-    pytester.makeconftest(
-        "def pytest_addoption(parser):\n"
-        "    parser.addoption('--numprocesses', dest='numprocesses', type=int)\n"
-    )
     pytester.makepyfile(test_suite="def test_it():\n    pass\n")
-    result, out = measure(pytester, "--numprocesses=2")
+    result, out = measure(pytester, "-n", "2")  # pytest-xdist, a dev dependency
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     result.stderr.fnmatch_lines(["*--mixtape-perf measures a session run serially*without -n*"])
     assert not out.exists()

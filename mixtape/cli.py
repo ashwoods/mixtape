@@ -561,15 +561,16 @@ def _value(value: Any) -> str:
 
 def _known(player: Player, path: str) -> str:
     """The hint for a `--set` of a property the player does not have: the closest of those it
-    has, or where to see them all."""
+    can write, or where to see them all."""
     spec = player.describe()
     key, _, name = path.rpartition(".")
     if (element := spec.elements.get(key)) is not None:  # its properties, by their own names
-        names = list(element.properties)
+        names = [n for n, p in element.properties.items() if p.writable]
         close = [f"{key}.{n}" for n in difflib.get_close_matches(name, names, n=3)]
     else:  # a typo in the element's key, or one of the player's own properties
-        paths = [p.path for p in spec.properties.values()]
-        paths += [p.path for e in spec.elements.values() for p in e.properties.values()]
+        props = [*spec.properties.values()]
+        props += [p for e in spec.elements.values() for p in e.properties.values()]
+        paths = [p.path for p in props if p.writable]
         close = difflib.get_close_matches(path, paths, n=3)
     if close:
         return f"did you mean {' or '.join(map(repr, close))}?"

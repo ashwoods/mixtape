@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The CLI says it needs PyGObject only when `gi` or GStreamer is missing, not on any
   ImportError.
 - The WebRTC example without a signalling server exits with an error instead of waiting.
-- The docs say that the `perf` and `leaks` tracers are one per process: two players measuring
-  in one process each get the samples of both.
+- The docs say that the `perf` and `leaks` tracers are one per process: two players in one
+  process each measure both pipelines with `perf`, and share the checkpoints of `leaks`.
 - The API reference has one heading per object, without the repeated section headings, and its
   docstrings link the names they mention.
 

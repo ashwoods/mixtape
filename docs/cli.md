@@ -392,18 +392,18 @@ Without `--json` the same error is `error: unknown property 'src.patern': did yo
 `--events jsonl` prints one JSON object per line on stdout, in the shapes that the WebSocket
 `/api/events` of the [HTTP API](http.md#events-the-websocket) sends. First come the model, the
 values and the graph, before the pipeline plays and after `--set`, so the values are the ones it
-starts with. Then comes every event, up to the final `eos` and `state` lines. The `state`,
-`position` and `commands` lines are not the same in every run, so this keeps the lines that are,
-and the value that `--set` gave. The player waits while its stdout is not read, so a consumer that
+starts with. Then comes every event, up to the final `eos` and `state` lines. The `graph`,
+`state`, `position` and `commands` lines are not the same in every run (a second `graph`, with
+the negotiated caps, comes in some runs only), so this keeps the lines that are, and the value
+that `--set` gave. The player waits while its stdout is not read, so a consumer that
 stops reading stalls it:
 
 ```console
 $ mixtape run --events jsonl --set src.pattern=ball "videotestsrc name=src num-buffers=30 ! fakesink" \
-    | grep -o -E '^\{"type": "(model|values|graph|eos)"|"src.pattern": "[a-z]*"'
+    | grep -o -E '^\{"type": "(model|values|eos)"|"src.pattern": "[a-z]*"'
 {"type": "model"
 {"type": "values"
 "src.pattern": "ball"
-{"type": "graph"
 {"type": "eos"
 ```
 

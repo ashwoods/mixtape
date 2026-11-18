@@ -33,5 +33,6 @@ async def main() -> None:
         # > the player says 0.5
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 # --8<-- [end:serve]

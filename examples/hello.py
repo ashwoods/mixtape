@@ -27,5 +27,6 @@ async def main() -> None:
                 break
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 # --8<-- [end:main]

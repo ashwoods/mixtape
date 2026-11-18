@@ -60,6 +60,7 @@ async def fails_while_playing() -> None:
 
 # --8<-- [end:playing]
 
-typo()
-asyncio.run(cannot_start())
-asyncio.run(fails_while_playing())
+if __name__ == "__main__":
+    typo()
+    asyncio.run(cannot_start())
+    asyncio.run(fails_while_playing())

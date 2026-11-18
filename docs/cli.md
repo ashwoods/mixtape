@@ -121,7 +121,9 @@ A player describes what it exposes: its commands, its properties, with their typ
 and current values, and the properties of its elements. `mixtape inspect` prints that without
 playing, for a description or for a player class of yours: `path/to/file.py:Class`, whose
 folder is put on `sys.path`, or `module:Class` for a module in the current folder or on
-`sys.path`. A class takes no further words, and `mixtape run` takes the same targets.
+`sys.path`. A class takes no further words, and `mixtape run` takes the same targets. The
+module is imported, so its top-level code runs: a script that also starts a player itself
+should keep that under `if __name__ == "__main__":`.
 
 `Demo` has the alias of an element property, made with `prop()`, and a `@command`; its
 `description` is the pipeline that `mixtape` builds for it (see

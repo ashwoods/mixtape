@@ -56,5 +56,6 @@ async def main() -> None:
         await report("restarted", consumer)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 # --8<-- [end:main]

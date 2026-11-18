@@ -41,7 +41,7 @@ $ sudo apt install python3-gi python3-gst-1.0 python3-venv gstreamer1.0-tools \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good    # Debian/Ubuntu
 ```
 
-Make a venv from a Python that has the bindings: `python3 -c 'import gi'` must succeed
+Make a venv from a Python that has the bindings: `python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst; Gst.IteratorError'` must succeed
 (Homebrew's is `/opt/homebrew/bin/python3`, Ubuntu's is `/usr/bin/python3`).
 `--system-site-packages` lets the venv see them, and the `http` extra adds the control page:
 

@@ -8,16 +8,17 @@ on:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 
       # gi and GStreamer come from apt, as in the Dockerfile. The docs' examples need bad
-      # (webrtcbin, inter, proxy, unixfd), ugly (x264enc) and nice (webrtcbin's ICE). The dev
-      # packages are for building the Rust plugins below.
+      # (webrtcbin, inter, proxy, unixfd), ugly (x264enc) and nice (webrtcbin's ICE).
+      # scripts/apt-install moves to the next mirror when one is slow.
       - name: Install GStreamer
+        timeout-minutes: 15
         run: |
-          sudo apt-get update -yq
-          sudo apt-get install -yq --no-install-recommends \
+          scripts/apt-install \
             python3-gi \
             python3-gst-1.0 \
             gstreamer1.0-plugins-base \
@@ -25,10 +26,7 @@ jobs:
             gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-ugly \
             gstreamer1.0-nice \
-            gstreamer1.0-tools \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev
+            gstreamer1.0-tools
 
       # The perf tracers (queue-levels, buffer-lateness, pad-push-timings) and the WebRTC
       # plugin (webrtcsink, webrtcsrc) are not packaged for Ubuntu: build them once and
@@ -40,9 +38,15 @@ jobs:
           path: ~/.cache/gst-rs-plugins
           key: gst-rs-plugins-${{ runner.os }}-0.15.4-${{ hashFiles('scripts/build-rs-plugins') }}
 
+      # The dev packages double the download, so they come only with a build.
       - name: Build GStreamer Rust plugins
         if: steps.rs-plugins.outputs.cache-hit != 'true'
+        timeout-minutes: 30
         run: |
+          scripts/apt-install \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev
           rustup toolchain install stable --profile minimal
           scripts/build-rs-plugins ~/.cache/gst-rs-plugins
 
@@ -61,6 +65,7 @@ jobs:
           version: "0.13.7"
 
       - name: ruff, mypy, pytest
+        timeout-minutes: 20
         run: scripts/check
         env:
           MIXTAPE_PYTHON: /usr/bin/python3

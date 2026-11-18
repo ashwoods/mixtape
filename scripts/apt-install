@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Install apt packages on a GitHub-hosted Ubuntu runner without hanging on a slow mirror.
+#
+# The runners' apt reads its archive mirrors from /etc/apt/apt-mirrors.txt and stays on
+# the first one while it trickles data: apt has no minimum-throughput setting, so a mirror
+# sending tens of kB/s turns a one-minute install into a 30-minute one (Nov 2026, the
+# us-east-2.ec2 mirror; actions/runner-images#14823). So the download runs on its own,
+# under a time limit; when it fails or runs out of time, the first mirror is dropped and
+# the download goes on from the next one, keeping the archives it already has.
+#
+# Usage: scripts/apt-install PACKAGE...
+set -euo pipefail
+
+mirrors=/etc/apt/apt-mirrors.txt
+
+apt_get() { # LIMIT ARGS...
+  local limit=$1
+  shift
+  sudo timeout "$limit" apt-get -yq -o Acquire::Retries=3 -o Acquire::http::Timeout=30 "$@"
+}
+
+drop_mirror() {
+  if [[ -f $mirrors ]] && (($(wc -l <"$mirrors") > 1)); then
+    echo "apt-install: dropping the mirror $(head -n 1 "$mirrors")"
+    sudo sed -i 1d "$mirrors"
+  fi
+}
+
+[[ -f $mirrors ]] && { echo "apt-install: mirrors:"; cat "$mirrors"; }
+
+for attempt in 1 2 3; do
+  if apt_get 2m update && apt_get 4m install --download-only --no-install-recommends "$@"; then
+    apt_get 10m install --no-install-recommends "$@"
+    exit 0
+  fi
+  echo "::warning::apt-install: attempt $attempt failed or ran out of time"
+  drop_mirror
+done
+echo "apt-install: giving up after 3 attempts" >&2
+exit 1

@@ -22,8 +22,10 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
-from ..exceptions import FeatureError
-from ..features.tracers import (
+from ...exceptions import FeatureError
+from ...perf.metrics import Sample
+from ...perf.parse import RUST
+from ..tracers import (
     LOG,
     _entries,
     _name,
@@ -32,8 +34,6 @@ from ..features.tracers import (
     installed,
     require,
 )
-from .metrics import Sample
-from .parse import RUST
 from .reader import RingTail
 
 logger = logging.getLogger(__name__)

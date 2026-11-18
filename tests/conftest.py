@@ -1,27 +1,11 @@
 # type: ignore
-import logging
 import os
 
-import colorlog
 import pytest
 
 from tests.flaky import Timing
 
 pytest_plugins = ["pytester"]
-
-logger = logging.getLogger(__name__)
-handler = colorlog.StreamHandler()
-handler.setFormatter(
-    colorlog.ColoredFormatter(
-        "(%(asctime)s) [%(log_color)s%(levelname)s] | %(name)s | %(message)s [%(threadName)-10s]"
-    )
-)
-
-# get root logger
-logger = logging.getLogger()
-logger.handlers = []
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
 
 
 def pytest_configure(config):

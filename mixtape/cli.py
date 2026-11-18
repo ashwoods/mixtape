@@ -36,8 +36,8 @@ if TYPE_CHECKING:
     from .events import EventStream
     from .exceptions import MixTapeError, PlayerPipelineError
     from .interfaces.messages import EventEncoder
-    from .model import PropSpec
     from .player import Player
+    from .spec import PropSpec
 
 logger = logging.getLogger("mixtape")
 _uvicorn_logger = logging.getLogger("uvicorn")
@@ -718,6 +718,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     return code if isinstance(code, int) else 0
 
 
+def _command_paths(command: Any, prefix: str = "") -> set[str]:
+    """The words that name each command, as `run` or `perf compare`: not those of a group."""
+    subcommands: dict[str, Any] = getattr(command, "commands", {})
+    if not subcommands:
+        return {prefix}
+    return {
+        path
+        for name, sub in subcommands.items()
+        for path in _command_paths(sub, f"{prefix} {name}".strip())
+    }
+
+
 def _usage_error(exc: Any, argv: Sequence[str]) -> None:
     """Print a usage error, and the usage line of the command that refused it."""
     ctx = exc.ctx
@@ -726,10 +738,11 @@ def _usage_error(exc: Any, argv: Sequence[str]) -> None:
         return
     message = exc.format_message().rstrip(".")  # a click message ends with a full stop
     # an option that misses its value is refused before its command has a context: its words
-    words = [arg for arg in argv if not arg.startswith("-")][:2]
-    named = " ".join(words if words == ["perf", "compare"] else words[:1])
-    commands = ("run", "inspect", "get", "set", "call", "watch", "perf compare")
-    fallback = f"mixtape {named}" if named in commands else "mixtape"
+    words = [arg for arg in argv if not arg.startswith("-")]
+    commands = _command_paths(get_command(app))
+    prefixes = (" ".join(words[:n]) for n in range(len(words), 0, -1))
+    named = next((prefix for prefix in prefixes if prefix in commands), "")
+    fallback = f"mixtape {named}" if named else "mixtape"
     path = ctx.command_path if ctx is not None else fallback
     if _as_json:
         _fail(message, "usage", f"'{path} --help' shows the usage")

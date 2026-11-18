@@ -165,7 +165,7 @@ def test_nothing_of_gstreamer_is_imported_or_written_without_the_option(
 
         @pytest.mark.perf(pipeline_latency_p95="1ns", nope=1)  # known, and ignored
         def test_it():
-            assert not {"gi", "mixtape.perf.collect"} & set(sys.modules)
+            assert not {"gi", "mixtape.features.perf.collect"} & set(sys.modules)
             assert "GST_TRACERS" not in os.environ
         """
     )

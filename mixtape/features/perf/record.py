@@ -7,11 +7,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .aggregate import RunStat, Window, rates, window
+from ...perf.aggregate import RunStat, Window, rates, window
+from ...perf.metrics import Sample
+from ...perf.output import Artifacts
+from ...perf.threads import IDLE, ThreadCpu
 from .collect import Collector
-from .metrics import Sample
-from .output import Artifacts
-from .threads import IDLE, ThreadCpu
 
 
 def _subject(subject: str, keys: dict[str, str]) -> str:

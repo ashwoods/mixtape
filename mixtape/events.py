@@ -10,7 +10,7 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
 from .exceptions import PlayerPipelineError
-from .model import GraphSpec, PlayerSpec
+from .spec import GraphSpec, PlayerSpec
 
 
 @dataclass(frozen=True, slots=True)

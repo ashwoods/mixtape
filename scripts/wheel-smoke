@@ -22,7 +22,7 @@ import mixtape
 package = Path(mixtape.__file__).parent
 assert package.is_relative_to(Path.cwd()), f"imported {package}, not the installed wheel"
 assert (package / "py.typed").is_file(), "no py.typed"
-assert (package / "vendor/uplot/uPlot.iife.min.js").is_file(), "no vendor/uplot"
+assert (package / "web/vendor/uplot/uPlot.iife.min.js").is_file(), "no web/vendor/uplot"
 EOF
 venv/bin/mixtape --version
 venv/bin/mixtape inspect "videotestsrc ! fakesink" > /dev/null

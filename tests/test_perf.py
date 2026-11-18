@@ -14,7 +14,7 @@ import pytest
 from mixtape import Player
 from mixtape.exceptions import FeatureError
 from mixtape.perf import RUST, Artifacts, Sample, Totals, TracerLog, percentile, rates, window
-from mixtape.perf.reader import RingTail
+from mixtape.features.perf.reader import RingTail
 
 FIXTURES = Path(__file__).parent / "fixtures" / "perf"
 """Recorded from `videotestsrc num-buffers=3 ! video/x-raw,width=64,height=48 ! queue name=q
@@ -400,7 +400,7 @@ BUILT_FIRST = textwrap.dedent("""
     from gi.repository import Gst
     from mixtape import Player
     from mixtape.exceptions import FeatureError
-    from mixtape.perf.collect import prepare
+    from mixtape.features.perf.collect import prepare
 
     prepare()  # what `Player.from_description` does before it initialises GStreamer
     Gst.init(None)

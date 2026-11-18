@@ -7,7 +7,7 @@ from typing import Any
 
 from .. import events
 from ..exceptions import UnknownNameError
-from ..model import PlayerSpec
+from ..spec import PlayerSpec
 from ..player import Player
 from .values import all_values, read_values
 

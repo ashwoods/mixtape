@@ -74,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `teardown()`, and leaving `async with`, fails the waits it ends, a pending `play()` or
   `play_until_eos()`, with `PlayerSetStateError("The player was torn down")` instead of
   cancelling them with `CancelledError`.
+- The spec types (`PlayerSpec`, `PropSpec` and the rest) are in `mixtape.spec`, not
+  `mixtape.model`; `mixtape.perf.{collect,reader,record}` are now under `mixtape.features.perf`;
+  the web assets and uPlot are in `mixtape/web/`.
 
 ### Fixed
 - The REST API reaches an element whose name has a `/` (`volume name=a/b`, sent as `a%2Fb`):

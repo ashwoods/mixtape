@@ -62,7 +62,6 @@ Changelog = "https://github.com/ashwoods/mixtape/blob/main/Changelog.md"
 
 [dependency-groups]
 dev = [
-    "colorlog",
     "httpx",
     "mixtape[http]",
     { include-group = "docs" },
@@ -102,6 +101,7 @@ required-version = ">=0.8"
 addopts = "-ra --tb=short"
 testpaths = ["tests"]
 timeout = 20
+log_level = "INFO"
 timeout_method = "thread"
 asyncio_default_fixture_loop_scope = "function"
 

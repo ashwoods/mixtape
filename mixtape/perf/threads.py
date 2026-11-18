@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from mixtape.perf.metrics import Sample
+from .metrics import Sample
 
 logger = logging.getLogger(__name__)
 

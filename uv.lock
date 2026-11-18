@@ -296,18 +296,6 @@ wheels = [
 ]
 
 [[package]]
-name = "colorlog"
-version = "6.12.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8c/55/ba79756cb90c8d69d599d57785398ac87bba7b19c80e87f4e8a562197c93/colorlog-6.12.0.tar.gz", hash = "sha256:2a7924c1dadf18b22a0eb8b06d1c7b01d5341707ec1641eb6fcc4fde0c3e8e5f", size = 18151, upload-time = "2026-07-23T13:40:40.71Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/19/0b6647bf5e331521e55d2b63bfbdc210bd9cd605189273f03614a05f702d/colorlog-6.12.0-py3-none-any.whl", hash = "sha256:30d392604e9110045a2c2aeefc27d7a017abbab63f3a8aee594eac0801df784e", size = 12239, upload-time = "2026-07-23T13:40:39.562Z" },
-]
-
-[[package]]
 name = "execnet"
 version = "2.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -730,7 +718,6 @@ http = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "colorlog" },
     { name = "httpx" },
     { name = "mixtape", extra = ["http"] },
     { name = "mkdocs-llmstxt" },
@@ -762,7 +749,6 @@ provides-extras = ["http"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "colorlog" },
     { name = "httpx" },
     { name = "mixtape", extras = ["http"] },
     { name = "mkdocs-llmstxt", specifier = "==0.5.1" },

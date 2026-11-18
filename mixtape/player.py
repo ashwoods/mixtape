@@ -41,10 +41,6 @@ from .model import (
     Command,
     Computed,
     Declarations,
-    GraphSpec,
-    LinkSpec,
-    NodeSpec,
-    PlayerSpec,
     action_signals,
     codec_for,
     collect,
@@ -56,6 +52,7 @@ from .model import (
     is_user_named,
     validation_reasons,
 )
+from .spec import GraphSpec, LinkSpec, NodeSpec, PlayerSpec
 
 logger = logging.getLogger(__name__)
 

@@ -22,7 +22,7 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst  # noqa: E402
 
 from mixtape import Player  # noqa: E402
-from mixtape.model import GraphSpec  # noqa: E402
+from mixtape.spec import GraphSpec  # noqa: E402
 from tests.examples import EXAMPLES  # noqa: E402
 
 # "<pipeline index>.<element>" of both ends, the element by its name or its factory, and a label

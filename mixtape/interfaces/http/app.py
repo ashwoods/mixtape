@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from ...exceptions import InvalidValueError, MixTapeError, UnknownNameError
 from ...hints import did_you_mean
-from ...model import ElementSpec
+from ...spec import ElementSpec
 from ...perf.metrics import units_script
 from ...player import Player
 from ..encoding import jsonable
@@ -24,11 +24,11 @@ from .security import check_headers, is_loopback
 from .ws import serve_events
 
 STATIC = {
-    "mixtape.css": ("interfaces/http/mixtape.css", "text/css"),
-    "graph.js": ("interfaces/http/graph.js", "text/javascript"),
-    "perf.js": ("interfaces/http/perf.js", "text/javascript"),
-    "uPlot.iife.min.js": ("vendor/uplot/uPlot.iife.min.js", "text/javascript"),
-    "uPlot.min.css": ("vendor/uplot/uPlot.min.css", "text/css"),
+    "mixtape.css": ("web/mixtape.css", "text/css"),
+    "graph.js": ("web/graph.js", "text/javascript"),
+    "perf.js": ("web/perf.js", "text/javascript"),
+    "uPlot.iife.min.js": ("web/vendor/uplot/uPlot.iife.min.js", "text/javascript"),
+    "uPlot.min.css": ("web/vendor/uplot/uPlot.min.css", "text/css"),
 }
 """The files the page loads besides itself, by name: where they are in the package, and their
 type. The perf report inlines the same files. `metrics.js` is the exception: it is generated,

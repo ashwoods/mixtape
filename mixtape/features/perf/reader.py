@@ -17,9 +17,9 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
-from .metrics import Sample
-from .parse import TracerLog
-from .threads import name_thread
+from ...perf.metrics import Sample
+from ...perf.parse import TracerLog
+from ...perf.threads import name_thread
 
 logger = logging.getLogger(__name__)
 

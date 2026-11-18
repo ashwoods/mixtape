@@ -136,7 +136,7 @@ def render(index: dict[str, Any]) -> str:
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
             f'<meta http-equiv="Content-Security-Policy" content="{POLICY}">',
             "<title>perf · tests</title>",
-            f"<style>\n{_read('interfaces/http/mixtape.css')}\n{STYLE}</style>",
+            f"<style>\n{_read('web/mixtape.css')}\n{STYLE}</style>",
             "</head>",
             "<body>",
             '<header class="report-head"><div>',

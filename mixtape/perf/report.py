@@ -1,7 +1,7 @@
 """`report.html`: a run's artifacts as one page that works offline, from a file, for good.
 
 It inlines all it needs: uPlot, the styles and the graph and chart code of the control page
-with the report's own (`mixtape/interfaces/http/report.js`), and the run: `summary.json`, with
+with the report's own (`mixtape/web/report.js`), and the run: `summary.json`, with
 the graph `perf` keeps, and `windows.jsonl`. Its content security policy lets it fetch
 nothing."""
 
@@ -41,13 +41,13 @@ def render(summary: dict[str, Any], windows: list[dict[str, Any]]) -> str:
     # element open past its end tag, swallowing the code after it
     data = json.dumps({"summary": summary, "windows": windows}, separators=(",", ":"))
     data = data.replace("<", "\\u003c")
-    styles = (_read("vendor/uplot/uPlot.min.css"), _read("interfaces/http/mixtape.css"))
+    styles = (_read("web/vendor/uplot/uPlot.min.css"), _read("web/mixtape.css"))
     scripts = (
-        _read("interfaces/http/graph.js"),
-        _read("vendor/uplot/uPlot.iife.min.js"),  # whole, with its banner: MIT keeps the credit
+        _read("web/graph.js"),
+        _read("web/vendor/uplot/uPlot.iife.min.js"),  # whole, with its banner: MIT keeps the credit
         units_script(),
-        _read("interfaces/http/perf.js"),
-        _read("interfaces/http/report.js"),
+        _read("web/perf.js"),
+        _read("web/report.js"),
     )
     return "\n".join(
         [

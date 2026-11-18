@@ -1,9 +1,10 @@
 """The `perf` feature: measure a running pipeline with GStreamer's own tracers, for the live
 page (`perf.summary`) and for CI (the artifacts of `out`).
 
-Python never runs on a streaming thread for it: the `Collector` of `mixtape.perf.collect` reads
-the records of the core `latency` and `stats` tracers from GStreamer's ring buffer logger, and
-asks the gst-plugins-rs tracers to write theirs to a file (`write-log`)."""
+Python never runs on a streaming thread for it: the `Collector` of
+`mixtape.features.perf.collect` reads the records of the core `latency` and `stats` tracers
+from GStreamer's ring buffer logger, and asks the gst-plugins-rs tracers to write theirs to a
+file (`write-log`)."""
 
 import asyncio
 import logging
@@ -13,19 +14,18 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import PositiveFloat
 
-from ..exceptions import FeatureError
-from ..model import prop
-from ..perf import Window
-from ..perf.collect import CORE, Collector, prepare
-from ..perf.parse import RUST
-from ..perf.record import Recorder
-from ..perf.threads import name_thread
-from . import Feature
-from .tracers import _name
-
+from ...exceptions import FeatureError
+from ...model import prop
+from ...perf import Window
+from ...perf.parse import RUST
+from ...perf.threads import name_thread
+from .. import Feature
+from ..tracers import _name
+from .collect import CORE, Collector, prepare
+from .record import Recorder
 
 if TYPE_CHECKING:
-    from ..player import Player
+    from ...player import Player
 
 logger = logging.getLogger(__name__)
 

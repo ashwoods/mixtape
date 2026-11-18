@@ -34,7 +34,7 @@ import pytest
 
 if TYPE_CHECKING:  # not at run time: it imports GStreamer
     from .perf.budget import Budget
-    from .perf.record import Recorder
+    from .features.perf.record import Recorder
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def _start_tracers() -> None:
     except (ImportError, ValueError) as error:
         raise pytest.UsageError(f"--mixtape-perf needs PyGObject and GStreamer: {error}") from None
     from .exceptions import FeatureError
-    from .perf.collect import Collector, prepare
+    from .features.perf.collect import Collector, prepare
 
     if Gst.is_initialized():
         raise pytest.UsageError(
@@ -221,7 +221,7 @@ class Measure:
 
     @pytest.hookimpl(wrapper=True, tryfirst=True)
     def pytest_runtest_setup(self, item: pytest.Item) -> Any:
-        from .perf.record import Recorder
+        from .features.perf.record import Recorder
 
         folder = _folder_name(item.nodeid, self._folders)
         run = self._runs[item.nodeid] = _Run(

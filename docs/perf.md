@@ -179,10 +179,12 @@ vary too much between two runs: bound those with a budget. The
 [command line page](cli.md#compare-two-runs) has its options and its exit status.
 
 !!! note "On a busy machine"
-    A short run ends with a window of a fraction of a second, in which a few milliseconds of
-    CPU of a thread look large. On a busy machine the compare above can list the CPU of
-    `other` or `asyncio_0`, which have nothing to do with the encoder, or the latency of `mux`,
-    as regressions, and exit 1. The numbers of the latency are not affected.
+    The maxima of a latency are single frames, and a machine busy with other work delays
+    some of them. There the compare above can list the latency of `mux` or `capsfilter0` as
+    regressions, and exit 1. Compare runs made on a quiet machine, or run each side a few
+    times. The CPU use is steadier: a window shorter than half the interval, such as the
+    one a run ends with, has no CPU use or rates, since a few milliseconds of CPU would look
+    large in it.
 
 ## Other sources
 

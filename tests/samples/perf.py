@@ -56,7 +56,7 @@ def compared(out: str) -> None:
     regressions = re.search(r"(\d+) regressions", out)
     status = re.search(r"exit status (\d+)", out)
     assert regressions and status, out
-    # a busy machine can add the CPU of a thread to the regressions: then it exits 1
+    # a busy machine can add the latency maximum of an element to the regressions: then it exits 1
     assert (status[1] == "0") == (regressions[1] == "0"), out
 
 

@@ -284,6 +284,26 @@ process, not one per player, so one player at a time can measure: two players wi
 process each record both pipelines ([Two pipelines](two-pipelines.md#what-mixtape-does-across-two-players)
 has an example). Run them in two processes to measure them apart.
 
+## The cost on a fast pipeline
+
+On a pipeline that pushes as fast as it can, `perf` adds a lot of CPU, most of it system time.
+This is a known cost of the tracers, not of your setup. The three `gst-plugins-rs` tracers
+that `perf` reads (`queue-levels`, `buffer-lateness` and `pad-push-timings`) write their log
+with one unbuffered write per record, so their cost grows with the number of buffers. On
+`audiotestsrc num-buffers=20000 ! queue ! audioconvert ! identity ! queue ! fakesink sync=false`,
+about 320,000 records, they took about 9 s of CPU; the run took 0.3 s without tracers.
+`mixtape run` with `perf` costs about as much as `gst-launch-1.0` with the same tracers, so the
+cost is the tracers', not mixtape's. It is in `gst-plugins-rs` 0.15.4, which Homebrew installs and
+`scripts/build-rs-plugins` builds, measured on macOS with GStreamer 1.28.9. mixtape does not work
+around it yet.
+
+The records also fill the debug log. On such a pipeline the log of a busy thread can outgrow the
+4 MiB that `perf` reads from, and `lost` in `summary.json` is then not 0 (see
+[Record it](#record-it)): `pad.interval` and the other metrics of the core tracers are missing
+records. That run lost about half of its `pad.interval` records. A live pipeline, or one with
+`sync=true`, makes records at its real rate, far fewer per second, so neither problem is likely
+there.
+
 ## The recorder as a test suite
 
 Installing mixtape adds a pytest plugin that measures every test of any GStreamer suite with

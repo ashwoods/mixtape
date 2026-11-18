@@ -123,6 +123,19 @@ async def test_commands(served: Served) -> None:
 
 
 @pytest.mark.asyncio
+async def test_commands_of_a_late_element(served: Served, Gst: Any) -> None:
+    """A command that came after the app was made has no route of its own: it was 404."""
+    await served.client.post("/api/commands/play")
+    served.player.pipeline.add(Gst.ElementFactory.make("appsrc", "late"))
+    for _ in range(50):
+        if "late.end-of-stream" in served.player.describe().commands:
+            break
+        await asyncio.sleep(0.1)
+    response = await served.client.post("/api/commands/late.end-of-stream")
+    assert (response.status_code, response.json()) == (200, {"result": "ok"})
+
+
+@pytest.mark.asyncio
 async def test_elements_and_properties(served: Served) -> None:
     client = served.client
     assert (await client.get("/api/elements/src")).json()["pattern"] == "smpte"

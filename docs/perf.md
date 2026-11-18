@@ -300,11 +300,11 @@ cost is the tracers', not mixtape's. It is in `gst-plugins-rs` 0.15.4, which Hom
 around it yet.
 
 The core tracers' records (`latency`, `stats`) go to the debug log instead. On such a pipeline the
-log of a busy thread can outgrow the 4 MiB ring per thread that `perf` reads it from, and `lost` in `summary.json` is then not 0 (see
-[Record it](#record-it)): `pad.interval` and the other metrics of the core tracers are missing
-records. That run lost about half of its `pad.interval` records. A live pipeline, or one with
-`sync=true`, makes records at its real rate, far fewer per second, so neither problem is likely
-there.
+log of a busy thread can outgrow the 4 MiB ring per thread that `perf` reads it from, and `lost`
+in `summary.json` is then not 0 (see [Record it](#record-it)): `pad.interval` and the other
+metrics of the core tracers are missing records. That run lost about half of its `pad.interval`
+records. A live pipeline, or one with `sync=true`, makes records at its real rate, far fewer per
+second, so neither problem is likely there.
 
 ## The recorder as a test suite
 

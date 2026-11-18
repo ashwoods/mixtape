@@ -56,12 +56,7 @@ class Feature:
     _declared: Declarations  # the class's; `gst:` features have their own
     _prepared = False
     _initialised = False
-    _tasks: set[asyncio.Task[Any]]  # `spawn`ed, until they end
-
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
-        self = super().__new__(cls)
-        self._tasks = set()  # here because a subclass's `__init__` need not call super's
-        return self
+    _tasks: set[asyncio.Task[Any]]  # `spawn`ed, until they end; the player sets it on attach
 
     def __init__(self) -> None:
         pass

@@ -394,6 +394,7 @@ class Player:
         self._connect_relinks()
         for feature in self._features.values():
             feature.player = self
+            feature._tasks = set()  # its own, even in a copy of a feature
             try:
                 feature.attach(self)
             except BaseException:
@@ -414,8 +415,9 @@ class Player:
                 feature.detach(self)
             except Exception:
                 logger.exception("Feature %r failed to detach", feature.name)
-            feature._end_tasks(cancel=cancellable)
-            feature.player = None
+            finally:
+                feature._end_tasks(cancel=cancellable)
+                feature.player = None
 
     def teardown(self) -> None:
         """Set the pipeline to NULL and detach from the loop. Idempotent, re-usable after.

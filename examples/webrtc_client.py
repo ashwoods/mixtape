@@ -23,7 +23,7 @@ from gi.repository import Gst
 from mixtape import Player, command, prop
 from mixtape.exceptions import CommandError, PlayerPipelineError
 
-SERVER = "ws://127.0.0.1:8443"
+SERVER = os.environ.get("WEBRTC_SERVER", "ws://127.0.0.1:8443")  # for `mixtape run`, too
 
 
 def publisher(

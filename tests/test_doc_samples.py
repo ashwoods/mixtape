@@ -28,9 +28,8 @@ assert len(SAMPLES_BY_ID) == len(SAMPLES), "two samples have the same id"
 
 
 # the samples of these pages run one after another on one xdist worker (`--dist loadgroup`):
-# the x264 encodes of perf.md would make each other slow, and the clients of webrtc.md share the
-# signalling server's default port, 8443
-SERIAL = {"perf.md": "perf", "webrtc.md": "webrtc"}
+# the x264 encodes of perf.md would make each other slow
+SERIAL = {"perf.md": "perf"}
 
 
 def param(s: Sample) -> object:

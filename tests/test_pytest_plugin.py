@@ -77,6 +77,7 @@ def test_each_test_gets_a_report_and_the_session_an_index(pytester: pytest.Pytes
     result, out = measure(pytester, "--junitxml=junit.xml")
     result.assert_outcomes(passed=4)
     index = load(out / "index.json")
+    assert index["format_version"] == 1
     tests = {test["id"]: test for test in index["tests"]}
     assert list(tests) == [
         "test_suite.py::test_one",
@@ -181,6 +182,19 @@ def test_gstreamer_initialised_before_the_plugin_is_a_usage_error(
         ["*--mixtape-perf needs GStreamer's tracers*initialised GStreamer*"]
     )
     assert not (pytester.path / "perf").exists()
+
+
+def test_a_session_with_xdist_workers_is_a_usage_error(pytester: pytest.Pytester) -> None:
+    # pytest-xdist's option, without its workers
+    pytester.makeconftest(
+        "def pytest_addoption(parser):\n"
+        "    parser.addoption('--numprocesses', dest='numprocesses', type=int)\n"
+    )
+    pytester.makepyfile(test_suite="def test_it():\n    pass\n")
+    result, out = measure(pytester, "--numprocesses=2")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*--mixtape-perf measures a session run serially*without -n*"])
+    assert not out.exists()
 
 
 def test_a_perf_player_and_the_plugin_both_get_the_samples(pytester: pytest.Pytester) -> None:

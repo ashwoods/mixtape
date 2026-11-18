@@ -7,6 +7,7 @@ asks the gst-plugins-rs tracers to write theirs to a file (`write-log`)."""
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,7 @@ from ..perf import Window
 from ..perf.collect import CORE, Collector, prepare
 from ..perf.parse import RUST
 from ..perf.record import Recorder
+from ..perf.threads import name_thread
 from . import Feature
 from .tracers import _name
 
@@ -26,6 +28,10 @@ if TYPE_CHECKING:
     from ..player import Player
 
 logger = logging.getLogger(__name__)
+
+_WORKER = ThreadPoolExecutor(1, "mixtape-perf", initializer=name_thread)
+"""The thread that reads the log and writes the windows, off the event loop: named, so that
+what it uses is perf's and not in `thread.cpu`"""
 
 
 def _keys(player: "Player") -> dict[str, str]:
@@ -50,8 +56,7 @@ class Perf(Feature):
     The core tracers write to the debug log only: it turns on its `GST_TRACER` category at level
     7 (unless `GST_DEBUG` names it) and reads the log from GStreamer's ring buffer logger, in
     memory, instead of its default logger, and echoes the lines that are not the tracers' to
-    stderr as that would. With a `GST_DEBUG_FILE` in the environment the default logger stays,
-    writing there, and it echoes nothing.
+    where that would: stderr, or the `GST_DEBUG_FILE` of the environment.
 
     Tracers are created by `Gst.init` and never later, one of each per process: build the
     player with `Player.from_description` or `mixtape run`, first in the process. They are
@@ -108,6 +113,12 @@ class Perf(Feature):
         try:  # what the run did since the last window, and its end
             recorder.window(_keys(player))
         finally:
+            if lost := recorder.lost:
+                logger.warning(
+                    "perf lost debug log lines %d times during the run: some tracer records "
+                    "are missing from its numbers",
+                    lost,
+                )
             recorder.finish(
                 {
                     "pipeline": player._description,
@@ -120,15 +131,21 @@ class Perf(Feature):
     async def _poll(self, player: "Player") -> None:
         loop = asyncio.get_running_loop()
         due = loop.time()
+        failed = False
         while True:
             due += self.interval
             await asyncio.sleep(max(due - loop.time(), 0))
-            keys = _keys(player)
-            await self._check_added(player)
-            self._snapshot(player)
-            assert self._recorder is not None
-            self._summary = await asyncio.to_thread(self._recorder.window, keys)
-            self.notify("summary")
+            try:
+                keys = _keys(player)
+                await self._check_added(player)
+                self._snapshot(player)
+                assert self._recorder is not None
+                self._summary = await loop.run_in_executor(_WORKER, self._recorder.window, keys)
+                self.notify("summary")
+            except Exception:  # a full disk, say: the next window may work, the poll goes on
+                if not failed:  # once a run, not every window
+                    logger.exception("perf could not close a window")
+                failed = True
 
     async def _check_added(self, player: "Player") -> None:
         """Warn once for each element added since `check` that was made before the collector
@@ -137,7 +154,8 @@ class Perf(Feature):
         if not added:
             return
         self._names |= added
-        unknown = await asyncio.to_thread(Collector.get().unknown, added)  # reads the log
+        loop = asyncio.get_running_loop()
+        unknown = await loop.run_in_executor(_WORKER, Collector.get().unknown, added)  # the log
         if self._recorder is not None and self._recorder.lost:
             return  # the lines lost may have had their creation: the reader warned of those
         for name in unknown:

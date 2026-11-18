@@ -11,28 +11,25 @@ from .metrics import Sample
 RECORD = "GST_TRACER :0:: "
 """What precedes a record in a log line, after the category name"""
 
-_STR = r'("(?:[^"\\]|\\.)*"|[^,;]*)'  # a serialized string, quoted or not
+# A record prints a string with `%s`, as it is: a name with a comma or a quote (`a,b`) is not
+# quoted, so a string field ends at the next field the record declares, not at a comma
+_STR = r"(.*?)"
 _U64 = r"\(guint64\)(\d+)"
 # the fields of a record come in the order its GstTracerRecord declares them
-_ELEMENT_LATENCY = re.compile(rf"element=\(string\){_STR}, src=.*?time={_U64}, ts={_U64}")
+_ELEMENT_LATENCY = re.compile(
+    rf", element=\(string\){_STR}, src=\(string\).*?, time={_U64}, ts={_U64}"
+)
 _LATENCY = re.compile(
-    rf"src-element=\(string\){_STR}, .*?sink-element=\(string\){_STR}, .*?time={_U64}, ts={_U64}"
+    rf", src-element=\(string\){_STR}, src=\(string\).*?"
+    rf", sink-element=\(string\){_STR}, sink=\(string\).*?, time={_U64}, ts={_U64}"
 )
 _NEW_ELEMENT = re.compile(
-    rf"ts={_U64}, ix=\(uint\)(\d+), parent-ix=\(uint\)\d+, name=\(string\){_STR}"
+    rf"ts={_U64}, ix=\(uint\)(\d+), parent-ix=\(uint\)\d+, name=\(string\){_STR}, type="
 )
-_NEW_PAD = re.compile(rf"ix=\(uint\)(\d+), parent-ix=\(uint\)(\d+), name=\(string\){_STR}")
+_NEW_PAD = re.compile(rf"ix=\(uint\)(\d+), parent-ix=\(uint\)(\d+), name=\(string\){_STR}, type=")
 _BUFFER = re.compile(
     rf"ts={_U64}, pad-ix=\(uint\)(\d+), element-ix=\(uint\)(\d+), .*?buffer-size=\(uint\)(\d+)"
 )
-_ESCAPED = re.compile(r"\\([0-7]{3}|.)")
-
-
-def _string(value: str) -> str:
-    """A string field as GStreamer serialized it: bare, or quoted with backslash escapes."""
-    if not value.startswith('"'):
-        return value
-    return _ESCAPED.sub(lambda m: chr(int(m[1], 8)) if len(m[1]) == 3 else m[1], value[1:-1])
 
 
 class TracerLog:
@@ -88,18 +85,18 @@ class TracerLog:
                 self._buffer(int(m[1]), int(m[2]), int(m[3]), int(m[4]))
         elif name == "element-latency":
             if self.collecting and (m := _ELEMENT_LATENCY.search(payload)):
-                self.samples.append(Sample(int(m[3]), "element.latency", _string(m[1]), int(m[2])))
+                self.samples.append(Sample(int(m[3]), "element.latency", m[1], int(m[2])))
         elif name == "latency":
             if self.collecting and (m := _LATENCY.search(payload)):
-                subject = f"{_string(m[1])}→{_string(m[2])}"
+                subject = f"{m[1]}→{m[2]}"
                 self.samples.append(Sample(int(m[4]), "pipeline.latency", subject, int(m[3])))
         elif name == "new-element":
             if m := _NEW_ELEMENT.search(payload):
-                name = self.elements[int(m[2])] = _string(m[3])
+                name = self.elements[int(m[2])] = m[3]
                 self.created[name] = int(m[1])
         elif name == "new-pad":
             if m := _NEW_PAD.search(payload):
-                self.pads[int(m[1])] = _string(m[3])
+                self.pads[int(m[1])] = m[3]
 
     def _buffer(self, ts: int, pad: int, element: int, size: int) -> None:
         subject = f"{self.elements.get(element, element)}:{self.pads.get(pad, pad)}"

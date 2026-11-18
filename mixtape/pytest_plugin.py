@@ -119,6 +119,13 @@ def pytest_configure(config: pytest.Config) -> None:
         'perf(pipeline_latency_p95="20ms", process_cpu_mean="150%")',
     )
     if config.getoption("mixtape_perf") is not None:
+        if config.getoption("numprocesses", None) not in (None, 0, "0"):
+            # the workers would share the cores, so their numbers would not compare with a
+            # session run alone, and each would write its own index
+            raise pytest.UsageError(
+                "--mixtape-perf measures a session run serially: run it without -n "
+                "(pytest-xdist), or with -n 0"
+            )
         config.pluginmanager.register(Measure(config), "mixtape-perf")
     elif config.getoption("mixtape_perf_baseline") is not None:
         raise pytest.UsageError("--mixtape-perf-baseline needs --mixtape-perf")
@@ -235,12 +242,17 @@ class Measure:
         return (yield)
 
     def _poll(self, run: _Run) -> None:
+        from .perf.threads import name_thread
+
+        name_thread()
+        failed = False
         while not run.stop.wait(self.interval):
             try:
                 run.recorder.window()
-            except Exception:
-                logger.exception("perf could not close a window of the running test")
-                return
+            except Exception:  # the next window may work: the poll goes on
+                if not failed:  # once a test, not every interval
+                    logger.exception("perf could not close a window of the running test")
+                failed = True
 
     @pytest.hookimpl(wrapper=True, tryfirst=True)
     def pytest_runtest_call(self, item: pytest.Item) -> Any:
@@ -254,6 +266,11 @@ class Measure:
             # percentile of the whole run needs
             run.recorder.window()
             if breaches := budget.check(budgets, run.recorder.stats()):
+                if lost := run.recorder.lost:
+                    breaches.append(
+                        f"perf lost debug log lines ({lost} times) while the test ran: these "
+                        "numbers are incomplete"
+                    )
                 pytest.fail("\n".join(breaches), pytrace=False)
         return result
 
@@ -322,6 +339,7 @@ class Measure:
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         from .perf import compare, index
+        from .perf.output import FORMAT_VERSION
 
         # a test that was interrupted has no teardown: finish what it measured, as far as it got
         for run in self._runs.values():
@@ -334,6 +352,7 @@ class Measure:
         index.write(
             self.out,
             {
+                "format_version": FORMAT_VERSION,
                 "interval": self.interval,
                 "samples": self.samples,
                 "tests": list(self._tests.values()),

@@ -80,6 +80,16 @@ The folder has more than the summary:
 - `samples.jsonl` and a `<metric>.csv` for each metric: every sample, as `t_ns,subject,value`
   (times are nanoseconds since GStreamer initialised).
 
+`summary.json` also has `lost`: how many times the debug log dropped lines before `perf` read
+them. When it is not 0, some tracer records are missing from the numbers, and `mixtape run` logs
+a warning with the count at the end. It has a `format_version` too, 1: a reader takes a document
+without one as 1, and it changes only when a field is renamed or removed.
+
+`perf` reads GStreamer's debug log itself and passes on the lines that are not its tracers':
+to stderr, or to the file `GST_DEBUG_FILE` names (`%p` is the process id, `-` is stdout), so
+that file has your categories but not the tracer records. A `GST_DEBUG_FILE` with `%r`, a
+number `perf` cannot know, gets the tracer records as well.
+
 ## The report
 
 ![The top of report.html: the pipeline graph and the charts of latency and queue fill](images/perf-report.png)
@@ -107,7 +117,12 @@ The ones that matter here:
 - `process.cpu` and `thread.cpu`: CPU time over wall time, where 100 is one core. GStreamer names
   a streaming thread after its pad: the thread of a queue's source pad is `q:src`, and it runs
   everything downstream of the queue until the next queue, here the encoder, the muxer and the
-  file. Threads that GStreamer does not name are `other`.
+  file. Threads that GStreamer does not name are `other`. `thread.cpu` leaves out perf's own
+  threads (their names start with `mixtape-perf`: the log reader and the window writer), and
+  `process.cpu` subtracts what they used, so both are the pipeline's and the app's. A thread
+  that was busy once (over 0.1% of a core) and then went idle counts as 0 in the statistics of
+  the run for its idle windows, though the chart does not draw it for them; a thread that
+  was never busy is left out.
 - `pad.buffers`, `pad.bitrate`, `pad.interval` (core `stats`), `pad.lateness` and `pad.push`:
   what each pad pushes, how fast, and how late.
 
@@ -177,6 +192,11 @@ of CPU, 5% of a queue. It compares the p95 and the max of each latency, each CPU
 queue level, where a higher value is worse. It leaves out rates, lateness and push time, which
 vary too much between two runs: bound those with a budget. The
 [command line page](cli.md#compare-two-runs) has its options and its exit status.
+
+A run whose debug log dropped lines (its `lost`, above) is marked, never failed: the text has a
+"Lost log lines" section, and `--json` a `lost` list of `{"side": "base" or "new", "lost": N}`
+(a session's items have the `"test"` too). The exit status stays 0, 1 or 2. A document with a
+newer `format_version`, or without the fields compare reads, is a usage error: exit status 2.
 
 !!! note "On a busy machine"
     The maxima of a latency are single frames, and a machine busy with other work delays
@@ -315,7 +335,8 @@ Each test that ran a pipeline gets a folder in `/tmp/perf-out/` with its `window
 `summary.json` and `report.html`, as `mixtape run` wrote them (its window is from the start of
 its setup to the end of its teardown; `--mixtape-perf-samples` adds the samples and the CSVs, and
 `--mixtape-perf-interval SECONDS` sets the window). `index.json` has every test's outcome,
-duration and the worst p95, max and mean of each metric with the subject that had it, and
+duration, `lost` and the worst p95, max and mean of each metric with the subject that had it, a
+`format_version` as `summary.json` does, and
 `index.html` is the same as a page that links to the reports. Without the option the plugin does
 nothing.
 
@@ -337,8 +358,9 @@ FAILED examples/recorder_suite/test_recorder.py::test_records_720p - Failed: ...
 ```
 
 The message names the metric and the statistic, the subject that had the worst value, the value
-and the limit. A metric the test has no samples of fails too. The 360p test passed, as it has no
-budget, but `index.html` shows what happened to it:
+and the limit. A metric the test has no samples of fails too, and when the log of the test lost
+lines, the failure adds a line saying that the numbers are incomplete. The 360p test passed, as
+it has no budget, but `index.html` shows what happened to it:
 
 ![index.html of the failing session: the 720p test failed, with its worst numbers next to the passing 360p test's](images/perf-index.png)
 
@@ -348,9 +370,9 @@ A budget bounds what you chose to bound. The other check compares the whole sess
 earlier one: `--mixtape-perf-baseline BASE` takes the `--mixtape-perf` folder of that session
 (CI keeps the one of the main branch), compares at the end as `mixtape perf compare` does,
 writes `compare.json` next to the index (the same JSON as `mixtape perf compare --json`; from
-0.8, fields are only added, never renamed or removed), prints the result in its own section and fails the
-session, exit status 1, on a regression. Here the baseline is a session with the fast encoder,
-and the new one runs only the 360p test with the slow one:
+0.8, fields are only added, never renamed or removed: `lost` is an addition), prints the result
+in its own section and fails the session, exit status 1, on a regression. Here the baseline is
+a session with the fast encoder, and the new one runs only the 360p test with the slow one:
 
 ```console
 $ pytest -q examples/recorder_suite --mixtape-perf /tmp/perf-base > /dev/null
@@ -393,5 +415,7 @@ their id, so keep the baseline from the same suite.
 The plugin needs the tracers like `perf` does, so it initialises GStreamer before pytest reads
 the first `conftest.py`, and stops with a usage error when something did so earlier: a plugin
 loaded with `-p` or `PYTEST_PLUGINS` that imports `gi` and initialises it first. It gives
-`GST_TRACERS` back to the environment, so the processes your tests start measure nothing. It is
-not aware of `pytest-xdist`: each worker would write its own index.
+`GST_TRACERS` back to the environment, so the processes your tests start measure nothing. A
+session is measured serially, so `--mixtape-perf` with `pytest-xdist` workers (`-n` above 0) is
+a usage error: run without `-n`, or with `-n 0`. Parallel workers share the cores, so their
+numbers would not compare with a serial baseline, and each would write its own index.

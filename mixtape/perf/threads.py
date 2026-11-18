@@ -6,6 +6,7 @@ import ctypes
 import logging
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable
 
@@ -17,7 +18,12 @@ OTHER = "other"
 """The subject of the threads without a name of their own"""
 
 IDLE = 0.1
-"""Percent of one core under which the threads of a name get no sample in a window"""
+"""Percent of one core under which the threads of a name get no sample in a window, until
+they have been over it once"""
+
+OWN = "mixtape-perf"
+"""What the names of perf's own threads start with: what they use is perf's, not the
+pipeline's, so it is in no `thread.cpu` and taken out of `process.cpu`"""
 
 _PROC_PIDTHREADINFO, _PROC_PIDLISTTHREADS = 5, 6
 
@@ -40,6 +46,19 @@ class _ThreadInfo(ctypes.Structure):
     ]
 
 
+def name_thread() -> None:
+    """Give the calling thread its Python name in the operating system too, cut to the 15
+    bytes Linux keeps, as Python itself does from 3.14 on, so that `ThreadCpu` sees it."""
+    name = threading.current_thread().name.encode()[:15]
+    try:
+        if sys.platform == "linux":
+            ctypes.CDLL(None).prctl(15, name)  # PR_SET_NAME
+        elif sys.platform == "darwin":
+            ctypes.CDLL(None).pthread_setname_np(name)
+    except (OSError, AttributeError):  # a libc without it: the thread counts as the others
+        logger.debug("cannot name the thread %r for the OS", name)
+
+
 def parse_stat(stat: bytes, ticks: int) -> tuple[str, int]:
     """The name and the CPU time in ns of a thread from its `/proc/<pid>/task/<tid>/stat`, with
     `ticks` to the second. The kernel cuts the name to 15 bytes, in the middle of a character
@@ -54,11 +73,15 @@ def parse_stat(stat: bytes, ticks: int) -> tuple[str, int]:
 
 class ThreadCpu:
     """Samples `thread.cpu`: the CPU time each thread used since the last `sample`, over the
-    wall time since then, in percent of one core, summed by thread name. Without a way to
-    read threads on this OS, `sample` gives nothing."""
+    wall time since then, in percent of one core, summed by thread name. Perf's own threads
+    (`OWN`) are left out, and what they used is summed in `own_ns`. Without a way to read
+    threads on this OS, `sample` gives nothing."""
 
     def __init__(self) -> None:
         self._last: tuple[float, dict[int, int]] | None = None
+        self._known: set[str] = set()  # the names that were over `IDLE` once
+        self.own_ns = 0
+        """CPU time perf's own threads used between the first `sample` and the last"""
         self._main = ""  # what Linux calls a thread nobody named: the process's own name
         self._libproc: ctypes.CDLL | None = None
         self._read: Callable[[], dict[int, tuple[str, int]]] | None = None
@@ -74,7 +97,9 @@ class ThreadCpu:
     def sample(self, t_ns: int) -> list[Sample]:
         """`thread.cpu` of each thread name since the last call, at `t_ns`: the first call
         only takes the baseline. A thread that came in between counts from zero, one that
-        left is not counted, as what it used is not known; a name under `IDLE` is left out."""
+        left is not counted, as what it used is not known. A name under `IDLE` is left out
+        until it is over it once, and from then on has a sample in every window, so that the
+        statistics of the run count the windows it was idle in."""
         if self._read is None:
             return []
         threads = self._read()
@@ -84,14 +109,18 @@ class ThreadCpu:
             return []
         percents: dict[str, float] = {}
         for tid, (name, ns) in threads.items():
-            subject = name if name and name != self._main else OTHER
             before = last[1].get(tid, 0)
             used = ns - before if ns >= before else ns  # an id reused by a new thread
+            if name.startswith(OWN):
+                self.own_ns += used
+                continue
+            subject = name if name and name != self._main else OTHER
             percents[subject] = percents.get(subject, 0.0) + used / 1e9 / (wall - last[0]) * 100
+        self._known.update(subject for subject, value in percents.items() if value >= IDLE)
         return [
             Sample(t_ns, "thread.cpu", subject, value)
             for subject, value in percents.items()
-            if value >= IDLE  # an idle thread is no line on the chart
+            if subject in self._known
         ]
 
     def _linux(self) -> dict[int, tuple[str, int]]:

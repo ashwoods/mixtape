@@ -104,10 +104,16 @@ class Leaks(Feature):
         self._mark.clear()
 
     async def _poll(self) -> None:
+        failed = False
         while True:
             await asyncio.sleep(self.interval)
-            if self._fold():
-                self.notify("alive")
+            try:
+                if self._fold():
+                    self.notify("alive")
+            except Exception:  # the next checkpoint may work: the poll goes on
+                if not failed:  # once a run, not every interval
+                    logger.exception("leaks could not take a checkpoint")
+                failed = True
 
     def _fold(self) -> bool:
         """Take a checkpoint of the tracer and add what it saw to `alive`. Whether it changed.

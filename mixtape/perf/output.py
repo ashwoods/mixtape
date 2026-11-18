@@ -10,6 +10,10 @@ from . import report
 from .aggregate import Totals, Window
 from .metrics import METRICS, Sample
 
+FORMAT_VERSION = 1
+"""The `format_version` of `summary.json` and `index.json`: a reader takes a document without
+one for 1. It changes only when a field is renamed or removed, not when one is added"""
+
 
 class Artifacts:
     """Write a run to `folder`, replacing what an earlier run left:
@@ -28,7 +32,9 @@ class Artifacts:
         for stale in folder.glob("*.csv"):
             if stale.stem in METRICS:
                 stale.unlink()
-        (folder / "samples.jsonl").unlink(missing_ok=True)
+        # what `finish` writes: a run that does not get there leaves none of an earlier one's
+        for name in ("samples.jsonl", "summary.json", "report.html"):
+            (folder / name).unlink(missing_ok=True)
         self._samples = open(folder / "samples.jsonl", "w", encoding="utf-8") if samples else None
         self._windows = open(folder / "windows.jsonl", "w", encoding="utf-8")
         self._csv: dict[str, tuple[IO[str], Any]] = {}  # metric: (file, writer)
@@ -69,6 +75,7 @@ class Artifacts:
         close the files, and write `report.html` from them. The summary."""
         stats = self.totals.stats()
         summary = {
+            "format_version": FORMAT_VERSION,
             **about,
             "windows": self.windows,
             "metrics": {

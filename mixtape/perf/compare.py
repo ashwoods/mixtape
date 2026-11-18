@@ -13,6 +13,7 @@ from typing import Any
 
 from .index import measure
 from .metrics import METRICS
+from .output import FORMAT_VERSION
 
 THRESHOLD = 0.5
 """How much a value may grow over the base, as a fraction of it, before it is a regression.
@@ -72,6 +73,18 @@ def _tests(document: dict[str, Any], what: str) -> set[str]:
     return {test["id"] for test in document["tests"]} if what == "session" else set()
 
 
+def _lost(document: dict[str, Any], what: str, side: str) -> list[dict[str, Any]]:
+    """The tests (`{"side", "test", "lost"}`) or the run (`{"side", "lost"}`) of one side
+    whose debug log dropped lines, so some of their numbers are missing."""
+    if what == "session":
+        return [
+            {"side": side, "test": test["id"], "lost": test["lost"]}
+            for test in document["tests"]
+            if test.get("lost")
+        ]
+    return [{"side": side, "lost": document["lost"]}] if document.get("lost") else []
+
+
 def _missing(
     mine: dict[tuple[str, ...], Any],
     tests: set[str],
@@ -98,8 +111,9 @@ def compare(
     `regressions` and `improvements` are lists of `{"test" (sessions), "metric", "subject",
     "stat", "unit", "base", "new"}`, the worst change first; `added` and `removed` are lists of
     what only one side has, as objects with those keys that say it: `{"test"}`, `{"test",
-    "metric"}` or, for a run, `{"metric", "subject"}`. `threshold_percent` is `threshold` in
-    percent, as `--threshold` is given."""
+    "metric"}` or, for a run, `{"metric", "subject"}`. `lost` lists the tests, or the runs, of
+    either side whose debug log dropped lines (see `_lost`): their numbers are incomplete.
+    `threshold_percent` is `threshold` in percent, as `--threshold` is given."""
     before, after = _values(base, what), _values(new, what)
     regressions: list[dict[str, Any]] = []
     improvements: list[dict[str, Any]] = []
@@ -135,18 +149,34 @@ def compare(
         "improvements": improvements,
         "added": _missing(after, tests_after, before, tests_before, what),
         "removed": _missing(before, tests_before, after, tests_after, what),
+        "lost": _lost(base, what, "base") + _lost(new, what, "new"),
         "compared": len(both) * len(STATS),
     }
 
 
 def load(folder: Path) -> tuple[dict[str, Any], str]:
-    """The `index.json` or `summary.json` of a folder, and which of them it is."""
+    """The `index.json` or `summary.json` of a folder, and which of them it is. One of a
+    newer `format_version`, or without the fields to compare, is a `CompareError`."""
     what = kind(folder)
     path = folder / ("index.json" if what == "session" else "summary.json")
     try:
-        return json.loads(path.read_text(encoding="utf-8")), what
+        document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise CompareError(f"cannot read {path}: {error}") from None
+    version = document.get("format_version", 1) if isinstance(document, dict) else 1
+    if version != FORMAT_VERSION:
+        raise CompareError(
+            f"{path} has format_version {version!r}, and this mixtape reads "
+            f"{FORMAT_VERSION}: compare it with the mixtape that wrote it"
+        )
+    try:
+        _values(document, what)
+        _lost(document, what, "")
+    except (KeyError, TypeError, AttributeError, IndexError) as error:
+        raise CompareError(
+            f"cannot read {path}: it is not as mixtape writes it ({type(error).__name__}: {error})"
+        ) from None
+    return document, what
 
 
 def compare_folders(base: Path, new: Path, threshold: float = THRESHOLD) -> dict[str, Any]:
@@ -194,6 +224,16 @@ def format_text(result: dict[str, Any]) -> str:
     for title, key in (("Added", "added"), ("Removed", "removed")):
         if result[key]:
             lines += [f"{title}:", *("  " + "  ".join(item.values()) for item in result[key]), ""]
+    if lost := result.get("lost"):
+        rows = [
+            [item["side"], *([item["test"]] if "test" in item else []), str(item["lost"])]
+            for item in lost
+        ]
+        lines += [
+            "Lost log lines (times; some tracer records are missing from these numbers):",
+            *_table(rows),
+            "",
+        ]
     lines.append(
         f"{len(result['regressions'])} regressions, {len(result['improvements'])} improvements, "
         f"{len(result['added'])} added, {len(result['removed'])} removed "

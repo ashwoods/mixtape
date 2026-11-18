@@ -191,6 +191,25 @@ def test_the_command_compares_single_runs_and_refuses_what_it_cannot(
     err = capsys.readouterr().err
     assert "neither an index.json nor a summary.json" in err
     assert "perf,out=DIR" in err and "pytest --mixtape-perf DIR" in err
+    broken = write(tmp_path / "broken", "summary.json", {"metrics": {"element.latency": {}}})
+    assert main(["perf", "compare", str(base), str(broken)]) == 2
+    assert "it is not as mixtape writes it (KeyError: 'subjects')" in capsys.readouterr().err
+    newer = write(tmp_path / "newer", "summary.json", {"format_version": 2, "metrics": {}})
+    assert main(["perf", "compare", str(base), str(newer)]) == 2
+    assert "has format_version 2, and this mixtape reads 1" in capsys.readouterr().err
+
+
+def test_the_runs_that_lost_log_lines_are_listed() -> None:
+    base, new = index(a={}, b={}), index(a={}, b={})
+    new["tests"][1]["lost"] = 3
+    result = compare.compare(base, new, "session")
+    assert result["lost"] == [{"side": "new", "test": "b", "lost": 3}]
+    assert (
+        "Lost log lines (times; some tracer records are missing from these numbers):\n  new  b  3\n"
+        in compare.format_text(result)
+    )
+    run = compare.compare({"lost": 2, "metrics": {}}, {"metrics": {}}, "run")  # none before it
+    assert run["lost"] == [{"side": "base", "lost": 2}]
 
 
 # -- budgets -- #

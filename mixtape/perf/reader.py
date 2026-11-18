@@ -19,6 +19,7 @@ from gi.repository import Gst
 
 from .metrics import Sample
 from .parse import TracerLog
+from .threads import name_thread
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,9 @@ class RingTail:
 
     With `echo` it installs the logger and removes GStreamer's default one, which would
     write the same lines to stderr, so `echo` is where they go; without it the default logger
-    stays (a `GST_DEBUG_FILE` the user chose). `get_logs` is where the rings come from, one
-    string per thread: the logger's, unless given (the tests do), which then is not installed.
+    stays (a `GST_DEBUG_FILE` whose name it cannot tell). `get_logs` is where the rings come
+    from, one string per thread: the logger's, unless given (the tests do), which then is not
+    installed.
 
     GStreamer drops the oldest lines of a ring that is full: when the line a ring was read up to
     is gone from a ring nearly as big as `size`, the lines after it are lost, and `lost` counts
@@ -79,6 +81,7 @@ class RingTail:
         self._thread.start()
 
     def _run(self) -> None:
+        name_thread()
         while not self._stop.wait(self._interval):
             try:
                 self.catch_up()

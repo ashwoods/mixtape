@@ -11,7 +11,7 @@ from .aggregate import RunStat, Window, rates, window
 from .collect import Collector
 from .metrics import Sample
 from .output import Artifacts
-from .threads import ThreadCpu
+from .threads import IDLE, ThreadCpu
 
 
 def _subject(subject: str, keys: dict[str, str]) -> str:
@@ -50,9 +50,9 @@ class Recorder:
         self._rates_ns = self.start_ns  # where the rates of the next window start
         self._rated = False  # whether a window has rates
         self._counts: dict[str, tuple[int, int]] = {}  # of pads since `_rates_ns`
-        self._cpu = (time.process_time(), time.monotonic())  # at the rates' start
         self._threads = ThreadCpu()
         self._threads.sample(self.start_ns)  # the baseline
+        self._cpu = (time.process_time(), time.monotonic(), 0)  # at the rates' start
         self.measured: set[str] = set()
         """The metrics it has windows of"""
 
@@ -73,15 +73,18 @@ class Recorder:
                 self._counts[pad] = (before[0] + buffers, before[1] + size)
             cpu = None
             if not self._rated or end - self._rates_ns >= self._shortest_ns:
-                cpu = self._cpu_sample()
                 samples += rates(self._counts, self._rates_ns, end)
                 samples += self._threads.sample(end)
+                cpu = self._cpu_sample()  # after the threads: without what perf's own used
                 self._rates_ns, self._counts, self._rated = end, {}, True
             if keys:
                 samples = [s._replace(subject=_subject(s.subject, keys)) for s in samples]
             if cpu is not None:
                 samples.append(cpu)
-            result = window(samples, self.end_ns, end)
+            # a thread idle in this window counts in the run's statistics, but is no point on
+            # the chart
+            shown = [s for s in samples if s.metric != "thread.cpu" or s.value >= IDLE]
+            result = window(shown, self.end_ns, end)
             if self._artifacts is not None:
                 self._artifacts.add(samples, result)
             self.measured.update(result.metrics)
@@ -97,18 +100,21 @@ class Recorder:
             return self._artifacts.totals.stats()
 
     def _cpu_sample(self) -> Sample | None:
-        """`process.cpu` since the last window (`thread.cpu` is `ThreadCpu`'s)."""
-        cpu, wall = time.process_time(), time.monotonic()
-        (last_cpu, last_wall), self._cpu = self._cpu, (cpu, wall)
+        """`process.cpu` since the last window, but for what perf's own threads used
+        (`thread.cpu` is `ThreadCpu`'s)."""
+        cpu, wall, own = time.process_time(), time.monotonic(), self._threads.own_ns
+        (last_cpu, last_wall, last_own), self._cpu = self._cpu, (cpu, wall, own)
         if wall <= last_wall:
             return None
-        percent = (cpu - last_cpu) / (wall - last_wall) * 100
+        used = cpu - last_cpu - (own - last_own) / 1e9
+        percent = max(used, 0.0) / (wall - last_wall) * 100
         return Sample(self._collector.now(), "process.cpu", "process", percent)
 
     def finish(self, about: dict[str, Any]) -> dict[str, Any] | None:
         """Stop recording and write the artifacts with `about` the run added to what it knows
         of it: their summary, or None without `out`."""
         with self._lock:
+            lost = self.lost
             self._subscription.stop()
             if self._artifacts is None:
                 return None
@@ -117,6 +123,7 @@ class Recorder:
                     "tracers": self._collector.tracer_entries,
                     "start_ns": self.start_ns,
                     "end_ns": self.end_ns,
+                    "lost": lost,
                     **about,
                 }
             )

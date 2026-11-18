@@ -22,8 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   control page disables the commands that cannot run. `play`, `pause` and `stop` cannot run
   while a state change is stuck, `eos` needs a playing pipeline that is not at its EOS, and
   `seek` a paused or playing pipeline that answers a seeking query.
+- `perf`: `summary.json` has `lost`, the times the debug log dropped lines before `perf` read
+  them, so that some tracer records are missing, and `format_version: 1`; `index.json` has
+  `format_version: 1`. A reader takes a document without one as 1; it changes only when a field
+  is renamed or removed. `mixtape run` logs a warning with the count at the end, and a budget
+  failure of a test that lost lines says that its numbers are incomplete.
+- `mixtape perf compare --json` (and `compare.json` of `--mixtape-perf-baseline`): `lost`, a
+  list of `{"side", "test", "lost"}` for sessions or `{"side", "lost"}` for runs, with `side`
+  `"base"` or `"new"`; the text has a "Lost log lines" section. A lossy run is marked, never
+  failed: the exit status stays 0, 1 or 2. Fields are still only added.
 
 ### Changed
+- `perf compare` of a document with a newer `format_version`, or without the fields it reads,
+  is a usage error (exit status 2).
+- `--mixtape-perf` with `pytest-xdist` workers (`-n` above 0) is a usage error: the workers
+  share the cores, so their numbers would not compare with a serial baseline.
 - `perf` keeps 4 MiB of the debug log of each thread instead of 1 MiB: a WebRTC call logged
   more than 1 MiB on one thread between two reads and lost tracer records.
 - `invoke("play")`, `"pause"` or `"stop"` while a state change is stuck raises a
@@ -31,6 +44,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Calling `play()`, `pause()` or `stop()` still raises `PlayerSetStateError`.
 
 ### Fixed
+- `perf`'s own threads (names starting `mixtape-perf`: the log reader and the window writer) are
+  left out of `thread.cpu`, and `process.cpu` subtracts what they used.
+- A `perf` thread that was busy once and then went idle counts as 0 in the statistics of the
+  run for its idle windows, though the chart does not draw it for them; those windows had no sample.
+- With `GST_DEBUG_FILE` set, `perf` writes the debug lines that are not the tracers' to that
+  file (`%p` is the pid, `-` is stdout), not to stderr; without it, to stderr as before. A
+  `GST_DEBUG_FILE` with `%r` keeps GStreamer's default logger, which writes the tracer lines
+  there as well.
+- `perf` reads the tracer records of an element or a queue whose name has a comma or a quote,
+  such as `queue name="a,b"`: they had no `element.latency`.
+- A window or a leak checkpoint that raises is logged once, and `perf`, `leaks` and the window
+  thread of `--mixtape-perf` go on with the next one instead of stopping for the rest of the run.
+- A `perf` run removes the `summary.json` and `report.html` an earlier run left in its folder, so
+  a run that does not finish shows none of an earlier one's.
+- `perf` leaves no `mixtape-perf-*` folder in the temporary folder: each read of the
+  `gst-plugins-rs` tracers' log goes to a temporary file it removes.
 - `perf` gives a window shorter than half the interval, such as the one a run ends with, no CPU
   use or rates: a few milliseconds of CPU looked large in it, and `perf compare` of two runs of
   the same code listed them as regressions.

@@ -14,16 +14,17 @@ extra_css:
 
 nav:
   - Overview: index.md
+  - Concepts: concepts.md
   - Guides:
+      - Command line: cli.md
       - Writing an application: library.md
       - Measuring performance: perf.md
+      - Two pipelines: two-pipelines.md
   - Reference:
-      - Command line: cli.md
       - HTTP API: http.md
       - API reference: reference.md
   - Examples:
       - A WebRTC client: webrtc.md
-      - Two pipelines: two-pipelines.md
   - Troubleshooting: troubleshooting.md
   - Changelog: changelog.md
 
@@ -50,11 +51,19 @@ plugins:
   - llmstxt:
       full_output: llms-full.txt
       markdown_description: |
-        PyGObject and GStreamer come from the system (Homebrew or apt), not from PyPI: install
-        mixtape into a venv made with `--system-site-packages` from the Python that has them.
+        PyGObject (`gi`) and GStreamer come from the system (Homebrew or apt), not from PyPI:
+        install mixtape into a venv made with `--system-site-packages` from the Python that has
+        them. Tracers are one set per process, created when GStreamer initialises, so the
+        features that need them (`perf`, `leaks`, `tracers`, `gst:NAME`) must come first in the
+        process. `mixtape run` exits 0 at an EOS or a first Ctrl-C, 1 for a pipeline error, 2 for
+        bad usage or a target or feature that cannot be loaded, 130 for a second Ctrl-C. The JSON
+        that `mixtape inspect --json` and `mixtape perf compare --json` print, and `compare.json`,
+        only gain fields from 0.8: none is renamed or removed. The source, with the `examples/` the docs run, is at
+        https://github.com/ashwoods/mixtape.
       sections:
         Docs:
           - index.md: what mixtape is, how to install it, a first pipeline
+          - concepts.md: the player, its model, its threads, features and tracers, and the interfaces made from the model
           - library.md: subclass `Player`, declare properties and commands, read events, write a `Feature`
           - perf.md: the `perf` feature, recording a run, comparing two runs, budgets in pytest
           - cli.md: "`mixtape run`, `mixtape inspect`, `--set`, `--http`, `--feature`, exit statuses"

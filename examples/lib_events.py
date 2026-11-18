@@ -1,4 +1,4 @@
-"""Read a player's events, and react to one kind of bus message.
+"""Read a player's events.
 
 python3 examples/lib_events.py
 """

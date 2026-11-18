@@ -81,9 +81,9 @@ $ python3 examples/webrtc_client.py --camera --sink autovideosink --call
 
 Without an argument `--call` calls the first client that publishes. On a network, every
 client gets the server's address with `--server ws://host:8443` (under `mixtape run`, in
-`WEBRTC_SERVER` in its environment), and the two
-`stun-server=NULL` in the code below must go, so that ICE can ask a STUN server for the
-address to use.
+`WEBRTC_SERVER` in its environment). For peers behind a NAT, pass `--stun stun://host:port`:
+the two `stun-server=NULL` in the code below then name that server, so that ICE can ask it
+for the address to use.
 
 ## How it works
 

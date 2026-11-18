@@ -14,7 +14,7 @@ succeed with the Python you start from, and print nothing:
 $ python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst; Gst.IteratorError'
 ```
 
-Homebrew's Python is `/opt/homebrew/bin/python3` and Ubuntu's is `/usr/bin/python3`. Then
+Homebrew's Python is `$(brew --prefix)/bin/python3` and Ubuntu's is `/usr/bin/python3`. Then
 `python3 -m venv --system-site-packages .venv`. [Install](index.md#install) has the steps.
 
 ## error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: see https://shashi.to/mixtape/troubleshooting/ { #mixtape-needs-pygobject }
@@ -55,8 +55,9 @@ elements are there.
 
 The message starts `The feature 'perf' needs the tracers …` (or `The feature 'leaks' needs the
 leaks tracer …`) and ends `…before anything else initialises GStreamer, or set GST_TRACERS
-yourself`. GStreamer creates its tracers when it initialises, once per process, and something in
-your program initialised it before the feature could ask for them.
+yourself`. GStreamer [creates its tracers once per process](concepts.md#tracers-once-per-process),
+when it initialises, and something in your program initialised it before the feature could ask
+for them.
 
 Build the player with `Player.from_description(..., features=['perf'])` before anything else
 touches GStreamer, or run `mixtape run --feature perf`, which does. If another library initialises

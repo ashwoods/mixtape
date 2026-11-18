@@ -33,7 +33,7 @@ where gst-plugins-rs is installed; `appsink` and `appsrc` when your code has to 
 
 ## Decoupled: intervideo
 
-The producer plays a camera at 10 frames per second into the channel `cam`. The consumer reads
+The producer plays a test pattern (a stand-in for a camera) at 10 frames per second into the channel `cam`. The consumer reads
 the channel at 30:
 
 ```mermaid
@@ -214,9 +214,9 @@ properties, commands and graph) and its own events. Nothing in one sees the othe
 serve each on a port of its own: `serve` takes the player and the address, and with port 0 it
 picks one.
 
-The tracers are another matter. GStreamer creates them once per process, when it initialises,
-and mixtape's `perf`, `leaks` and `tracers` features read them: they are **one per process**,
-not one per player. For `perf` that means one collector per process, and every recorder gets
+The tracers are another matter: they are
+[**one per process**](concepts.md#tracers-once-per-process), not one per player. For `perf` that
+means one collector per process, and every recorder gets
 every sample the process makes. So with `perf` on two players in one process:
 
 - each player records both pipelines, and shows both on its page;

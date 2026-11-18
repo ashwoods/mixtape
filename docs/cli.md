@@ -566,10 +566,10 @@ Properties:
 ```
 
 `leaks.checkpoint` returns what changed since its last call, and `leaks.reset` starts counting
-again. The count comes from GStreamer's `leaks` tracer. A tracer exists only if
-`GST_TRACERS` names it before GStreamer is initialised, and there is one per process. `mixtape run`
-prepares its features before anything else initialises GStreamer, so the command line needs
-nothing more. In code, build the player with `Player.from_description`, first in the process.
+again. The count comes from GStreamer's `leaks` tracer, and tracers are
+[created once per process](concepts.md#tracers-once-per-process). `mixtape run` prepares its
+features before anything else initialises GStreamer, so the command line needs nothing more.
+In code, build the player with `Player.from_description`, first in the process.
 
 ### tracers
 
@@ -598,7 +598,8 @@ proc-rusage,
 
 What your environment already sets in `GST_TRACERS` or `GST_DEBUG` is kept, with a warning. A
 tracer that is not installed fails the player, and so does one that GStreamer was initialised
-without: like `leaks`, `tracers` has to be first in the process, which rules out a pytest run
+without: like `leaks`, `tracers` has to be
+[first in the process](concepts.md#tracers-once-per-process), which rules out a pytest run
 whose earlier tests initialised GStreamer.
 
 ### perf
@@ -659,7 +660,8 @@ error: the feature 'gst:leaks' is not supported: use the feature 'leaks': the tr
 exit status 2
 ```
 
-As for `tracers`, a `gst:` feature has to be first in the process.
+A `gst:` feature, like `tracers`, has to be
+[first in the process](concepts.md#tracers-once-per-process).
 
 ## Compare two runs: `mixtape perf compare` { #compare-two-runs }
 

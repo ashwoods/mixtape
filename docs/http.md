@@ -307,7 +307,8 @@ a player on your machine, by a cross-origin request or by DNS rebinding:
 - A request whose `Host` is a DNS name is refused with 403, except the loopback name and this
   machine's own name, so that a name that was rebound to your address does not pass. Bound to a
   loopback address, the `Host` must be a loopback one as well.
-- The WebSocket is checked the same way, and a connection that is refused is closed with code 1008.
+- The WebSocket is checked the same way, and a connection that is refused gets a 403 at the
+  handshake: it never opens.
 
 ```console
 $ mixtape run --http 8047 "videotestsrc is-live=true ! fakesink" 2>/dev/null &

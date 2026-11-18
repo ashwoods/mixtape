@@ -266,8 +266,8 @@ Serving on http://127.0.0.1:8047
 
 ## First in the process
 
-GStreamer's tracers exist only if GStreamer creates them when it initialises, once per process.
-`mixtape run` and `Player.from_description` prepare the features before anything initialises
+GStreamer [creates its tracers once per process](concepts.md#tracers-once-per-process), when it
+initialises. `mixtape run` and `Player.from_description` prepare the features before anything initialises
 GStreamer, so a `perf` they build works. A program that initialised GStreamer first, or imported
 something that did, cannot have it, and the error says so
 ([Troubleshooting](troubleshooting.md#gst-tracers) has the fix):
@@ -440,4 +440,4 @@ loaded with `-p` or `PYTEST_PLUGINS` that imports `gi` and initialises it first.
 `GST_TRACERS` back to the environment, so the processes your tests start measure nothing. A
 session is measured serially, so `--mixtape-perf` with `pytest-xdist` workers (`-n` above 0) is
 a usage error: run without `-n`, or with `-n 0`. Parallel workers share the cores, so their
-numbers would not compare with a serial baseline, and each would write its own index.
+numbers would not compare with a serial baseline.

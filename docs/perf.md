@@ -259,8 +259,10 @@ $ python3 examples/perf_late.py
 The feature 'perf' needs the tracers 'latency', 'stats', but GStreamer could not create them (its warnings say why) or was initialised before it could set GST_TRACERS: build the player with Player.from_description(..., features=['perf']) or run `mixtape run --feature perf` before anything else initialises GStreamer, or set GST_TRACERS yourself
 ```
 
-The rule is the same for the `tracers` feature and for `gst:NAME`, and one player at a time can
-measure, as the tracers are shared.
+The rule is the same for the `tracers` feature and for `gst:NAME`. The tracers are one per
+process, not one per player, so one player at a time can measure: two players with `perf` in one
+process each record both pipelines ([Two pipelines](two-pipelines.md#what-mixtape-does-across-two-players)
+has an example). Run them in two processes to measure them apart.
 
 ## The recorder as a test suite
 

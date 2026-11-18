@@ -52,7 +52,10 @@ class Leaks(Feature):
     The tracer is one per process and exists only when `GST_TRACERS` names it before
     `Gst.init`: this feature sets that in `prepare`, so it works for a player built by
     `Player.from_description` (and `mixtape run`) first in the process. One player at a time
-    can track, as they share the tracer's checkpoints.
+    can track: two players with `leaks` in one process share the tracer, whose checkpoints
+    cover the whole process since the last one either took, so each counts some of the objects
+    of both pipelines, and the first to stop stops the tracking of the other. Run them in two
+    processes to track them apart.
 
     The tracer's `get-live-objects` signal is never used: PyGObject frees the objects it
     returns, which are still in the pipeline.

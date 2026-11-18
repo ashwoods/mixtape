@@ -54,8 +54,10 @@ class Perf(Feature):
     writing there, and it echoes nothing.
 
     Tracers are created by `Gst.init` and never later, one of each per process: build the
-    player with `Player.from_description` or `mixtape run`, first in the process. One player
-    at a time can measure, as they share the tracers.
+    player with `Player.from_description` or `mixtape run`, first in the process. They are
+    one per process, not one per player, so one player at a time can measure: two players
+    with `perf` in one process each record the samples of both pipelines, and two elements of
+    the same name are one subject. Run them in two processes to measure them apart.
     """
 
     name = "perf"

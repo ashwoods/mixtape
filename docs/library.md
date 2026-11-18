@@ -388,6 +388,11 @@ Its hooks run in this order:
 - [`notify("beats")`](reference.md#mixtape.Feature.notify) publishes the current value of the
   property `beats` as a `PropertyChanged` of `heartbeat.beats`, and does nothing while the
   feature is detached. Like the player's, it is for the loop thread only.
+- [`spawn(coro)`](reference.md#mixtape.Feature.spawn) starts a task on the player's loop and
+  supervises it: an exception it ends with is logged naming the feature, and what still runs
+  is cancelled after `detach`, so a feature keeps no task of its own. From a signal handler on
+  any thread, [`call_soon(callback, *args)`](reference.md#mixtape.Feature.call_soon) hands a
+  call to the loop, and does nothing while the feature is detached.
 - Getters and commands must also work when the player is not set up, because `mixtape inspect`
   reads every property: answer from what you have. `self.player` is the player while attached.
 - A feature declares computed properties only. Its name cannot be that of an element of the

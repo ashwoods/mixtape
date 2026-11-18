@@ -39,7 +39,7 @@ def _keys(player: "Player") -> dict[str, str]:
     another key: elements of the same name in different bins (`a.q`, `b.q`) keep their name,
     which does not say which of them it is."""
     keys: dict[str, str | None] = {}
-    for key, element in player._element_keys().items():
+    for key, element in player.element_keys().items():
         name = element.get_name()
         keys[name] = None if name in keys else key
     return {name: key for name, key in keys.items() if key is not None and key != name}
@@ -77,7 +77,6 @@ class Perf(Feature):
         self._summary: Window | None = None
         self._graph: dict[str, Any] | None = None  # for the report: the latest snapshot
         self._snapshot_failed = False
-        self._task: asyncio.Task[None] | None = None
         self._names: set[str] = set()  # of the elements checked for a record of their creation
 
     def prepare(self) -> None:
@@ -87,7 +86,7 @@ class Perf(Feature):
         Collector.get()  # before the pipeline's elements: their names are in the log
 
     def check(self, player: "Player") -> None:
-        self._names = {e.get_name() for e in player._element_keys().values()}
+        self._names = {e.get_name() for e in player.element_keys().values()}
         unknown = Collector.get().unknown(self._names)
         if unknown:
             raise FeatureError(
@@ -101,12 +100,9 @@ class Perf(Feature):
         self._recorder = Recorder(self.out, interval=self.interval)
         self._snapshot_failed = False
         self._snapshot(player)
-        self._task = asyncio.get_running_loop().create_task(self._poll(player))
+        self.spawn(self._poll(player))
 
     def detach(self, player: "Player") -> None:
-        if self._task is not None and not self._task.get_loop().is_closed():
-            self._task.cancel()  # a closed loop cannot cancel: the task died with it
-        self._task = None
         self._summary = None
         recorder, self._recorder = self._recorder, None
         assert recorder is not None  # `attach` ran
@@ -121,7 +117,7 @@ class Perf(Feature):
                 )
             recorder.finish(
                 {
-                    "pipeline": player._description,
+                    "pipeline": player.pipeline_description,
                     "interval": self.interval,
                     "graph": self._graph,
                 }
@@ -150,7 +146,7 @@ class Perf(Feature):
     async def _check_added(self, player: "Player") -> None:
         """Warn once for each element added since `check` that was made before the collector
         started: a decodebin's are not, but one the application made early and adds late is."""
-        added = {e.get_name() for e in player._element_keys().values()} - self._names
+        added = {e.get_name() for e in player.element_keys().values()} - self._names
         if not added:
             return
         self._names |= added

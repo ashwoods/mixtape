@@ -7,10 +7,12 @@ in the `mixtape.features` entry point group, and enabled with `--feature NAME[,K
 `Player.features` or the `features` argument of the player.
 """
 
+import asyncio
 import importlib.metadata
+import logging
 import re
 import typing
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Coroutine, Iterable
 from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 
 from pydantic import BaseModel, ValidationError
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
     from ..player import Player
 
 __all__ = ["Feature", "FeatureError", "FeatureSpec", "available", "resolve", "resolve_all"]
+
+logger = logging.getLogger(__name__)  # `mixtape.features`: where a feature's failed task is logged
 
 GROUP = "mixtape.features"
 GST = "gst:"
@@ -52,6 +56,12 @@ class Feature:
     _declared: Declarations  # the class's; `gst:` features have their own
     _prepared = False
     _initialised = False
+    _tasks: set[asyncio.Task[Any]]  # `spawn`ed, until they end
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        self = super().__new__(cls)
+        self._tasks = set()  # here because a subclass's `__init__` need not call super's
+        return self
 
     def __init__(self) -> None:
         pass
@@ -122,6 +132,44 @@ class Feature:
         streams. Does nothing while detached. On the loop thread only."""
         if self.player is not None:
             self.player.notify(f"{self.name}.{prop}")
+
+    def call_soon(self, callback: Callable[..., object], *args: Any) -> None:
+        """Run `callback(*args)` on the player's loop, from a signal handler on any thread.
+        Does nothing while detached, or when the loop is closing: a handler that races the
+        teardown needs no check of its own."""
+        player = self.player  # read once: the teardown clears it on the loop thread
+        if player is not None:
+            player._call_soon(callback, *args)
+
+    def spawn[T](self, coro: Coroutine[Any, Any, T]) -> asyncio.Task[T]:
+        """Start `coro` as a task on the player's loop. Call it from
+        [`attach`][mixtape.Feature.attach] or later, on the loop thread.
+
+        The host supervises the task: one that ends with an exception (not a cancellation) is
+        logged with its traceback on the `mixtape.features` logger, naming the feature, and
+        the player cancels the ones still running right after
+        [`detach`][mixtape.Feature.detach] returns. Raises
+        [`FeatureError`][mixtape.exceptions.FeatureError] while detached: there is no loop
+        to run it on, and nothing would cancel it."""
+        if self.player is None:
+            coro.close()  # never awaited: no warning for it
+            raise FeatureError(f"The feature {self.name!r} can spawn a task only while attached")
+        task = asyncio.get_running_loop().create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._task_done)
+        return task
+
+    def _task_done(self, task: asyncio.Task[Any]) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled() and (exc := task.exception()) is not None:
+            logger.error("Task of feature %r failed", self.name, exc_info=exc)
+
+    def _end_tasks(self, *, cancel: bool) -> None:
+        """Forget the tasks it spawned, and cancel them unless their loop is gone."""
+        tasks, self._tasks = self._tasks, set()
+        if cancel:
+            for task in tasks:
+                task.cancel()
 
     def _command(self, name: str) -> Callable[..., Any]:
         """What its command `name` calls."""

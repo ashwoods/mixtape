@@ -71,7 +71,6 @@ class Leaks(Feature):
         self._alive: Counter[str] = Counter()
         self._mark: Counter[str] = Counter()  # `alive` at the last `checkpoint` command
         self._tracer: Any = None
-        self._task: asyncio.Task[None] | None = None
 
     def prepare(self) -> None:
         add_tracers([TRACER])  # one the environment names keeps its parameters
@@ -84,12 +83,9 @@ class Leaks(Feature):
         self._alive.clear()
         self._mark.clear()
         self._tracer.emit("activity-start-tracking")
-        self._task = asyncio.get_running_loop().create_task(self._poll())
+        self.spawn(self._poll())
 
     def detach(self, player: "Player") -> None:
-        if self._task is not None and not self._task.get_loop().is_closed():
-            self._task.cancel()  # a closed loop cannot cancel: the task died with it
-        self._task = None
         if self._tracer is not None:
             self._fold()  # a final checkpoint, for what the teardown freed and what it kept
             leaked = {k: n for k, n in self._alive.most_common() if n > 0 and k not in SINGLETONS}

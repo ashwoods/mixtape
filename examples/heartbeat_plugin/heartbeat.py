@@ -21,7 +21,6 @@ class Heartbeat(Feature):
     def __init__(self, interval: Annotated[float, Field(gt=0)] = 1.0) -> None:
         self.interval = interval
         self._beats = 0
-        self._task: asyncio.Task[None] | None = None
 
     def prepare(self) -> None:
         # before GStreamer is initialised: the place for environment variables
@@ -35,12 +34,7 @@ class Heartbeat(Feature):
     def attach(self, player: Player) -> None:
         # when the player is set up, on its loop
         self._beats = 0
-        self._task = asyncio.get_running_loop().create_task(self._beat())
-
-    def detach(self, player: Player) -> None:
-        # when it is torn down
-        if self._task:
-            self._task.cancel()
+        self.spawn(self._beat())  # cancelled for you when the player is torn down
 
     async def _beat(self) -> None:
         while True:

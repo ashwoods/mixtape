@@ -309,6 +309,13 @@ class Player:
     # -- inspection -- #
 
     @property
+    def pipeline_description(self) -> str | None:
+        """The description the player was built from by
+        [`from_description`][mixtape.Player.from_description], None for one built from a
+        pipeline"""
+        return self._description
+
+    @property
     def bus(self) -> Gst.Bus:
         """The pipeline's bus"""
         return self.pipeline.get_bus()
@@ -390,6 +397,7 @@ class Player:
             try:
                 feature.attach(self)
             except BaseException:
+                feature._end_tasks(cancel=True)  # what it spawned before it failed
                 feature.player = None
                 self.teardown()  # detaches those before it
                 raise
@@ -399,11 +407,14 @@ class Player:
     def _detach_features(self) -> None:
         """Detach the attached features, the last first. A failing one is logged, not raised."""
         attached, self._attached = self._attached, []
+        loop = self._loop
+        cancellable = loop is not None and not loop.is_closed()  # else the tasks died with it
         for feature in reversed(attached):
             try:
                 feature.detach(self)
             except Exception:
                 logger.exception("Feature %r failed to detach", feature.name)
+            feature._end_tasks(cancel=cancellable)
             feature.player = None
 
     def teardown(self) -> None:
@@ -821,7 +832,7 @@ class Player:
         """Fail for a feature whose GStreamer plugin features are missing, whose name would
         shadow the `element.property` paths of an element, or that refuses the player."""
         registry = Gst.Registry.get()
-        keys = self._element_keys()
+        keys = self.element_keys()
         for feature in self._features.values():
             if missing := [r for r in feature.requires if registry.lookup_feature(r) is None]:
                 raise FeatureError(
@@ -911,7 +922,7 @@ class Player:
     def graph(self) -> GraphSpec:
         """A snapshot of the pipeline's elements and the links between them."""
         self.setup()
-        return self._graph(self._element_keys())
+        return self._graph(self.element_keys())
 
     def _graph(self, element_keys: dict[str, Gst.Element]) -> GraphSpec:
         keys = {e: key for key, e in element_keys.items()}
@@ -1008,10 +1019,12 @@ class Player:
             self._commands_changed()  # what it did, or failed to, may change what can run
         return None if declared.spec.builtin else result
 
-    def _element_keys(self) -> dict[str, Gst.Element]:
+    def element_keys(self) -> dict[str, Gst.Element]:
         """Every element of the pipeline tree by its key: its name when no other element has
-        it, else the dotted names from below the pipeline (`a.q`). Over all elements, so the
-        keys do not depend on what is exposed. The pipeline's key is always its name, and a
+        it, else the dotted names from below the pipeline (`a.q`), as in the model. Over all
+        elements, the ones the model does not expose too (see
+        [`exposed_elements`][mixtape.Player.exposed_elements]), so the keys do not depend on
+        what is exposed. The pipeline's key is always its name, and a
         top-level child of the same name has it prefixed (`pipeline0.pipeline0`)."""
 
         def walk(bin: Gst.Bin) -> Iterator[Gst.Element]:
@@ -1049,7 +1062,7 @@ class Player:
     def exposed_elements(self) -> dict[str, Gst.Element]:
         """The elements the model exposes by key: the named ones, or all with `expose_all`.
         The pipeline itself counts too: `playbin name=pb` is the pipeline."""
-        return {key: e for key, e in self._element_keys().items() if self._is_exposed(e)}
+        return {key: e for key, e in self.element_keys().items() if self._is_exposed(e)}
 
     def _is_exposed(self, element: Gst.Element) -> bool:
         return self._expose_all or is_user_named(element)
@@ -1074,7 +1087,7 @@ class Player:
     def _locate(self, path: str, *, exposed: bool = True) -> tuple[Gst.Element, Any, Codec]:
         """The element, ParamSpec and codec of an `element.property` path."""
         name, _, prop_name = path.rpartition(".")
-        keys = self._element_keys()
+        keys = self.element_keys()
         element = keys.get(name)
         if element is None and name:
             same = sorted(key for key, e in keys.items() if e.get_name() == name)
@@ -1131,7 +1144,7 @@ class Player:
             ("deep-element-removed", self._removed),
         ):
             self._bin_ids.append(self.pipeline.connect(signal, self._on_element_signal, callback))
-        keys = self._element_keys()
+        keys = self.element_keys()
         for key, element in keys.items():
             if element != self.pipeline:
                 self._watch_shape(element)
@@ -1182,7 +1195,7 @@ class Player:
         if any(watched == element for watched, _ in self._notify_ids):
             return  # added between connecting deep-element-added and the first walk
         if key is None:  # an element added later: its key is as of now
-            key = next((k for k, e in self._element_keys().items() if e == element), None)
+            key = next((k for k, e in self.element_keys().items() if e == element), None)
             if key is None:
                 return  # removed meanwhile
         self._watched[element] = key
@@ -1294,7 +1307,7 @@ class Player:
         `ModelChanged`, with the commands built again, when the exposed elements or their
         keys do."""
         self._shape_flush = None
-        keys = self._element_keys()
+        keys = self.element_keys()
         renamed = {e: key for key, e in keys.items() if e in self._watched}
         for element, key in renamed.items():  # a namesake came: `q` is `a.q` now
             if self._watched[element] != key:

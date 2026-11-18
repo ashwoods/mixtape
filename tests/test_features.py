@@ -176,6 +176,47 @@ async def test_attach_detach_and_notify(Gst: Any) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_spawned_task_that_fails_is_logged_naming_the_feature(
+    Gst: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    class Failing(Feat):
+        name = "failing"
+
+        def attach(self, player: Player) -> None:
+            async def boom() -> None:
+                raise ValueError("the poll broke")
+
+            self.spawn(boom())
+
+    async with Player.from_description(PIPELINE, features=[Failing()]):
+        await asyncio.sleep(0.05)
+    [record] = [r for r in caplog.records if r.name == "mixtape.features"]
+    assert "'failing'" in record.getMessage()
+    assert record.exc_info is not None and record.exc_info[0] is ValueError
+
+
+@pytest.mark.asyncio
+async def test_a_spawned_task_still_running_is_cancelled_after_detach(Gst: Any) -> None:
+    seen: list[bool] = []  # whether the task was still running when `detach` ran
+
+    class Spawning(Feat):
+        name = "spawning"
+
+        def attach(self, player: Player) -> None:
+            self.task = self.spawn(asyncio.sleep(60))
+
+        def detach(self, player: Player) -> None:
+            seen.append(not self.task.done())
+
+    feature = Spawning()
+    async with Player.from_description(PIPELINE, features=[feature]):
+        pass
+    assert seen == [True]
+    await asyncio.sleep(0)  # the cancellation lands
+    assert feature.task.cancelled()
+
+
+@pytest.mark.asyncio
 async def test_prepare_runs_before_gstreamer_is_initialised(
     Gst: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

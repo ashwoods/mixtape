@@ -97,7 +97,7 @@ class GstTracer(Feature):
 
         def notified(_tracer: Any, ps: Any) -> None:  # on whatever thread changed it
             if ps.name in props:
-                player._call_soon(self.notify, ps.name)
+                self.call_soon(self.notify, ps.name)
 
         self._handler = self._tracer.connect("notify", notified)
 

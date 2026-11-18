@@ -77,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The spec types (`PlayerSpec`, `PropSpec` and the rest) are in `mixtape.spec`, not
   `mixtape.model`; `mixtape.perf.{collect,reader,record}` are now under `mixtape.features.perf`;
   the web assets and uPlot are in `mixtape/web/`.
+- Features have a host API: `Feature.spawn(coro)` starts a task whose failure is logged and
+  that is cancelled after `detach`, `Feature.call_soon(callback, *args)` hands a call from any
+  thread to the loop, and `Player.element_keys()` and `Player.pipeline_description` replace
+  reaching into the player's private names.
 
 ### Fixed
 - The REST API reaches an element whose name has a `/` (`volume name=a/b`, sent as `a%2Fb`):

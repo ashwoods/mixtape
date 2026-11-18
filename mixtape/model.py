@@ -218,7 +218,7 @@ def is_user_named(element: Gst.Element) -> bool:
 
 
 def element_prop_spec(element: Gst.Element, key: str, ps: Any, codec: Codec) -> PropSpec:
-    """The spec of a property of `element`, known as `key` (see `Player._element_keys`)."""
+    """The spec of a property of `element`, known as `key` (see `Player.element_keys`)."""
     schema = codec.adapter.json_schema()
     if codec.default is not None:
         schema["default"] = codec.default

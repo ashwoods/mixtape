@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mixtape run --set` of a property the player does not have suggests the closest ones it has:
   `unknown property 'src.patern': did you mean 'src.pattern'?`.
 - The WebRTC example takes `--stun URL`, a STUN server for peers behind NAT (none by default).
-- The docs site has an `llms.txt`.
+- The docs site has an `llms.txt` and an `llms-full.txt`, generated from its pages, and a
+  Concepts page: a player, its model, its threads, features and the tracers once per process.
+  Its source links point at the commit the site is built from, and PyPI links to it.
 - `@command(when=check)` says when a command can run: `check(self)` returns `True`, or the
   reason it cannot. `Player.unavailable()` lists the commands that cannot run, `describe()`,
   `mixtape inspect --json` and `GET /api/model` have it as `unavailable`, and `invoke` refuses

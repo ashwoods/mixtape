@@ -58,8 +58,8 @@ plugins:
         process. `mixtape run` exits 0 at an EOS or a first Ctrl-C, 1 for a pipeline error, 2 for
         bad usage or a target or feature that cannot be loaded, 130 for a second Ctrl-C. The JSON
         that `mixtape inspect --json` and `mixtape perf compare --json` print, and `compare.json`,
-        only gain fields from 0.8: none is renamed or removed. The source, with the `examples/` the docs run, is at
-        https://github.com/ashwoods/mixtape.
+        only gain fields from 0.8: none is renamed or removed. The source, with the `examples/` the
+        docs run, is at https://github.com/ashwoods/mixtape.
       sections:
         Docs:
           - index.md: what mixtape is, how to install it, a first pipeline
@@ -67,12 +67,12 @@ plugins:
           - library.md: subclass `Player`, declare properties and commands, read events, write a `Feature`
           - perf.md: the `perf` feature, recording a run, comparing two runs, budgets in pytest
           - cli.md: "`mixtape run`, `mixtape inspect`, `--set`, `--http`, `--feature`, exit statuses"
+          - two-pipelines.md: pipelines that feed each other, in one process or two
           - http.md: the REST and WebSocket endpoints, the control page, serving from your own code
           - reference.md: "`Player`, `Feature`, `prop`, `command`, the events, the exceptions"
           - troubleshooting.md: each heading is an error message, with its fix
         Examples:
           - webrtc.md: a `Player` that makes video calls with webrtcsink and webrtcsrc
-          - two-pipelines.md: pipelines that feed each other, in one process or two
         Optional:
           - changelog.md: what changed in each release
 

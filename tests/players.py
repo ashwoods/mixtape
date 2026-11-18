@@ -18,6 +18,21 @@ class Demo(Player):
         return word * times
 
 
+class Recorder(Player):
+    """A player with a command that can only run while it records."""
+
+    description = "audiotestsrc ! fakesink"
+    recording = False
+
+    @command
+    def start_recording(self) -> None:
+        self.recording = True
+
+    @command(when=lambda self: self.recording or "Not recording")
+    def stop_recording(self) -> None:
+        self.recording = False
+
+
 class Feat(Feature):
     """A feature that records its lifecycle, with an option, a command and a changing property."""
 

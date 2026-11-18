@@ -100,6 +100,15 @@ class ModelChanged(Event):
 
 
 @dataclass(frozen=True, slots=True)
+class CommandsChanged(Event):
+    """The commands that cannot run changed: published when the map of
+    [`Player.unavailable()`][mixtape.Player.unavailable] differs from the last one."""
+
+    unavailable: dict[str, str]
+    """The commands that cannot run now, with the reason"""
+
+
+@dataclass(frozen=True, slots=True)
 class Message(Event):
     """Any bus message, published after the specific event (if any) for it."""
 

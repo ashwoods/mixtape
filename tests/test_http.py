@@ -22,7 +22,7 @@ from mixtape import Player, command
 from mixtape.exceptions import MixTapeError
 from mixtape.interfaces.http import Listening, serve
 from mixtape.interfaces.http.security import check_headers
-from tests.players import Feat
+from tests.players import Feat, Recorder
 
 PIPELINE = "videotestsrc name=src ! queue name=q ! fakesink name=sink"
 COLLIDING = "bin.( name=a queue name=q ! fakesink ) bin.( name=b queue name=q ! fakesink )"
@@ -120,6 +120,25 @@ async def test_commands(served: Served) -> None:
     assert (unknown.status_code, unknown.json()) == (404, {"detail": "Unknown command 'nope'"})
     await client.post("/api/commands/stop")
     assert served.player.get("state") == "null"
+
+
+@pytest.mark.asyncio
+async def test_a_command_that_cannot_run_is_refused_and_published(Gst: Any) -> None:
+    player = Recorder.from_description(Recorder.description)
+    async with player, serve(player, "127.0.0.1", 0) as listening:
+        async with httpx.AsyncClient(base_url=listening.url) as client:
+            model = (await client.get("/api/model")).json()
+            assert model["unavailable"]["stop_recording"] == "Not recording"
+            refused = await client.post("/api/commands/stop_recording")
+            assert (refused.status_code, refused.json()) == (409, {"detail": "Not recording"})
+            ws_url = f"ws://127.0.0.1:{listening.port}/api/events"
+            async with websockets.connect(ws_url) as ws:
+                first = await snapshot(ws)
+                assert first["model"]["unavailable"] == model["unavailable"]
+                assert (await client.post("/api/commands/start_recording")).status_code == 200
+                seen = await until(ws, lambda m: m["type"] == "commands")
+                assert "stop_recording" not in seen[-1]["unavailable"]
+                assert seen[-1]["unavailable"] == player.unavailable()
 
 
 @pytest.mark.asyncio

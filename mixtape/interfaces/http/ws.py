@@ -13,6 +13,7 @@ Server to client, one JSON object per message:
     {"type": "eos"}
     {"type": "error" | "warning", "source", "message", "debug"}   (an error also once on connect)
     {"type": "position", "position", "duration"}
+    {"type": "commands", "unavailable": {name: reason}}   the commands that cannot run changed
     {"type": "reply", "id", "result"}                 or "error": {"status", "detail"[, "errors"]}
 
 Client to server:
@@ -78,6 +79,8 @@ def encode_event(event: events.Event) -> dict[str, Any] | None:
             return {"type": "warning", "source": source, "message": message, "debug": debug}
         case events.Position(position=position, duration=duration):
             return {"type": "position", "position": position, "duration": duration}
+        case events.CommandsChanged(unavailable=unavailable):
+            return {"type": "commands", "unavailable": unavailable}
         case events.GraphChanged(graph=graph):
             return {"type": "graph", "graph": graph.model_dump(mode="json")}
         case events.ModelChanged(model=model):

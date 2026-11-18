@@ -145,6 +145,8 @@ class _Bound(NamedTuple):
 
     declared: Command
     call: Callable[..., Any]
+    owner: Any = None
+    """What its check is called with: the player, or the feature the command belongs to"""
 
 
 class Player:
@@ -230,6 +232,9 @@ class Player:
         self._watched: dict[Gst.Element, str] = {}  # the key its notify handlers publish
         self._shape_ids: dict[Gst.Object, list[int]] = {}  # element and pad handlers
         self._shape_flush: asyncio.TimerHandle | None = None  # a publication on its way
+        self._commands_flush: asyncio.Handle | None = None  # a check of the commands on its way
+        self._commands_seen: dict[str, str] = {}  # `unavailable()` as last published or seen
+        self._unchecked: set[str] = set()  # the commands whose failing check was logged
         self._graph_seen: GraphSpec | None = None  # as last published
         self._exposed_seen: list[str] = []  # the keys of the exposed elements, likewise
         self._bin_ids: list[int] = []  # the pipeline's deep-element-added/removed handlers
@@ -367,6 +372,7 @@ class Player:
             self._loop = self._fd = None  # the loop died without a teardown
             self._events = events.Broadcast()  # and its subscribers with it
             self._position_task = self._last_position = None
+            self._commands_flush = None
         if self._loop is loop:
             return
         if self._loop is not None:
@@ -385,6 +391,7 @@ class Player:
                 self.teardown()  # detaches those before it
                 raise
             self._attached.append(feature)
+        self._commands_seen = self.unavailable()  # the first change after this is news
 
     def _detach_features(self) -> None:
         """Detach the attached features, the last first. A failing one is logged, not raised."""
@@ -433,6 +440,9 @@ class Player:
         if self._position_task is not None and loop is not None and not loop.is_closed():
             self._position_task.cancel()
         self._position_task = self._last_position = None
+        if self._commands_flush is not None:
+            self._commands_flush.cancel()
+            self._commands_flush = None
         waiters = [future for _, future in self._state_waiters] + self._eos_waiters
         self._state_waiters.clear()
         self._eos_waiters.clear()
@@ -543,17 +553,17 @@ class Player:
     async def ready(self) -> Gst.StateChangeReturn:
         return await self.set_state(Gst.State.READY)
 
-    @command
+    @command(when=lambda self: self._stuck_reason() or True)
     async def pause(self) -> Gst.StateChangeReturn:
         """Pause the pipeline."""
         return await self.set_state(Gst.State.PAUSED)
 
-    @command
+    @command(when=lambda self: self._stuck_reason() or True)
     async def play(self) -> Gst.StateChangeReturn:
         """Play the pipeline."""
         return await self.set_state(Gst.State.PLAYING)
 
-    @command
+    @command(when=lambda self: self._stuck_reason() or True)
     async def stop(self, eos: bool = False, timeout: float | None = 5.0) -> None:
         """Set the pipeline to NULL, after an EOS when `eos` and it is playing.
 
@@ -572,22 +582,20 @@ class Player:
         else:
             await self.set_state(Gst.State.NULL)
 
-    @command
+    @command(when=lambda self: self._eos_refusal() or True)
     async def eos(self, timeout: float | None = 5.0) -> None:
         """Send an EOS event and wait for the EOS message it causes, while playing, for up to
         `timeout` seconds: a streaming thread that hangs never carries it to the sinks."""
         self.setup()
         self._raise_if_stuck()
-        # paused, the EOS blocks on the prerolled sinks (and so would a stop after it);
-        # in NULL it waits for the next play; at EOS no second one comes
-        if self.state != Gst.State.PLAYING or self._eos:
-            raise CommandError("EOS needs a playing pipeline that is not at its EOS")
+        if (refusal := self._eos_refusal()) is not None:
+            raise CommandError(refusal)
         try:
             await self.send_eos(timeout)
         except TimeoutError as exc:
             raise CommandError(f"No EOS within {timeout:g} s") from exc
 
-    @command
+    @command(when=lambda self: self._seek_refusal() or True)
     def seek(self, position: NonNegativeFloat) -> None:
         """Seek to a position in seconds, flushing."""
         flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT
@@ -644,11 +652,37 @@ class Player:
         self._changing_to = state
         return self._changing
 
+    def _stuck_reason(self) -> str | None:
+        """Why no change can be made while one that timed out is still blocked, else None."""
+        if self._stuck is not None and not self._stuck.done():
+            return f"The pipeline is stuck changing state{self._changing_in()}"
+        self._stuck = None
+        return None
+
     def _raise_if_stuck(self) -> None:
         """Fail at once while a change that timed out is still blocked."""
-        if self._stuck is not None and not self._stuck.done():
-            raise PlayerSetStateError(f"The pipeline is stuck changing state{self._changing_in()}")
-        self._stuck = None
+        if (reason := self._stuck_reason()) is not None:
+            raise PlayerSetStateError(reason)
+
+    def _eos_refusal(self) -> str | None:
+        """Why `eos` cannot run now, else None: paused, the EOS blocks on the prerolled sinks
+        (and so would a stop after it); in NULL it waits for the next play; at EOS no second
+        one comes."""
+        if (reason := self._stuck_reason()) is not None:
+            return reason
+        if self.state != Gst.State.PLAYING or self._eos:
+            return "EOS needs a playing pipeline that is not at its EOS"
+        return None
+
+    def _seek_refusal(self) -> str | None:
+        """Why `seek` cannot run now, else None: the pipeline has to be paused or playing
+        (in NULL, a source may say it can seek) and to answer that it can."""
+        if self.state not in (Gst.State.PAUSED, Gst.State.PLAYING):
+            return "Seeking needs a paused or playing pipeline"
+        query = Gst.Query.new_seeking(Gst.Format.TIME)
+        if not self.pipeline.query(query) or not query.parse_seeking()[1]:
+            return "The pipeline cannot seek"
+        return None
 
     def _changing_in(self) -> str:
         """`: name, … still changing state` for the elements a change waits for, if any: a
@@ -794,11 +828,13 @@ class Player:
         signals of the exposed elements as `element.signal`, then each feature's as
         `feature.name`."""
 
-        def bound(c: Command, path: str, call: Callable[..., Any]) -> _Bound:
-            return _Bound(replace(c, spec=c.spec.model_copy(update={"name": path})), call)
+        def bound(c: Command, path: str, call: Callable[..., Any], owner: Any = None) -> _Bound:
+            return _Bound(replace(c, spec=c.spec.model_copy(update={"name": path})), call, owner)
 
         declared = self._declarations()
-        commands = {name: _Bound(c, getattr(self, name)) for name, c in declared.commands.items()}
+        commands = {
+            name: _Bound(c, getattr(self, name), self) for name, c in declared.commands.items()
+        }
         for key, element in self.exposed_elements().items():
             for name, (c, emit) in action_signals(element).items():
                 commands[f"{key}.{name}"] = bound(c, f"{key}.{name}", emit)
@@ -808,7 +844,7 @@ class Player:
         for feature in self._features.values():
             for name, c in feature._declared.commands.items():
                 path = f"{feature.name}.{name}"
-                commands[path] = bound(c, path, feature._command(name))
+                commands[path] = bound(c, path, feature._command(name), feature)
             for name, p in feature._declared.computed.items():
                 computed[f"{feature.name}.{name}"] = (p, feature)
         return commands, computed
@@ -828,7 +864,32 @@ class Player:
             commands={name: bound.declared.spec for name, bound in self._commands.items()},
             properties=properties,
             elements={key: describe_element(e, key) for key, e in self.exposed_elements().items()},
+            unavailable=self.unavailable(),
         )
+
+    def unavailable(self) -> dict[str, str]:
+        """The commands that cannot run now, with the reason, as of this call: every command's
+        [`when`][mixtape.command] check is evaluated, in the order of
+        [`describe()`][mixtape.Player.describe]. Needs no running loop."""
+        refused = {name: self._refusal(name, bound) for name, bound in self._commands.items()}
+        return {name: reason for name, reason in refused.items() if reason is not None}
+
+    def _refusal(self, name: str, bound: _Bound) -> str | None:
+        """Why the command `name` cannot run now, else None. A check that raises refuses it."""
+        when = bound.declared.when
+        if when is None:
+            return None
+        try:
+            verdict = when(bound.owner)
+        except Exception as exc:
+            if name not in self._unchecked:
+                self._unchecked.add(name)
+                logger.exception("The check of the command %r failed", name)
+            return f"{name!r} could not be checked: {exc}"
+        self._unchecked.discard(name)
+        if isinstance(verdict, str) and verdict:
+            return verdict
+        return None if verdict else f"{name!r} cannot run now"
 
     def graph(self) -> GraphSpec:
         """A snapshot of the pipeline's elements and the links between them."""
@@ -884,42 +945,52 @@ class Player:
     async def set(self, path: str, value: Any) -> None:
         """Validate `value` and set the property. Nothing changes when it is rejected."""
         self.setup()
-        if path in BUILTIN_PROPS or path in self._computed:
-            raise NotWritableError(f"{path!r} is read-only")
-        element, ps, codec = self._resolve(path)
-        flags = int(ps.flags)
-        if not flags & GObject.ParamFlags.WRITABLE or flags & GObject.ParamFlags.CONSTRUCT_ONLY:
-            raise NotWritableError(f"{path!r} is read-only or can only be set on construction")
         try:
-            validated = codec.adapter.validate_python(value)
-        except ValidationError as exc:
-            raise _invalid(f"value for {path!r}", exc) from exc
-        # GLib reports an out of range value as a warning and leaves the old one
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always", GObject.Warning)
+            if path in BUILTIN_PROPS or path in self._computed:
+                raise NotWritableError(f"{path!r} is read-only")
+            element, ps, codec = self._resolve(path)
+            flags = int(ps.flags)
+            if not flags & GObject.ParamFlags.WRITABLE or flags & GObject.ParamFlags.CONSTRUCT_ONLY:
+                raise NotWritableError(f"{path!r} is read-only or can only be set on construction")
             try:
-                element.set_property(ps.name, codec.write(validated))
-            except (TypeError, ValueError, OverflowError) as exc:
-                raise InvalidValueError(f"Invalid value for {path!r}: {exc}") from exc
-        if problems := [w for w in caught if issubclass(w.category, GObject.Warning)]:
-            raise InvalidValueError(f"Invalid value for {path!r}: {problems[0].message}")
+                validated = codec.adapter.validate_python(value)
+            except ValidationError as exc:
+                raise _invalid(f"value for {path!r}", exc) from exc
+            # GLib reports an out of range value as a warning and leaves the old one
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", GObject.Warning)
+                try:
+                    element.set_property(ps.name, codec.write(validated))
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise InvalidValueError(f"Invalid value for {path!r}: {exc}") from exc
+            if problems := [w for w in caught if issubclass(w.category, GObject.Warning)]:
+                raise InvalidValueError(f"Invalid value for {path!r}: {problems[0].message}")
+        finally:
+            self._commands_changed()
 
     async def invoke(self, name: str, /, **args: Any) -> Any:
         """Call the command `name` with validated `args` and return its result.
 
-        Built-in commands return None, as their specs say."""
+        Raises [`CommandError`][mixtape.exceptions.CommandError] with the reason when the
+        command's [`when`][mixtape.command] check refuses it. Built-in commands return None,
+        as their specs say."""
         self.setup()
-        if (bound := self._commands.get(name)) is None:
-            raise UnknownNameError(f"Unknown command {name!r}")
-        declared = bound.declared
         try:
-            validated = declared.args.model_validate(args)
-        except ValidationError as exc:
-            raise _invalid(f"arguments for {name!r}", exc) from exc
-        result = bound.call(**{k: getattr(validated, k) for k in type(validated).model_fields})
-        if inspect.isawaitable(result):
-            result = await result
-        return None if declared.spec.builtin else result
+            if (bound := self._commands.get(name)) is None:
+                raise UnknownNameError(f"Unknown command {name!r}")
+            declared = bound.declared
+            try:
+                validated = declared.args.model_validate(args)
+            except ValidationError as exc:
+                raise _invalid(f"arguments for {name!r}", exc) from exc
+            if (reason := self._refusal(name, bound)) is not None:
+                raise CommandError(reason)
+            result = bound.call(**{k: getattr(validated, k) for k in type(validated).model_fields})
+            if inspect.isawaitable(result):
+                result = await result
+            return None if declared.spec.builtin else result
+        finally:
+            self._commands_changed()
 
     def _element_keys(self) -> dict[str, Gst.Element]:
         """Every element of the pipeline tree by its key: its name when no other element has
@@ -1225,7 +1296,33 @@ class Player:
                 loop.call_soon_threadsafe(callback, *args)
 
     def _publish(self, event: events.Event) -> None:
+        """Publish `event`, and check the commands after it: what it tells may change them."""
         self._events.publish(event)
+        if not isinstance(event, events.Position | events.CommandsChanged):
+            self._commands_changed()
+
+    def _commands_changed(self) -> None:
+        """Check the commands once the loop is done with what it runs now: any number of calls
+        in a turn make one check. A no-op while detached."""
+        loop = self._loop
+        if loop is not None and self._commands_flush is None:
+            self._commands_flush = loop.call_soon(self.update_commands)
+
+    def update_commands(self) -> None:
+        """Check which commands can run now and publish
+        [`CommandsChanged`][mixtape.events.CommandsChanged] when that differs from the last
+        time. The player does it after every event, `invoke` and `set`; call it for a condition
+        it cannot see (a timer, another thread: `call_soon_threadsafe(player.update_commands)`).
+        On the loop thread only; a no-op while detached."""
+        if self._commands_flush is not None:
+            self._commands_flush.cancel()
+            self._commands_flush = None
+        if self._loop is None:
+            return
+        current = self.unavailable()
+        if current != self._commands_seen:
+            self._commands_seen = current
+            self._publish(events.CommandsChanged(current))
 
     # -- events and message handlers -- #
 
@@ -1284,7 +1381,7 @@ class Player:
             self._on_buffering(message)
         elif kind == Gst.MessageType.QOS:
             logger.debug("QoS from %s", message.src.get_name())
-        self._events.publish(events.Message(message))
+        self._publish(events.Message(message))
         for message_type, callback in tuple(self._handlers.values()):
             if kind & message_type:
                 try:
@@ -1306,7 +1403,7 @@ class Player:
             if not future.done():
                 future.set_exception(error)
                 future.exception()  # mark it retrieved: nobody may be awaiting it
-        self._events.publish(events.Error(error))
+        self._publish(events.Error(error))
 
     def _on_eos(self) -> None:
         logger.info("EOS")
@@ -1314,7 +1411,7 @@ class Player:
         for future in self._eos_waiters:
             if not future.done():
                 future.set_result(None)
-        self._events.publish(events.Eos())
+        self._publish(events.Eos())
 
     def _on_state_changed(self, message: Gst.Message) -> None:
         if message.src != self.pipeline:
@@ -1326,14 +1423,14 @@ class Player:
             for target, future in self._state_waiters:
                 if target == new == state and still_pending == pending and not future.done():
                     future.set_result(None)
-        self._events.publish(events.StateChanged(old, new, pending))
+        self._publish(events.StateChanged(old, new, pending))
         self._shape_changed()  # a missed signal shows by the next state at the latest
 
     def _on_warning(self, message: Gst.Message) -> None:
         gerror, debug = message.parse_warning()
         source = message.src.get_name() if message.src else "unknown"
         logger.warning("Warning from element %s: %s (%s)", source, gerror.message, debug)
-        self._events.publish(events.Warning(source, gerror.message, debug))
+        self._publish(events.Warning(source, gerror.message, debug))
 
     def _on_clock_lost(self) -> None:
         if self._target == Gst.State.PLAYING:

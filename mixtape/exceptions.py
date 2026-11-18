@@ -72,4 +72,4 @@ class FeatureError(ModelError):
 
 
 class CommandError(ModelError):
-    """A built-in command could not do what was asked"""
+    """A command could not do what was asked, or cannot run now"""

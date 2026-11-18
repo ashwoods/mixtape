@@ -354,6 +354,22 @@ class Segment(BaseModel):
     end: Point | None = None
 
 
+def test_a_command_can_say_when_it_can_run(Gst):
+    def check(self):
+        return True
+
+    class Gated(Player):
+        @command
+        def always(self) -> None: ...
+
+        @command(when=check)
+        def sometimes(self) -> None: ...
+
+    commands = Gated._declarations().commands
+    assert commands["always"].when is None
+    assert commands["sometimes"].when is check
+
+
 @pytest.mark.asyncio
 async def test_command_schemas_have_their_models_inlined(Gst):
     class Draw(Player):

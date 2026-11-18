@@ -11,8 +11,16 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
-from mixtape import Player
-from mixtape.events import Eos, Error, Message, Position, StateChanged, Warning
+from mixtape import Feature, Player, command
+from mixtape.events import (
+    CommandsChanged,
+    Eos,
+    Error,
+    Message,
+    Position,
+    StateChanged,
+    Warning,
+)
 from mixtape.exceptions import (
     CommandError,
     MixTapeError,
@@ -21,6 +29,7 @@ from mixtape.exceptions import (
     PlayerPipelineError,
     PlayerSetStateError,
 )
+from tests.players import Recorder
 
 LIVE = "videotestsrc is-live=true ! fakesink sync=true"
 NEVER_PREROLLS = "appsrc name=src ! fakesink"
@@ -573,3 +582,71 @@ async def test_handlers_survive_each_other_and_can_be_removed(pipeline, caplog):
         post()
         await wait_for_event(stream, Message)
         assert len(seen) == 2
+
+
+# -- command availability -- #
+
+NOT_PLAYING = "EOS needs a playing pipeline that is not at its EOS"
+NOT_PAUSED = "Seeking needs a paused or playing pipeline"
+EOS_OGG = "videotestsrc num-buffers=100 ! theoraenc ! oggmux ! decodebin ! fakesink"
+
+
+@pytest.mark.asyncio
+async def test_the_builtin_commands_that_cannot_run_now(Gst):
+    player = Player.from_description("audiotestsrc ! fakesink")
+    assert player.unavailable() == {"eos": NOT_PLAYING, "seek": NOT_PAUSED}  # no loop needed
+    assert player.describe().unavailable == player.unavailable()
+    async with player:
+        await bounded(player.pause())
+        assert player.unavailable() == {"eos": NOT_PLAYING}
+        await bounded(player.play())
+        assert player.unavailable() == {}
+
+    async with Player.from_description(EOS_OGG) as player:  # an Ogg stream cannot seek paused
+        await bounded(player.pause())
+        assert player.unavailable() == {"eos": NOT_PLAYING, "seek": "The pipeline cannot seek"}
+
+
+@pytest.mark.asyncio
+async def test_a_command_that_cannot_run_is_refused_and_its_change_published(Gst):
+    async with Recorder.from_description(Recorder.description) as player:
+        stream = player.events()
+        with pytest.raises(CommandError, match="^Not recording$"):
+            await player.invoke("stop_recording")
+        assert player.unavailable()["stop_recording"] == "Not recording"
+
+        await player.invoke("start_recording")
+        event = await wait_for_event(stream, CommandsChanged)
+        assert "stop_recording" not in event.unavailable
+        assert event.unavailable == player.unavailable()
+        await asyncio.sleep(0.05)  # the same map is not published again
+        stream.close()
+        assert not [e async for e in stream if isinstance(e, CommandsChanged)]
+        await player.invoke("stop_recording")
+
+
+@pytest.mark.asyncio
+async def test_a_feature_command_is_unavailable_as_feature_name_command(Gst):
+    class Gated(Feature):
+        name = "gated"
+
+        @command(when=lambda self: False)
+        def go(self) -> None: ...
+
+    player = Player.from_description("fakesink", features=[Gated()])
+    assert player.unavailable()["gated.go"] == "'gated.go' cannot run now"
+    with pytest.raises(CommandError, match="cannot run now"):
+        await player.invoke("gated.go")
+    player.teardown()
+
+
+@pytest.mark.asyncio
+async def test_a_check_that_raises_makes_the_command_unavailable_and_is_logged_once(Gst, caplog):
+    class Broken(Player):
+        @command(when=lambda self: 1 / 0)
+        def boom(self) -> None: ...
+
+    player = Broken.from_description("fakesink")
+    for _ in range(2):
+        assert player.unavailable()["boom"] == "'boom' could not be checked: division by zero"
+    assert caplog.text.count("The check of the command 'boom' failed") == 1

@@ -55,6 +55,9 @@ async def test_a_stop_that_hangs_names_the_element_and_frees_the_loop():
         await bounded(player.stop())
     with pytest.raises(PlayerSetStateError, match="stuck changing state: f still changing"):
         await player.play()  # at once
+    unavailable = player.unavailable()
+    for name in ("play", "pause", "stop", "eos"):
+        assert unavailable[name].startswith("The pipeline is stuck changing state: f still")
     with pytest.raises(PlayerSetStateError, match="Interrupted"):
         await bounded(play)
 
@@ -65,6 +68,7 @@ async def test_a_stop_that_hangs_names_the_element_and_frees_the_loop():
             await asyncio.sleep(0.01)
 
     await bounded(stopped())
+    assert not {"play", "pause", "stop"} & set(player.unavailable())
     await bounded(player.stop())
     player.teardown()
 

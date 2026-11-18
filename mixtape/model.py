@@ -89,6 +89,8 @@ class PlayerSpec(_Spec):
     properties: dict[str, PropSpec]
     """The built-ins, the declared aliases and the computed properties"""
     elements: dict[str, ElementSpec]
+    unavailable: dict[str, str] = Field(default_factory=dict)
+    """The commands that cannot run now, with the reason; a snapshot as of `describe()`"""
 
 
 class NodeSpec(_Spec):
@@ -464,12 +466,35 @@ def prop(
 
 
 _COMMAND = "__mixtape_command__"
+_WHEN = "__mixtape_command_when__"
+
+type Check = Callable[[Any], bool | str]
+"""When a command can run: called with its owner, the player (the feature, for a feature's
+command). True when it can, else the reason it cannot, or False for a generic one."""
 
 
-def command[F: Callable[..., Any]](method: F) -> F:
-    """Mark a sync or async method of a [`Player`][mixtape.Player] as a command."""
-    setattr(method, _COMMAND, True)
-    return method
+@overload
+def command[F: Callable[..., Any]](method: F, /) -> F: ...
+@overload
+def command[F: Callable[..., Any]](*, when: Check) -> Callable[[F], F]: ...
+def command(method: Callable[..., Any] | None = None, /, *, when: Check | None = None) -> Any:
+    """Mark a sync or async method of a [`Player`][mixtape.Player], or of a
+    [`Feature`][mixtape.Feature], as a command.
+
+    `@command(when=check)` says when it can run: `check(self)` is a sync function that returns
+    True when it can, or the reason it cannot as a string (False gives a generic reason). The
+    player lists the commands that cannot run now in [`unavailable()`][mixtape.Player.unavailable]
+    and publishes the changes as [`CommandsChanged`][mixtape.events.CommandsChanged]. `invoke`,
+    and so the command line and the HTTP API, refuses such a command with the reason; calling
+    the method yourself does not check. A check should be quick and change nothing.
+    """
+
+    def mark(method: Callable[..., Any]) -> Callable[..., Any]:
+        setattr(method, _COMMAND, True)
+        setattr(method, _WHEN, when)
+        return method
+
+    return mark if method is None else mark(method)
 
 
 @dataclass(frozen=True)
@@ -477,6 +502,8 @@ class Command:
     spec: CommandSpec
     args: type[BaseModel]
     """Validates the arguments"""
+    when: Check | None = None
+    """Whether it can run now; None: always"""
 
 
 def _inline_defs(schema: dict[str, Any], what: str) -> dict[str, Any]:
@@ -520,7 +547,9 @@ def args_model(
     return create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
 
 
-def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Command:
+def _build_command(
+    method: Callable[..., Any], name: str, builtin: bool, when: Check | None
+) -> Command:
     hints = typing.get_type_hints(method, include_extras=True)
     args = args_model(method, name, hints, "commands")
     returns = hints.get("return", type(None))
@@ -536,7 +565,7 @@ def _build_command(method: Callable[..., Any], name: str, builtin: bool) -> Comm
         result=result,
         builtin=builtin,
     )
-    return Command(spec, args)
+    return Command(spec, args, when)
 
 
 class Declarations(NamedTuple):
@@ -561,7 +590,8 @@ def collect(cls: type, root: type) -> Declarations:
                     attr.build()  # a getter without a return hint fails here
                     computed[name] = attr
             elif getattr(attr, _COMMAND, False):
-                commands[name] = _build_command(attr, name, klass is root)
+                when = getattr(attr, _WHEN, None)
+                commands[name] = _build_command(attr, name, klass is root, when)
     return Declarations(props, commands, computed)
 
 

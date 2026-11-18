@@ -437,6 +437,32 @@ def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
     assert not re.search(r"https?://|\b(src|href)\s*=|@import|url\(", report)
 
 
+def test_a_short_last_window_has_no_rates(tmp_path: Path) -> None:
+    """The fraction of a second between the last poll and the stop gave the CPU of a few
+    milliseconds, which made `perf compare` flag threads like `asyncio_0` at 80%."""
+    out = tmp_path / "out"
+    pipeline = (
+        "videotestsrc is-live=true num-buffers=36 ! video/x-raw,width=64,height=48,"
+        "framerate=30/1 ! fakesink"
+    )
+    done = subprocess.run(
+        [sys.executable, "-m", "mixtape", "run", pipeline, "--feature", f"perf,out={out}"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=run_env(),
+    )
+    assert done.returncode == 0, done.stderr
+    windows = [json.loads(line) for line in (out / "windows.jsonl").read_text().splitlines()]
+    first, *rest = windows
+    assert "process.cpu" in first["metrics"], windows
+    assert any(w["end"] - w["start"] < 0.5e9 for w in rest), windows  # the stop's
+    for each in rest:
+        short = each["end"] - each["start"] < 0.5e9
+        rated = {"process.cpu", "thread.cpu", "pad.buffers"} & each["metrics"].keys()
+        assert not rated if short else "process.cpu" in rated, each
+
+
 @pytest.mark.parametrize("name", ["</script><b>", "<!--<script>"])
 def test_the_report_keeps_markup_in_names_as_data(name: str) -> None:
     from mixtape.perf.report import render

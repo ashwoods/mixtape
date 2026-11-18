@@ -27,10 +27,18 @@ class Recorder:
     the one collecting, from the end of the last. With `out`, a folder gets the artifacts (see
     `Artifacts`; `samples` says whether it gets every sample), written by `finish`.
 
+    The rates (the CPU of the process and its threads, the buffers and bits per second of
+    pads) are one value per window, so a window much shorter than `interval` would weigh as
+    much as a whole one with a value of a few milliseconds: one shorter than half of it gets
+    no rates, unless it is the first, and its time counts in the next window's, or in none
+    when it is the last, the fraction of a second between the last poll and the stop.
+
     Any number of recorders can run at once, as the collector gives each what was measured
     since its own last window."""
 
-    def __init__(self, out: Path | None = None, samples: bool = True) -> None:
+    def __init__(
+        self, out: Path | None = None, samples: bool = True, interval: float = 1.0
+    ) -> None:
         self._collector = Collector.get()
         self._lock = threading.Lock()  # one window at a time: the poll's or the last
         self._artifacts = Artifacts(out, samples) if out is not None else None
@@ -38,7 +46,11 @@ class Recorder:
         self.start_ns = self.end_ns = self._collector.now()
         """Nanoseconds since GStreamer initialised: when it started, and where the window
         collecting starts, which is the end of the last"""
-        self._cpu = (time.process_time(), time.monotonic())  # at the window's start
+        self._shortest_ns = int(interval * 1e9 / 2)  # of a window with rates
+        self._rates_ns = self.start_ns  # where the rates of the next window start
+        self._rated = False  # whether a window has rates
+        self._counts: dict[str, tuple[int, int]] = {}  # of pads since `_rates_ns`
+        self._cpu = (time.process_time(), time.monotonic())  # at the rates' start
         self._threads = ThreadCpu()
         self._threads.sample(self.start_ns)  # the baseline
         self.measured: set[str] = set()
@@ -54,11 +66,17 @@ class Recorder:
         """Close the window collecting, with the subjects named by `keys` instead of the names
         the tracers report. It reads and writes files: not for a loop."""
         with self._lock:
-            cpu = self._cpu_sample()
             samples, counts = self._subscription.take()
             end = self._collector.now()
-            samples += rates(counts, self.end_ns, end)
-            samples += self._threads.sample(end)
+            for pad, (buffers, size) in counts.items():
+                before = self._counts.get(pad, (0, 0))
+                self._counts[pad] = (before[0] + buffers, before[1] + size)
+            cpu = None
+            if not self._rated or end - self._rates_ns >= self._shortest_ns:
+                cpu = self._cpu_sample()
+                samples += rates(self._counts, self._rates_ns, end)
+                samples += self._threads.sample(end)
+                self._rates_ns, self._counts, self._rated = end, {}, True
             if keys:
                 samples = [s._replace(subject=_subject(s.subject, keys)) for s in samples]
             if cpu is not None:

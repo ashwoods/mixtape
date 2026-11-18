@@ -217,7 +217,9 @@ class Measure:
         from .perf.record import Recorder
 
         folder = _folder_name(item.nodeid, self._folders)
-        run = self._runs[item.nodeid] = _Run(item, Recorder(self.out / folder, self.samples))
+        run = self._runs[item.nodeid] = _Run(
+            item, Recorder(self.out / folder, self.samples, self.interval)
+        )
         self._tests[item.nodeid] = {
             "id": item.nodeid,
             "outcome": "passed",

@@ -91,7 +91,7 @@ class Perf(Feature):
             )
 
     def attach(self, player: "Player") -> None:
-        self._recorder = Recorder(self.out)
+        self._recorder = Recorder(self.out, interval=self.interval)
         self._snapshot_failed = False
         self._snapshot(player)
         self._task = asyncio.get_running_loop().create_task(self._poll(player))

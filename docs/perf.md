@@ -82,7 +82,8 @@ The folder has more than the summary:
 
 `summary.json` also has `lost`: how many times the debug log dropped lines before `perf` read
 them. When it is not 0, some tracer records are missing from the numbers, and `mixtape run` logs
-a warning with the count at the end. It has a `format_version` too, 1: a reader takes a document
+a warning with the count at the end (on a pipeline that pushes as fast as it can, expect it: see
+[The cost on a fast pipeline](#the-cost-on-a-fast-pipeline)). It has a `format_version` too, 1: a reader takes a document
 without one as 1, and it changes only when a field is renamed or removed.
 
 `perf` reads GStreamer's debug log itself and passes on the lines that are not its tracers':
@@ -298,7 +299,7 @@ cost is the tracers', not mixtape's. It is in `gst-plugins-rs` 0.15.4, which Hom
 around it yet.
 
 The records also fill the debug log. On such a pipeline the log of a busy thread can outgrow the
-4 MiB that `perf` reads from, and `lost` in `summary.json` is then not 0 (see
+4 MiB ring per thread that `perf` reads from, and `lost` in `summary.json` is then not 0 (see
 [Record it](#record-it)): `pad.interval` and the other metrics of the core tracers are missing
 records. That run lost about half of its `pad.interval` records. A live pipeline, or one with
 `sync=true`, makes records at its real rate, far fewer per second, so neither problem is likely

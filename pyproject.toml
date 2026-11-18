@@ -55,6 +55,7 @@ mixtape = "mixtape.pytest_plugin"
 
 [project.urls]
 Homepage = "https://github.com/ashwoods/mixtape"
+Documentation = "https://shashi.to/mixtape/"
 Repository = "https://github.com/ashwoods/mixtape"
 Issues = "https://github.com/ashwoods/mixtape/issues"
 Changelog = "https://github.com/ashwoods/mixtape/blob/main/Changelog.md"
@@ -77,7 +78,12 @@ dev = [
 ]
 
 # The site in docs/ (mkdocs.yml); .github/workflows/docs.yml builds it with only this group.
-docs = ["mkdocs-material==9.8.1", "mkdocstrings[python]==1.0.8"]
+# mkdocs-llmstxt writes llms.txt and llms-full.txt from the built pages.
+docs = [
+    "mkdocs-llmstxt==0.5.1",
+    "mkdocs-material==9.8.1",
+    "mkdocstrings[python]==1.0.8",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -13,6 +13,10 @@ sections they cover with a marker (registered in tests/conftest.py):
 A key is the example's file name without `.py`, a colon and the section name, so the names of
 the examples must be unique across examples/ and its folders.
 
+The links point at the commit the site is built from (`git rev-parse HEAD`), not at main, so a
+site built from a release links to the code of that release. Links to `blob/main/` or
+`tree/main/` written on a page are pinned the same way.
+
 The build warns, which `mkdocs build --strict` turns into a failure, when a section the docs
 include has no covering test, when a marker names a section no example has, or when an included
 section does not exist.
@@ -21,6 +25,7 @@ section does not exist.
 import ast
 import logging
 import re
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -37,6 +42,8 @@ END = re.compile(r"--8<--\s*\[end:([^\]]+)\]")
 
 # set by on_config
 root = Path()
+repo = ""
+sha = ""
 blob = ""
 tests: dict[str, list[tuple[str, str, int]]] = {}  # "recorder:build" -> [(test, file, line)]
 sections: set[str] = set()  # "recorder:build", for every section any example has
@@ -73,9 +80,13 @@ def markers(path: Path) -> Iterator[tuple[str, str, int]]:
 
 
 def on_config(config: Any) -> Any:
-    global root, blob, tests, sections
+    global root, repo, sha, blob, tests, sections
     root = Path(config.config_file_path).parent
-    blob = f"{config.repo_url.rstrip('/')}/blob/main"
+    repo = config.repo_url.rstrip("/")
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    blob = f"{repo}/blob/{sha}"
 
     sections = set()
     for path in sorted((root / "examples").rglob("*.py")):
@@ -135,6 +146,8 @@ def source_line(path: str, used: list[str], indent: str) -> str:
 
 
 def on_page_markdown(markdown: str, page: Any, config: Any, files: Any) -> str:
+    for kind in ("blob", "tree"):
+        markdown = markdown.replace(f"{repo}/{kind}/main/", f"{repo}/{kind}/{sha}/")
     out: list[str] = []
     fence: tuple[str, str, int] | None = None
     used: dict[str, list[str]] = {}

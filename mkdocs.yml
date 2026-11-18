@@ -46,6 +46,26 @@ plugins:
             show_root_full_path: true
             show_symbol_type_heading: true
             show_symbol_type_toc: true
+  # llms.txt and llms-full.txt, from the built pages; each page also gets a Markdown copy
+  - llmstxt:
+      full_output: llms-full.txt
+      markdown_description: |
+        PyGObject and GStreamer come from the system (Homebrew or apt), not from PyPI: install
+        mixtape into a venv made with `--system-site-packages` from the Python that has them.
+      sections:
+        Docs:
+          - index.md: what mixtape is, how to install it, a first pipeline
+          - library.md: subclass `Player`, declare properties and commands, read events, write a `Feature`
+          - perf.md: the `perf` feature, recording a run, comparing two runs, budgets in pytest
+          - cli.md: "`mixtape run`, `mixtape inspect`, `--set`, `--http`, `--feature`, exit statuses"
+          - http.md: the REST and WebSocket endpoints, the control page, serving from your own code
+          - reference.md: "`Player`, `Feature`, `prop`, `command`, the events, the exceptions"
+          - troubleshooting.md: each heading is an error message, with its fix
+        Examples:
+          - webrtc.md: a `Player` that makes video calls with webrtcsink and webrtcsrc
+          - two-pipelines.md: pipelines that feed each other, in one process or two
+        Optional:
+          - changelog.md: what changed in each release
 
 theme:
   name: material

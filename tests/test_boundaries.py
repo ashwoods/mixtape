@@ -21,7 +21,7 @@ assert not found, found
 
 def test_spec_and_perf_import_without_gi_features_or_player() -> None:
     modules = ["mixtape.spec", "mixtape.perf"]
-    modules += [m.name for m in pkgutil.iter_modules(mixtape.perf.__path__, "mixtape.perf.")]
+    modules += [m.name for m in pkgutil.walk_packages(mixtape.perf.__path__, "mixtape.perf.")]
     result = subprocess.run(
         [sys.executable, "-c", CHECK, *modules], capture_output=True, text=True, timeout=60
     )

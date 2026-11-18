@@ -14,7 +14,8 @@ Server to client, one JSON object per message:
     {"type": "error" | "warning", "source", "message", "debug"}   (an error also once on connect)
     {"type": "position", "position", "duration"}
     {"type": "commands", "unavailable": {name: reason}}   the commands that cannot run changed
-    {"type": "reply", "id", "result"}                 or "error": {"status", "detail"[, "errors"]}
+    {"type": "reply", "id", "result"}                 or "error": {"status", "detail", "code",
+                                                     "hint"[, "errors"]}, as REST's errors
 
 Client to server:
 
@@ -28,23 +29,20 @@ dropped, with a close 1013 when it still reads: it gets the snapshot again when 
 
 import asyncio
 import json
-import math
 import logging
 from collections.abc import Awaitable
 from typing import Any
 
 from fastapi import WebSocket
-from fastapi.encoders import jsonable_encoder
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from ... import events
 from ...exceptions import InvalidValueError, MixTapeError
-from ...exceptions import UnknownNameError
-from ...model import PlayerSpec
 from ...player import Player
-from .errors import describe_error
+from ..encoding import encode_json
+from ..messages import EventEncoder
+from ..values import read_values, set_values
+from .errors import INTERNAL_ERROR, describe_error
 from .security import check_headers
-from .values import all_values, read_values, set_values
 
 logger = logging.getLogger(__name__)
 
@@ -61,82 +59,6 @@ SEND_BYTES = 16 * 1024 * 1024
 """The bytes a client may fall behind by, grace or not."""
 CLOSE_TIMEOUT = 2.0
 """Seconds to send the close frame: a client that does not read never takes it."""
-
-
-def encode_event(event: events.Event) -> dict[str, Any] | None:
-    """The JSON message of an event, None for those the page has no use for."""
-    match event:
-        case events.StateChanged(old=old, new=new, pending=pending):
-            return {
-                "type": "state",
-                "old": old.value_nick,
-                "new": new.value_nick,
-                "pending": pending.value_nick,
-            }
-        case events.PropertyChanged(path=path, element=element, property=prop, value=value):
-            return {
-                "type": "property",
-                "path": path,
-                "element": element,
-                "property": prop,
-                "value": value,
-            }
-        case events.Eos():
-            return {"type": "eos"}
-        case events.Error(error=error):
-            return {
-                "type": "error",
-                "source": error.source,
-                "message": error.message,
-                "debug": error.debug,
-            }
-        case events.Warning(source=source, message=message, debug=debug):
-            return {"type": "warning", "source": source, "message": message, "debug": debug}
-        case events.Position(position=position, duration=duration):
-            return {"type": "position", "position": position, "duration": duration}
-        case events.CommandsChanged(unavailable=unavailable):
-            return {"type": "commands", "unavailable": unavailable}
-        case events.GraphChanged(graph=graph):
-            return {"type": "graph", "graph": graph.model_dump(mode="json")}
-        case events.ModelChanged(model=model):
-            return {"type": "model", "model": model.model_dump(mode="json")}
-    return None  # Message
-
-
-def _element_values(player: Player, model: PlayerSpec, keys: set[str]) -> dict[str, Any]:
-    """`{path: value}` of the readable properties of the elements `keys` of `model`."""
-    values: dict[str, Any] = {}
-    for key in keys:
-        paths = [p.path for p in model.elements[key].properties.values() if p.readable]
-        try:
-            values |= read_values(player, {path: path for path in paths})
-        except UnknownNameError:
-            continue  # gone again since the model, or renamed by a namesake: a later one says
-    return values
-
-
-def _finite(value: Any) -> Any:
-    """`value`, made of what `jsonable_encoder` returns, with every NaN and infinity in it as
-    None: JSON has no such numbers."""
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {key: _finite(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_finite(item) for item in value]
-    return value
-
-
-def jsonable(value: Any) -> Any:
-    """`value` as data JSON can carry, with NaN and infinities as None, as the properties of
-    REST come (pydantic's way)."""
-    return _finite(jsonable_encoder(value))
-
-
-def encode_json(message: Any) -> str:
-    """The JSON text of `jsonable(message)`. A value JSON cannot carry (an object) raises
-    ValueError."""
-    return json.dumps(jsonable(message), allow_nan=False)
 
 
 async def _dispatch(player: Player, message: Any) -> Any:
@@ -164,15 +86,8 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
         return
     await websocket.accept()
     stream = player.events(position=True)  # before the snapshot: nothing falls between them
-    model = player.describe()
-    snapshot = [
-        {"type": "model", "model": model.model_dump(mode="json")},
-        {"type": "values", "values": all_values(player)},
-        {"type": "graph", "graph": player.graph().model_dump(mode="json")},
-    ]
-    if player.error is not None and (error := encode_event(events.Error(player.error))):
-        snapshot.append(error)  # the page may load after the error that stopped the pipeline
-    known = set(model.elements)  # the elements whose values the client has
+    encoder = EventEncoder(player)
+    snapshot = encoder.snapshot()
     outbox: asyncio.Queue[str] = asyncio.Queue()  # one writer: whole and in the order sent
     queued = 0  # the bytes in it: JSON as `json.dumps` writes it is ASCII
     behind = asyncio.Event()  # the client cannot keep up
@@ -202,14 +117,9 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
                 grace = None
 
     async def forward() -> None:
-        nonlocal known
         async for event in stream:
-            if (message := encode_event(event)) is None:
+            if (message := encoder.encode(event)) is None:
                 continue
-            if isinstance(event, events.ModelChanged):
-                elements = set(event.model.elements)
-                message["values"] = _element_values(player, event.model, elements - known)
-                known = elements
             try:
                 text = encode_json(message)
             except ValueError:
@@ -240,7 +150,7 @@ async def serve_events(websocket: WebSocket, player: Player, *, loopback: bool) 
                 reply["error"] = {"status": status, **body}
             else:
                 logger.exception("A WebSocket message failed")
-                reply["error"] = {"status": 500, "detail": "Internal error"}
+                reply["error"] = {"status": 500, **INTERNAL_ERROR}
             text = encode_json(reply)
         # after the events the command published: forward's turn to send them is already due
         await asyncio.sleep(0)

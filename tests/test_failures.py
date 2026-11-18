@@ -174,13 +174,17 @@ async def test_eos_on_a_hung_pipeline_answers_409_and_the_loop_runs_on():
             response = await eos
             assert (response.status_code, response.json()) == (
                 409,
-                {"detail": "No EOS within 0.5 s"},
+                {"detail": "No EOS within 0.5 s", "code": "command_failed", "hint": None},
             )
 
             stop = await client.post("/api/commands/stop")
             assert (stop.status_code, stop.json()) == (
                 409,
-                {"detail": "Could not set the pipeline to null within 0.5 s"},
+                {
+                    "detail": "Could not set the pipeline to null within 0.5 s",
+                    "code": "state_change_failed",
+                    "hint": None,
+                },
             )
             started = time.monotonic()
             response = await client.post("/api/commands/eos")  # at once while stuck

@@ -25,7 +25,8 @@ def test_websocket_replies_and_events() -> None:
         "first: values",
         "first: graph",
         "reply 1 {'vol.volume': 0.5}",
-        "reply 2 {'status': 404, 'detail': \"Unknown command 'no-such-command'\"}",
+        "reply 2 {'status': 404, 'detail': \"Unknown command 'no-such-command'\", "
+        "'code': 'unknown_name', 'hint': None}",
         "reply 3 None",
         "property [('vol.volume', 0.5)]",
         "states ['ready', 'paused', 'playing']",

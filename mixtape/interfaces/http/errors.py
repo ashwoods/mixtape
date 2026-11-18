@@ -16,8 +16,13 @@ from ...exceptions import (
 )
 
 
+INTERNAL_ERROR: dict[str, Any] = {"detail": "Internal error", "code": "internal", "hint": None}
+"""The body of an error that is not the player's, a bug: its message is in the server's log."""
+
+
 def describe_error(exc: MixTapeError) -> tuple[int, dict[str, Any]]:
-    """The status and JSON body (`detail`, and `errors` for an invalid value) of an error."""
+    """The status and JSON body of an error: `detail`, its `code` and `hint` (the close names
+    of an unknown one, else null), and `errors` for an invalid value."""
     if isinstance(exc, UnknownNameError):
         status = 404
     elif isinstance(exc, InvalidValueError | NotWritableError | NotReadableError):
@@ -32,4 +37,6 @@ def describe_error(exc: MixTapeError) -> tuple[int, dict[str, Any]]:
         body = {"detail": str(exc)}
     if isinstance(exc, InvalidValueError):
         body["errors"] = jsonable_encoder(exc.errors)
+    body["code"] = exc.code
+    body["hint"] = exc.hint if isinstance(exc, UnknownNameError) else None
     return status, body

@@ -301,6 +301,33 @@ def test_errors_start_in_lower_case(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().err.endswith("or gst:NAME for any GStreamer tracer\n")
 
 
+def test_timeout_stops_with_eos_and_exits_124(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", "--timeout", "0.3", "videotestsrc is-live=true ! fakesink"]) == 124
+    assert capsys.readouterr().err == "Timeout: stopping (EOS)…\n"
+
+
+def test_events_jsonl(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", "--events", "jsonl", "videotestsrc num-buffers=3 ! fakesink"]) == 0
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [m["type"] for m in messages[:3]] == ["model", "values", "graph"]
+    assert {"type": "eos"} in messages
+
+
+def test_json_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    argv = ["run", "--json", "--set", "src.patern=1", "videotestsrc name=src ! fakesink"]
+    assert main(argv) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "error": {
+            "code": "unknown_name",
+            "message": "Unknown property 'src.patern'",
+            "hint": "did you mean 'src.pattern'?",
+        }
+    }
+    assert main(["inspect", "--json", "--js", PIPELINE]) == 2
+    error = json.loads(capsys.readouterr().err)["error"]  # one line: no usage, no "Try"
+    assert error["code"] == "usage" and error["message"].startswith("No such option: --js")
+
+
 def test_ctrl_c_outside_the_play_loop_exits_130_quietly(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

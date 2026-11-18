@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import difflib
+import enum
 import errno
 import importlib
 import importlib.metadata
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
     from typer._click.formatting import HelpFormatter
 
     from .events import EventStream
+    from .exceptions import MixTapeError, PlayerPipelineError
+    from .interfaces.messages import EventEncoder
     from .model import CommandSpec, PropSpec
     from .player import Player
 
@@ -41,6 +44,7 @@ _log_handler: logging.Handler | None = None
 
 EXIT_ERROR = 1
 EXIT_USAGE = 2
+EXIT_TIMEOUT = 124  # as timeout(1)
 EXIT_INTERRUPTED = 130
 HTTP_HOST = "127.0.0.1"
 THRESHOLD_PERCENT = 50  # `perf.compare.THRESHOLD` as percent: a test keeps them in step
@@ -48,6 +52,7 @@ NO_GST = (
     "error: mixtape needs PyGObject and GStreamer 1.0 from the system Python: "
     "see https://shashi.to/mixtape/troubleshooting/"
 )
+INSPECT_HINT = "mixtape inspect TARGET lists them"
 VERBOSE_HELP = "log more: -v info, -vv debug"
 TARGET_HELP = (
     "TARGET is a pipeline description, as one quoted string or as its words, or a player "
@@ -61,6 +66,14 @@ FEATURE_HELP = (
     "only inside parentheses"
 )
 _VERBOSE = "mixtape.verbose"  # the `-v`s before the command, in `Context.meta`
+
+_as_json = False
+"""Whether the command's `--json` asked for JSON: errors and warnings as JSON lines on stderr,
+and no notices. `main` starts each run without."""
+
+
+class EventFormat(enum.Enum):
+    JSONL = "jsonl"
 
 
 class _Command(TyperCommand):
@@ -155,6 +168,16 @@ def _percentage(text: str) -> float:
     return value
 
 
+def _seconds(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0.0
+    if not (value > 0 and math.isfinite(value)):  # also nan
+        raise typer.BadParameter(f"{text!r} is not a number of seconds, more than 0")
+    return value
+
+
 def _version_lines() -> list[str]:
     """What a bug report needs: the versions of mixtape, GStreamer, PyGObject and Python."""
     try:
@@ -208,7 +231,7 @@ def _start(ctx: typer.Context, verbose: int, *, needs_gst: bool = True) -> int |
     exit code when the command needs GStreamer and it is not there."""
     _setup_logging(verbose + ctx.meta.get(_VERBOSE, 0))
     if needs_gst and not _gst_available():
-        print(NO_GST, file=sys.stderr)
+        _fail(NO_GST.removeprefix("error: "), "no_gstreamer")
         return EXIT_ERROR
     return None
 
@@ -224,7 +247,7 @@ def _start(ctx: typer.Context, verbose: int, *, needs_gst: bool = True) -> int |
     "\n"
     "Exit status: 0 at EOS or after a first Ctrl-C, 1 on a pipeline error, when --http "
     "cannot listen or without PyGObject, 2 on bad usage or a target or feature that cannot "
-    "be loaded, 130 on a second Ctrl-C.",
+    "be loaded, 124 when --timeout stopped it, 130 on a second Ctrl-C.",
 )
 def run(
     ctx: typer.Context,
@@ -249,22 +272,60 @@ def run(
             "after EOS or an error until interrupted; HOST defaults to 127.0.0.1",
         ),
     ] = None,
+    timeout: Annotated[
+        float | None,
+        typer.Option(
+            "--timeout",
+            parser=_seconds,
+            metavar="SECONDS",
+            show_default=False,
+            help="stop with an EOS, as a first Ctrl-C does, once it played for SECONDS, and "
+            "exit 124; with --http, stop serving too",
+        ),
+    ] = None,
+    events: Annotated[
+        EventFormat | None,
+        typer.Option(
+            "--events",
+            show_default=False,
+            help="print the model, the values and the graph, then every event, on stdout: "
+            "jsonl, one JSON object per line, as the WebSocket of --http sends them",
+        ),
+    ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="print errors as JSON on stderr and, with --http, the URL as JSON on stdout "
+            "once listening",
+        ),
+    ] = False,
     expose_all: ExposeAll = False,
     feature: Features = None,
     verbose: Verbose = 0,
 ) -> int:
+    global _as_json
+    _as_json = as_json
     if (code := _start(ctx, verbose)) is not None:  # before the extra: it imports gi too
         return code
     if http is not None:
         try:
             importlib.import_module("mixtape.interfaces.http")  # needs the extra
         except ImportError:
-            _error("--http needs the http extra: pip install 'mixtape[http]'")
+            _fail("--http needs the http extra", "missing_extra", "pip install 'mixtape[http]'")
             return EXIT_USAGE
     player = _load_player(target, expose_all, feature or [])
     if player is None:
         return EXIT_USAGE
-    return asyncio.run(_play(player, verbose + ctx.meta[_VERBOSE], _assignments(assignments), http))
+    play = _play(
+        player,
+        verbose + ctx.meta[_VERBOSE],
+        _assignments(assignments),
+        http,
+        timeout=timeout,
+        events=events is not None,
+    )
+    return asyncio.run(play)
 
 
 def _assignments(texts: Sequence[str] | None) -> list[tuple[str, str]]:
@@ -282,11 +343,15 @@ def _assignments(texts: Sequence[str] | None) -> list[tuple[str, str]]:
 def inspect(
     ctx: typer.Context,
     target: Target,
-    as_json: Annotated[bool, typer.Option("--json", help="print the model as JSON")] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="print the model as JSON, and errors as JSON on stderr")
+    ] = False,
     expose_all: ExposeAll = False,
     feature: Features = None,
     verbose: Verbose = 0,
 ) -> int:
+    global _as_json
+    _as_json = as_json
     if (code := _start(ctx, verbose)) is not None:
         return code
     return _inspect(target, as_json, expose_all, feature or [])
@@ -318,16 +383,20 @@ def perf_compare(
             help=f"how much a value may grow, in percent of the base; default {THRESHOLD_PERCENT}",
         ),
     ] = THRESHOLD_PERCENT,
-    as_json: Annotated[bool, typer.Option("--json", help="print the comparison as JSON")] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="print the comparison and errors as JSON")
+    ] = False,
     verbose: Verbose = 0,
 ) -> int:
+    global _as_json
+    _as_json = as_json
     _start(ctx, verbose, needs_gst=False)
     from .perf import compare
 
     try:
         result = compare.compare_folders(base, new, threshold / 100)
-    except compare.CompareError as exc:
-        _error(exc)
+    except compare.CompareError as exc:  # a folder that is not a session or a run
+        _fail(exc, "bad_target")
         return EXIT_USAGE
     print(json.dumps(result, indent=2) if as_json else compare.format_text(result))
     return EXIT_ERROR if result["regressions"] else 0
@@ -335,15 +404,20 @@ def perf_compare(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line and return its exit code."""
+    global _as_json
+    _as_json = False  # a command's --json sets it
     if not sys.stderr.isatty() or os.environ.get("NO_COLOR"):
         os.environ.setdefault("GST_DEBUG_NO_COLOR", "1")  # GStreamer's logs, for a file or a pipe
+    args = sys.argv[1:] if argv is None else list(argv)
     try:
-        code = get_command(app).main(args=argv, prog_name="mixtape", standalone_mode=False)
+        code = get_command(app).main(args=args, prog_name="mixtape", standalone_mode=False)
     except UsageError as exc:
-        _usage_error(exc, sys.argv[1:] if argv is None else argv)
+        _as_json = _as_json or "--json" in args  # refused before its command ran
+        _usage_error(exc, args)
         return exc.exit_code
     except ClickException as exc:
-        _error(exc.format_message())
+        _as_json = _as_json or "--json" in args
+        _fail(exc.format_message(), "usage")
         return exc.exit_code
     except typer.Abort:
         return EXIT_INTERRUPTED
@@ -356,14 +430,18 @@ def _usage_error(exc: Any, argv: Sequence[str]) -> None:
     if type(exc).__name__ == "NoArgsIsHelpError":  # a command with no words: its help
         print(ctx.get_help(), file=sys.stderr)
         return
-    _error(exc.format_message().rstrip("."))  # a click message ends with a full stop
-    if ctx is not None:
-        print(ctx.get_usage(), file=sys.stderr)
+    message = exc.format_message().rstrip(".")  # a click message ends with a full stop
     # an option that misses its value is refused before its command has a context: its words
     words = [arg for arg in argv if not arg.startswith("-")][:2]
     named = " ".join(words if words == ["perf", "compare"] else words[:1])
     fallback = f"mixtape {named}" if named in ("run", "inspect", "perf compare") else "mixtape"
     path = ctx.command_path if ctx is not None else fallback
+    if _as_json:
+        _fail(message, "usage", f"'{path} --help' shows the usage")
+        return
+    _error(message)
+    if ctx is not None:
+        print(ctx.get_usage(), file=sys.stderr)
     print(f"Try '{path} --help' for help.", file=sys.stderr)
 
 
@@ -396,6 +474,48 @@ def _error(message: object) -> None:
     if first in _SENTENCE_STARTS:
         first = first.lower()
     print(f"error: {first}{space}{rest}", file=sys.stderr)
+
+
+def _fail(message: object, code: str, hint: str | None = None) -> None:
+    """Print an error: `error: message: hint`, or with `--json` one line
+    `{"error": {"code", "message", "hint"}}`, whose code is one of the library's (`exc.code`)
+    or of the command line's own."""
+    if _as_json:
+        _print_json({"error": {"code": code, "message": str(message), "hint": hint}}, err=True)
+    else:
+        _error(f"{message}: {hint}" if hint else message)
+
+
+def _fail_on(exc: MixTapeError) -> None:
+    """Print a library error, with its code and hint."""
+    from .exceptions import UnknownNameError
+
+    _fail(exc, exc.code, exc.hint if isinstance(exc, UnknownNameError) else None)
+
+
+def _pipeline_error(error: PlayerPipelineError, verbose: int) -> None:
+    """Print a pipeline error, and its debug string with `-v`."""
+    message = f"{error.source}: {error.message}"
+    if _as_json:
+        _fail(message, error.code)
+    else:  # not as `_error`: an element's name stays as it is
+        print(f"error: {message}", file=sys.stderr)
+    if verbose and error.debug:
+        print(error.debug, file=sys.stderr)
+
+
+def _notice(text: str) -> None:
+    """Print what a person at the terminal wants to know on stderr; not with `--json`."""
+    if not _as_json:
+        print(text, file=sys.stderr)
+
+
+def _print_json(message: dict[str, Any], *, err: bool = False) -> None:
+    """Print `message` as one line of JSON, on stdout or with `err` on stderr, at once: a
+    program reads it as it comes."""
+    from .interfaces.encoding import encode_json  # without PyGObject too
+
+    print(encode_json(message), file=sys.stderr if err else sys.stdout, flush=True)
 
 
 def _setup_logging(verbose: int) -> None:
@@ -438,8 +558,11 @@ def _load_player(words: Sequence[str], expose_all: bool, features: Sequence[str]
         if cls.description is None:
             raise ValueError(f"{first} has no description to build a player from")
         return cls.from_description(expose_all=expose_all, features=features)
-    except (ValueError, PlayerDescriptionError, ModelError) as exc:
-        _error(exc)
+    except (PlayerDescriptionError, ModelError) as exc:
+        _fail_on(exc)
+        return None
+    except ValueError as exc:
+        _fail(exc, "bad_target")
         return None
 
 
@@ -570,35 +693,21 @@ def _value(value: Any) -> str:
     return json.dumps(value)
 
 
-def _known(player: Player, path: str) -> str:
-    """The hint for a `--set` of a property the player does not have: the closest of those it
-    can write, or where to see them all."""
-    spec = player.describe()
-    key, _, name = path.rpartition(".")
-    if (element := spec.elements.get(key)) is not None:  # its properties, by their own names
-        names = [n for n, p in element.properties.items() if p.writable]
-        close = [f"{key}.{n}" for n in difflib.get_close_matches(name, names, n=3)]
-    else:  # a typo in the element's key, or one of the player's own properties
-        props = [*spec.properties.values()]
-        props += [p for e in spec.elements.values() for p in e.properties.values()]
-        paths = [p.path for p in props if p.writable]
-        close = difflib.get_close_matches(path, paths, n=3)
-    if close:
-        return f"did you mean {' or '.join(map(repr, close))}?"
-    return "mixtape inspect TARGET lists them"
-
-
 async def _play(
     player: Player,
     verbose: int,
     assignments: Sequence[tuple[str, str]] = (),
     http: tuple[str, int] | None = None,
+    *,
+    timeout: float | None = None,
+    events: bool = False,
 ) -> int:
-    """Play until EOS, stopping with an EOS on the first SIGINT or SIGTERM and at once
-    on the second. Returns the exit code.
+    """Play until EOS, stopping with an EOS on the first SIGINT or SIGTERM, or once `timeout`
+    seconds have passed, and at once on the second. Returns the exit code.
 
     With `http` (host, port) it serves the player instead, and neither an EOS nor an
-    error ends it: only the first interrupt does, once the player has stopped."""
+    error ends it: only the first interrupt or the timeout does, once the player has stopped.
+    With `events`, it prints the snapshot and then every event as JSON lines on stdout."""
     from gi.repository import Gst
 
     from .exceptions import (
@@ -607,10 +716,12 @@ async def _play(
         PlayerSetStateError,
         UnknownNameError,
     )
+    from .interfaces.messages import EventEncoder
 
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()
     interrupts = 0
+    timed_out = False
     stopping: asyncio.Task[None] | None = None
     interrupted = asyncio.Event()
 
@@ -618,21 +729,30 @@ async def _play(
         nonlocal interrupts, stopping
         interrupts += 1
         if interrupts == 1:
-            print("Interrupt: stopping (EOS)…", file=sys.stderr)
+            _notice(f"{'Timeout' if timed_out else 'Interrupt'}: stopping (EOS)…")
             stopping = loop.create_task(player.stop(eos=True))
             interrupted.set()
         elif interrupts == 2:
             # The teardown that follows waits for a hung pipeline for up to its
             # `state_timeout`: a third Ctrl-C then kills the process, as the default does.
-            print("Interrupt: stopping now (Ctrl-C again to kill)…", file=sys.stderr)
+            _notice("Interrupt: stopping now (Ctrl-C again to kill)…")
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             if main_task is not None:
                 main_task.cancel()
+
+    def expire() -> None:
+        nonlocal timed_out
+        if not interrupts:  # after a Ctrl-C, it already stops
+            timed_out = True
+            interrupt()
 
     signals = (signal.SIGINT, signal.SIGTERM)
     for sig in signals:
         loop.add_signal_handler(sig, interrupt)
     pump: asyncio.Task[None] | None = None
+    stream: EventStream | None = None
+    printer: asyncio.Task[None] | None = None
+    timer: asyncio.TimerHandle | None = None
     try:
         if sys.platform == "darwin":
             from . import macos
@@ -643,9 +763,17 @@ async def _play(
                 try:
                     await player.set(path, value)
                 except UnknownNameError as exc:
-                    if str(exc) != f"Unknown property {path!r}":
-                        raise  # ambiguous or not exposed: it says what to use instead
-                    raise UnknownNameError(f"{exc}: {_known(player, path)}") from None
+                    if str(exc) == f"Unknown property {path!r}":  # not ambiguous or hidden
+                        exc.hint = exc.hint or INSPECT_HINT
+                    raise
+            if events:
+                stream = player.events(position=True)  # before the snapshot, as the socket's
+                encoder = EventEncoder(player)
+                for message in encoder.snapshot():  # now: the values from before it plays
+                    _print_json(message)
+                printer = loop.create_task(_print_events(encoder, stream))
+            if timeout is not None:
+                timer = loop.call_later(timeout, expire)
             if http is None:
                 await player.play_until_eos()
             else:
@@ -658,38 +786,58 @@ async def _play(
             raise
         return EXIT_INTERRUPTED
     except ModelError as exc:
-        _error(exc)
+        _fail_on(exc)
         return EXIT_USAGE
     except PlayerPipelineError as exc:
-        print(f"error: {exc.source}: {exc.message}", file=sys.stderr)
-        if verbose and exc.debug:
-            print(exc.debug, file=sys.stderr)
+        _pipeline_error(exc, verbose)
         return EXIT_ERROR
     except OSError as exc:  # --http cannot listen
         if http is None:
             raise
         if exc.errno == errno.EADDRINUSE:
-            _error(
-                f"{http[0]}:{http[1]} is in use (is another mixtape run --http running?): "
-                "choose another port with --http PORT"
+            _fail(
+                f"{http[0]}:{http[1]} is in use (is another mixtape run --http running?)",
+                "address_in_use",
+                "choose another port with --http PORT",
             )
         else:
-            _error(exc)
+            _fail(exc, "listen_failed")
         return EXIT_ERROR
     except PlayerSetStateError as exc:
         if interrupts and player.state == Gst.State.NULL:  # the stop ended a wait, as asked
-            return 0
-        _error(exc)
+            return EXIT_TIMEOUT if timed_out else 0
+        _fail_on(exc)
         return EXIT_ERROR
     finally:
         for sig in signals:
             loop.remove_signal_handler(sig)
-        for task in (pump, stopping):
+        if timer is not None:
+            timer.cancel()
+        if stream is not None and printer is not None and interrupts < 2:
+            stream.close()  # the teardown has closed it: the events it queued still print
+            await printer
+        for task in (pump, stopping, printer):
             if task is not None:
                 task.cancel()
         if stopping is not None and stopping.done() and not stopping.cancelled():
             stopping.exception()  # the teardown raised it again, or it did not matter
-    return 0
+    return EXIT_TIMEOUT if timed_out else 0
+
+
+async def _print_events(encoder: EventEncoder, stream: EventStream) -> None:
+    """Print the events of `stream` until it ends, as JSON lines in the shapes of the
+    WebSocket's messages."""
+    from .interfaces.encoding import encode_json
+
+    async for event in stream:
+        if (message := encoder.encode(event)) is None:
+            continue
+        try:
+            text = encode_json(message)
+        except ValueError:  # a value JSON cannot carry: as the socket, the others still print
+            logger.exception("Could not print %r", event)
+            continue
+        print(text, flush=True)
 
 
 @contextlib.asynccontextmanager
@@ -704,14 +852,20 @@ async def _serving(
     from .interfaces.http.security import is_loopback
 
     if not is_loopback(host):
-        print(
-            f"warning: serving on {host} without authentication: anyone who can reach it "
-            "can control the player",
-            file=sys.stderr,
+        warning = (
+            f"serving on {host} without authentication: anyone who can reach it "
+            "can control the player"
         )
+        if _as_json:
+            _print_json({"warning": {"code": "unauthenticated", "message": warning}}, err=True)
+        else:
+            print(f"warning: {warning}", file=sys.stderr)
     log_level = ("warning", "info", "debug")[min(verbose, 2)]
     async with serve(player, host, port, log_level=log_level) as listening:
-        print(f"Serving on {listening.url}", file=sys.stderr)
+        if _as_json:
+            _print_json({"url": listening.url})  # it is ready: a program can connect
+        else:
+            print(f"Serving on {listening.url}", file=sys.stderr)
         stream = player.events()
         reporter = asyncio.create_task(_report_errors(stream, verbose))
         try:
@@ -721,7 +875,7 @@ async def _serving(
                 pass  # the reporter prints it
             except PlayerSetStateError as exc:
                 if not stopping.is_set():  # a Ctrl-C during the preroll interrupts it
-                    _error(exc)
+                    _fail_on(exc)
             yield
         finally:
             stream.close()
@@ -734,6 +888,4 @@ async def _report_errors(stream: EventStream, verbose: int) -> None:
 
     async for event in stream:
         if isinstance(event, Error):
-            print(f"error: {event.error.source}: {event.error.message}", file=sys.stderr)
-            if verbose and event.error.debug:
-                print(event.error.debug, file=sys.stderr)
+            _pipeline_error(event.error, verbose)

@@ -13,13 +13,15 @@ from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from ...exceptions import InvalidValueError, MixTapeError, UnknownNameError
+from ...hints import did_you_mean
 from ...model import ElementSpec
 from ...perf.metrics import units_script
 from ...player import Player
-from .errors import describe_error
+from ..encoding import jsonable
+from ..values import read_values, set_values
+from .errors import INTERNAL_ERROR, describe_error
 from .security import check_headers, is_loopback
-from .values import read_values, set_values
-from .ws import jsonable, serve_events
+from .ws import serve_events
 
 STATIC = {
     "mixtape.css": ("interfaces/http/mixtape.css", "text/css"),
@@ -66,14 +68,15 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
     @app.exception_handler(Exception)
     async def internal_error(request: Request, exc: Exception) -> JSONResponse:
         # JSON as every other error, worded as the WebSocket's; uvicorn logs the traceback
-        return JSONResponse({"detail": "Internal error"}, status_code=500, headers=NO_FRAMING)
+        return JSONResponse(INTERNAL_ERROR, status_code=500, headers=NO_FRAMING)
 
     @app.middleware("http")
     async def guard(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         if (problem := check_headers(request.headers, loopback=loopback)) is not None:
-            response: Response = JSONResponse({"detail": problem}, status_code=403)
+            body = {"detail": problem, "code": "forbidden", "hint": None}
+            response: Response = JSONResponse(body, status_code=403)
         else:
             response = await call_next(request)
         response.headers.update(NO_FRAMING)
@@ -146,9 +149,9 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
         return JSONResponse({"result": jsonable(result)})
 
     def element_spec(key: str) -> ElementSpec:
-        element = player.describe().elements.get(key)
-        if element is None:
-            raise UnknownNameError(f"Unknown element {key!r}")
+        elements = player.describe().elements
+        if (element := elements.get(key)) is None:
+            raise UnknownNameError(f"Unknown element {key!r}", hint=did_you_mean(key, elements))
         return element
 
     def element_values(element: ElementSpec, names: list[str]) -> dict[str, Any]:
@@ -166,7 +169,11 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
 
         def path_of(name: str) -> str:
             if name not in element.properties:
-                raise UnknownNameError(f"Unknown property {name!r} of element {el!r}")
+                writable = [n for n, p in element.properties.items() if p.writable]
+                raise UnknownNameError(
+                    f"Unknown property {name!r} of element {el!r}",
+                    hint=did_you_mean(name, writable),
+                )
             return element.properties[name].path
 
         await set_values(player, values, path_of)
@@ -184,8 +191,11 @@ def create_app(player: Player, *, host: str = "127.0.0.1") -> FastAPI:
         values = await _json_object(request)
 
         def path_of(name: str) -> str:
-            if name not in player.describe().properties:
-                raise UnknownNameError(f"Unknown property {name!r}")
+            if name not in (props := player.describe().properties):
+                writable = [n for n, p in props.items() if p.writable]
+                raise UnknownNameError(
+                    f"Unknown property {name!r}", hint=did_you_mean(name, writable)
+                )
             return name
 
         await set_values(player, values, path_of)

@@ -44,7 +44,7 @@ async def talk(url: str) -> None:
         for id_ in sorted(replies):
             print("reply", id_, replies[id_])
             # > reply 1 {'vol.volume': 0.5}
-            # > reply 2 {'status': 404, 'detail': "Unknown command 'no-such-command'"}
+            # > reply 2 {'status': 404, 'detail': "Unknown command 'no-such-command'", 'code': 'unknown_name', 'hint': None}
             # > reply 3 None
         print("property", changes)
         # > property [('vol.volume', 0.5)]

@@ -1,10 +1,11 @@
-"""Reading and writing property values for the REST and WebSocket interfaces."""
+"""Reading and writing property values for the REST and WebSocket interfaces and the command
+line's events."""
 
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from ...exceptions import NotReadableError
-from ...player import Player
+from ..exceptions import NotReadableError
+from ..player import Player
 
 
 def read_values(player: Player, paths: Mapping[str, str]) -> dict[str, Any]:

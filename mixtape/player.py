@@ -12,7 +12,7 @@ from collections import Counter
 from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from types import MappingProxyType
-from typing import Any, ClassVar, NamedTuple, Self
+from typing import Any, ClassVar, Literal, NamedTuple, Self
 
 import gi
 
@@ -20,7 +20,7 @@ gi.require_version("Gst", "1.0")
 from gi.repository import GLib, GObject, Gst
 from pydantic import NonNegativeFloat, ValidationError
 
-from . import events
+from . import events, hints
 from .exceptions import (
     CommandError,
     FeatureError,
@@ -957,7 +957,7 @@ class Player:
             return self._read_builtin(path)
         if (computed := self._computed.get(path)) is not None:
             return computed[0].read(computed[1])
-        element, ps, codec = self._resolve(path)
+        element, ps, codec = self._resolve(path, "read")
         if not ps.flags & GObject.ParamFlags.READABLE:
             raise NotReadableError(f"{path!r} is write-only")
         return codec.read(element.get_property(ps.name))
@@ -967,7 +967,7 @@ class Player:
         self.setup()
         if path in BUILTIN_PROPS or path in self._computed:
             raise NotWritableError(f"{path!r} is read-only")
-        element, ps, codec = self._resolve(path)
+        element, ps, codec = self._resolve(path, "write")
         flags = int(ps.flags)
         if not flags & GObject.ParamFlags.WRITABLE or flags & GObject.ParamFlags.CONSTRUCT_ONLY:
             raise NotWritableError(f"{path!r} is read-only or can only be set on construction")
@@ -994,7 +994,8 @@ class Player:
         as their specs say."""
         self.setup()
         if (bound := self._commands.get(name)) is None:
-            raise UnknownNameError(f"Unknown command {name!r}")
+            hint = hints.command_hint(self.describe().model_dump(mode="json"), name)
+            raise UnknownNameError(f"Unknown command {name!r}", hint=hint)
         declared = bound.declared
         try:
             validated = declared.args.model_validate(args)
@@ -1056,10 +1057,22 @@ class Player:
     def _is_exposed(self, element: Gst.Element) -> bool:
         return self._expose_all or is_user_named(element)
 
-    def _resolve(self, path: str) -> tuple[Gst.Element, Any, Codec]:
-        """Like `_locate`, following an alias to its target, which is always exposed."""
+    def _resolve(
+        self, path: str, access: Literal["read", "write"]
+    ) -> tuple[Gst.Element, Any, Codec]:
+        """Like `_locate`, following an alias to its target, which is always exposed. An
+        unknown property gets the close ones that can be read or written, as `access` says,
+        as its hint."""
         alias = self._declarations().props.get(path)
-        return self._locate(alias.target, exposed=False) if alias else self._locate(path)
+        if alias:
+            return self._locate(alias.target, exposed=False)
+        try:
+            return self._locate(path)
+        except UnknownNameError as exc:
+            if str(exc) == f"Unknown property {path!r}":  # not ambiguous or not exposed
+                model = self.describe().model_dump(mode="json")
+                exc.hint = hints.property_hint(model, path, access)
+            raise
 
     def _locate(self, path: str, *, exposed: bool = True) -> tuple[Gst.Element, Any, Codec]:
         """The element, ParamSpec and codec of an `element.property` path."""

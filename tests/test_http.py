@@ -125,7 +125,10 @@ async def test_commands(served: Served) -> None:
     assert (await client.post("/api/commands/seek", content=b"{")).status_code == 422
     assert (await client.post("/api/commands/seek", json=[1])).status_code == 422
     unknown = await client.post("/api/commands/nope")  # as the WebSocket says it
-    assert (unknown.status_code, unknown.json()) == (404, {"detail": "Unknown command 'nope'"})
+    assert (unknown.status_code, unknown.json()) == (
+        404,
+        {"detail": "Unknown command 'nope'", "code": "unknown_name", "hint": None},
+    )
     await client.post("/api/commands/stop")
     assert served.player.get("state") == "null"
 
@@ -138,7 +141,10 @@ async def test_a_command_that_cannot_run_is_refused_and_published(Gst: Any) -> N
             model = (await client.get("/api/model")).json()
             assert model["unavailable"]["stop_recording"] == "Not recording"
             refused = await client.post("/api/commands/stop_recording")
-            assert (refused.status_code, refused.json()) == (409, {"detail": "Not recording"})
+            assert (refused.status_code, refused.json()) == (
+                409,
+                {"detail": "Not recording", "code": "command_failed", "hint": None},
+            )
             ws_url = f"ws://127.0.0.1:{listening.port}/api/events"
             async with websockets.connect(ws_url) as ws:
                 first = await snapshot(ws)
@@ -188,6 +194,22 @@ async def test_elements_and_properties(served: Served) -> None:
     assert set(properties) == {"state", "position", "duration"}
     assert (await client.patch("/api/properties", json={"state": "playing"})).status_code == 422
     assert (await client.patch("/api/properties", json={"src.pattern": "ball"})).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_an_error_has_a_code_and_a_hint(served: Served) -> None:
+    client = served.client
+    unknown = await client.patch("/api/elements/src", json={"patern": "ball"})
+    assert (unknown.status_code, unknown.json()) == (
+        404,
+        {
+            "detail": "Unknown property 'patern' of element 'src'",
+            "code": "unknown_name",
+            "hint": "did you mean 'pattern'?",
+        },
+    )
+    invalid = (await client.patch("/api/elements/src", json={"pattern": 99})).json()
+    assert invalid["code"] == "invalid_value" and invalid["errors"]
 
 
 @pytest.mark.asyncio
@@ -359,7 +381,10 @@ async def test_an_unexpected_error_is_json(Gst: Any) -> None:
     async with player, serve(player, "127.0.0.1", 0) as listening:
         async with httpx.AsyncClient(base_url=listening.url) as client:
             response = await client.post("/api/commands/broken")
-    assert (response.status_code, response.json()) == (500, {"detail": "Internal error"})
+    assert (response.status_code, response.json()) == (
+        500,
+        {"detail": "Internal error", "code": "internal", "hint": None},
+    )
 
 
 @pytest.mark.asyncio
@@ -608,6 +633,23 @@ def test_cli_serves_after_eos_and_stops_on_sigint() -> None:
         assert process.poll() is None  # an EOS does not end it
         with urllib.request.urlopen(f"{url}/api/model", timeout=5) as response:
             assert json.load(response)["name"] == "Player"
+        process.send_signal(signal.SIGINT)
+        assert process.wait(timeout=5) == 0
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_cli_json_prints_the_url_once_listening() -> None:
+    argv = [sys.executable, "-m", "mixtape", "run", "--http", "0", "--json", "--timeout", "10"]
+    process = subprocess.Popen(
+        [*argv, "videotestsrc is-live=true ! fakesink"], stdout=subprocess.PIPE, text=True
+    )
+    assert process.stdout is not None
+    try:
+        url = json.loads(process.stdout.readline())["url"]
+        with urllib.request.urlopen(f"{url}/api/model", timeout=5) as response:
+            assert response.status == 200
         process.send_signal(signal.SIGINT)
         assert process.wait(timeout=5) == 0
     finally:

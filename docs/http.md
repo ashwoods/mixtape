@@ -155,11 +155,11 @@ $ curl -s -X PATCH 127.0.0.1:8047/api/properties -d '{"state": "null"}' -w ' %{h
 $ curl -s -X POST 127.0.0.1:8047/api/commands/seek -d '{"position": -1}' -w ' %{http_code}\n'
 $ curl -s -X POST 127.0.0.1:8047/api/commands/pause > /dev/null
 $ curl -s -X POST 127.0.0.1:8047/api/commands/eos -w ' %{http_code}\n'; kill -INT $!
-{"detail":"Invalid value for 'vol.volume': Input should be less than or equal to 10","errors":[{"type":"less_than_equal","loc":[],"msg":"Input should be less than or equal to 10","input":11}]} 422
-{"detail":"Unknown element 'nosuch'"} 404
-{"detail":"'state' is read-only"} 422
-{"detail":"Invalid arguments for 'seek': position: Input should be greater than or equal to 0","errors":[{"type":"greater_than_equal","loc":["position"],"msg":"Input should be greater than or equal to 0","input":-1}]} 422
-{"detail":"EOS needs a playing pipeline that is not at its EOS"} 409
+{"detail":"Invalid value for 'vol.volume': Input should be less than or equal to 10","errors":[{"type":"less_than_equal","loc":[],"msg":"Input should be less than or equal to 10","input":11}],"code":"invalid_value","hint":null} 422
+{"detail":"Unknown element 'nosuch'","code":"unknown_name","hint":null} 404
+{"detail":"'state' is read-only","code":"not_writable","hint":null} 422
+{"detail":"Invalid arguments for 'seek': position: Input should be greater than or equal to 0","errors":[{"type":"greater_than_equal","loc":["position"],"msg":"Input should be greater than or equal to 0","input":-1}],"code":"invalid_value","hint":null} 422
+{"detail":"EOS needs a playing pipeline that is not at its EOS","code":"command_failed","hint":null} 409
 ```
 
 A command that says when it can run is refused with a 409 and its reason while it cannot, and
@@ -175,7 +175,7 @@ $ curl -s -X POST 127.0.0.1:8047/api/commands/finish -w ' %{http_code}\n'
 $ curl -s -X POST 127.0.0.1:8047/api/commands/start > /dev/null
 $ curl -s -X POST 127.0.0.1:8047/api/commands/finish -w ' %{http_code}\n'; kill -INT $!
 Not recording
-{"detail":"Not recording"} 409
+{"detail":"Not recording","code":"command_failed","hint":null} 409
 {"result":null} 200
 ```
 
@@ -188,7 +188,7 @@ $ mixtape run --http 8047 "filesrc location=/tmp/missing.mp4 ! fakesink" 2>/dev/
 $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s -X POST 127.0.0.1:8047/api/commands/play -w ' %{http_code}\n'
 $ curl -s 127.0.0.1:8047/api/properties -w ' %{http_code}\n'; kill -INT $!
-{"detail":"filesrc0: Resource not found."} 500
+{"detail":"filesrc0: Resource not found.","code":"pipeline_error","hint":null} 500
 {"state":"null","position":null,"duration":null} 200
 ```
 
@@ -294,8 +294,8 @@ $ until curl -sf 127.0.0.1:8047/api/model > /dev/null; do sleep 0.2; done
 $ curl -s -H "Origin: http://evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
 $ curl -s -H "Host: evil.example" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'
 $ curl -s -H "Origin: http://127.0.0.1:8047" 127.0.0.1:8047/api/properties -w ' %{http_code}\n'; kill -INT $!
-{"detail":"Origin 'http://evil.example' does not match Host '127.0.0.1:8047'"} 403
-{"detail":"Host 'evil.example' is not allowed"} 403
+{"detail":"Origin 'http://evil.example' does not match Host '127.0.0.1:8047'","code":"forbidden","hint":null} 403
+{"detail":"Host 'evil.example' is not allowed","code":"forbidden","hint":null} 403
 {"state":"playing","position":0.51,"duration":null} 200
 ```
 

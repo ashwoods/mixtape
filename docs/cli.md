@@ -483,7 +483,7 @@ Arguments:
 Options:
   --threshold PERCENT  how much a value may grow, in percent of the base;
                        default 50
-  --json               print the comparison as JSON
+  --json               print the comparison and errors as JSON
   -v, --verbose        log more: -v info, -vv debug
   -h, --help           Show this message and exit.
 

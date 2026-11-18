@@ -25,6 +25,9 @@ from mixtape.interfaces.http.security import check_headers
 from tests.players import Feat, Recorder
 
 PIPELINE = "videotestsrc name=src ! queue name=q ! fakesink name=sink"
+# its first buffer takes half a second to reach the sink: the sink cannot preroll before the
+# pipeline's set_state returns, which is then ASYNC, and `play` waits for the bus
+SLOW = "videotestsrc name=src ! identity sleep-time=500000 ! queue name=q ! fakesink name=sink"
 COLLIDING = "bin.( name=a queue name=q ! fakesink ) bin.( name=b queue name=q ! fakesink )"
 
 
@@ -37,8 +40,8 @@ class Served:
 
 
 @pytest_asyncio.fixture
-async def served(Gst: Any) -> AsyncIterator[Served]:
-    player = Player.from_description(PIPELINE)
+async def served(Gst: Any, request: pytest.FixtureRequest) -> AsyncIterator[Served]:
+    player = Player.from_description(getattr(request, "param", PIPELINE))
     async with player, serve(player, "127.0.0.1", 0) as listening:
         async with httpx.AsyncClient(base_url=listening.url) as client:
             yield Served(player, listening, client)
@@ -193,6 +196,7 @@ async def test_dotted_element_keys(Gst: Any) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("served", [SLOW], ids=["slow"], indirect=True)
 async def test_websocket(served: Served) -> None:
     async with websockets.connect(served.ws_url) as ws:
         first = await snapshot(ws)
@@ -218,13 +222,9 @@ async def test_websocket(served: Served) -> None:
         # a command is a task: the events stream while `play` waits for its state change
         await ws.send(json.dumps({"id": "p", "command": "play"}))
         seen = await until(ws, lambda m: m["type"] == "reply")
-        assert seen[-1] == {"type": "reply", "id": "p", "result": None}
-        # on a busy machine the pipeline can preroll before set_state returns, which is then
-        # SUCCESS, not ASYNC: play does not wait, and its reply can come before the bus's events
-        if not any(m["type"] == "state" for m in seen):
-            seen += await until(ws, lambda m: m["type"] == "state")
         states = [m for m in seen if m["type"] == "state"]
-        assert states[0]["old"] == "null" and "pending" in states[0]
+        assert states and states[0]["old"] == "null" and "pending" in states[0]
+        assert seen[-1] == {"type": "reply", "id": "p", "result": None}
         seen = await until(ws, lambda m: m["type"] == "position" and m["position"] is not None)
         assert seen[-1]["position"] >= 0
 

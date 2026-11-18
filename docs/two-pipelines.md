@@ -119,7 +119,8 @@ it a pipeline sets its base time again when it goes to PLAYING, and the one you 
 
 The order the pipelines start in matters. `proxysrc` has nothing to show until the producer
 pushes a buffer, so the consumer's `play()` does not return before the producer plays: start
-the producer first, or start both at once.
+the producer first, or start both at once. Either way the producer can push its first buffers
+before the consumer takes them; when none may be lost, see the end of the stream below.
 
 ```python
 --8<-- "examples/proxy_link.py:order"

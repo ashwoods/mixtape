@@ -50,10 +50,12 @@ def test_two_clients_in_one_process_each_receive_the_other() -> None:
     server = f"ws://127.0.0.1:{_free_port()}"
     out = run_example("webrtc_client.py", "--demo", "--server", server, timeout=60)
     assert out.returncode == 0, out.stdout
-    assert sorted(out.stdout.splitlines()) == [
-        "alice received 60 frames from bob",
-        "bob received 60 frames from alice",
-    ]
+    # not exact, as in webrtc.md's demo: on a busy machine the teardown can warn on stderr, from
+    # GLib ("poll(2) failed due to: Bad file descriptor" as a call stops) or from a signaller
+    # ("Connection reset without closing handshake" as alice's server stops)
+    lines = out.stdout.splitlines()
+    assert "alice received 60 frames from bob" in lines, out.stdout
+    assert "bob received 60 frames from alice" in lines, out.stdout
 
 
 def test_a_client_without_a_signalling_server_exits_with_an_error() -> None:
@@ -95,7 +97,7 @@ def test_a_client_calls_the_host_in_another_process() -> None:
             "webrtc_client.py", "--name", "guest", "--server", server, "--call", "host", timeout=60
         )  # it waits for the host to publish
         assert out.returncode == 0, out.stdout
-        assert out.stdout.splitlines() == ["guest received 60 frames from host"]
+        assert "guest received 60 frames from host" in out.stdout.splitlines(), out.stdout
     finally:
         host.send_signal(signal.SIGINT)
         try:

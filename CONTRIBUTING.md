@@ -21,7 +21,21 @@ commands and build:
 $ scripts/check
 ```
 
-Arguments go to pytest: `scripts/check -k eos`.
+To run a part of it, put group flags before any pytest arguments. `--lint` runs ruff check, ruff
+format --check and mypy. `--tests` runs pytest without the documentation's tests
+(`tests/test_doc_samples.py` and `tests/test_docs.py`). `--docs` runs only those two: the
+documentation's commands and its build. With no flag, all three run; flags combine:
+
+```console
+$ scripts/check --lint --docs
+```
+
+The remaining arguments go to pytest: `scripts/check -k eos`, or `scripts/check --tests -k eos`.
+
+pytest runs on up to 4 xdist workers. For one worker, for example with `--pdb` or `-s`, pass
+`-n 0`: `scripts/check --tests -n 0 -s -k eos`. The samples in `perf.md` and
+`tests/test_examples_perf.py` always run one after another on one worker (xdist group `perf`),
+because the x264 encodes would slow each other down.
 
 The first run creates `.venv` from the Python that has `gi` (Homebrew's `python3`, or
 `/usr/bin/python3`; set `MIXTAPE_PYTHON` to choose another) with `--system-site-packages`, so

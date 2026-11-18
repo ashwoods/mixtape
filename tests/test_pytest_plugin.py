@@ -99,7 +99,10 @@ def test_each_test_gets_a_report_and_the_session_an_index(pytester: pytest.Pytes
         assert queue["n"] == buffers
         worst = test["metrics"]["element.latency"]
         assert worst["unit"] == "ns" and worst["p95"]["subject"].startswith("queue")
-        assert worst["p95"]["value"] == queue["p95"] and worst["max"]["value"] == queue["max"]
+        assert worst["p95"]["value"] == queue["p95"]
+        # the queue holds the buffers, but on a busy machine a preempted element can have the max
+        (subject, stats), *_ = sorted(latency.items(), key=lambda item: -item[1]["max"])
+        assert worst["max"] == {"subject": subject, "value": stats["max"]}, (worst, latency)
         assert test["metrics"]["process.cpu"]["mean"]["subject"] == "process"
     # a test that ran no pipeline is listed, with no folder
     assert tests["test_suite.py::test_no_pipeline"]["folder"] is None
@@ -185,13 +188,8 @@ def test_gstreamer_initialised_before_the_plugin_is_a_usage_error(
 
 
 def test_a_session_with_xdist_workers_is_a_usage_error(pytester: pytest.Pytester) -> None:
-    # pytest-xdist's option, without its workers
-    pytester.makeconftest(
-        "def pytest_addoption(parser):\n"
-        "    parser.addoption('--numprocesses', dest='numprocesses', type=int)\n"
-    )
     pytester.makepyfile(test_suite="def test_it():\n    pass\n")
-    result, out = measure(pytester, "--numprocesses=2")
+    result, out = measure(pytester, "-n", "2")  # pytest-xdist, a dev dependency
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     result.stderr.fnmatch_lines(["*--mixtape-perf measures a session run serially*without -n*"])
     assert not out.exists()

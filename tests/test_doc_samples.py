@@ -27,6 +27,20 @@ SAMPLES_BY_ID = {s.id: s for s in SAMPLES}
 assert len(SAMPLES_BY_ID) == len(SAMPLES), "two samples have the same id"
 
 
+# the samples of these pages run one after another on one xdist worker (`--dist loadgroup`):
+# the x264 encodes of perf.md would make each other slow
+SERIAL = {"perf.md": "perf"}
+
+
+def param(s: Sample) -> object:
+    """A sample as a test, with its time limit: pytest-timeout arms its timer before the test
+    runs, so the marker has to be here."""
+    marks = [pytest.mark.timeout(s.timeout + 30)]
+    if s.page in SERIAL:
+        marks.append(pytest.mark.xdist_group(SERIAL[s.page]))
+    return pytest.param(s, id=s.id, marks=marks)
+
+
 def test_every_block_is_covered() -> None:
     problems = []
     own: dict[Block, list[Sample]] = {}  # block -> the samples that match it
@@ -81,12 +95,7 @@ def test_every_block_is_covered() -> None:
 
 @pytest.mark.parametrize(
     "sample",
-    [
-        # pytest-timeout arms its timer before the test runs: the marker has to be here
-        pytest.param(s, id=s.id, marks=pytest.mark.timeout(s.timeout + 30))
-        for s in SAMPLES
-        if s.kind in ("run", "output")
-    ],
+    [param(s) for s in SAMPLES if s.kind in ("run", "output")],
 )
 def test_sample(sample: Sample, tmp_path: Path) -> None:
     reason = skip_reason(sample)
@@ -114,11 +123,7 @@ def test_sample(sample: Sample, tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "sample",
-    [
-        pytest.param(s, id=s.id, marks=pytest.mark.timeout(s.timeout + 30))
-        for s in SAMPLES
-        if s.kind == "prints"
-    ],
+    [param(s) for s in SAMPLES if s.kind == "prints"],
 )
 def test_prints(sample: Sample, tmp_path: Path) -> None:
     expected = inline_output(sample.contains)

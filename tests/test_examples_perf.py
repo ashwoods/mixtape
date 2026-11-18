@@ -18,6 +18,8 @@ MISSING = [
     if subprocess.run(["gst-inspect-1.0", "--exists", name], capture_output=True).returncode
 ]
 needs_recorder = pytest.mark.skipif(bool(MISSING), reason=f"needs the GStreamer {MISSING}")
+# one after another with perf.md's samples, on one xdist worker: see tests/test_doc_samples.py
+pytestmark = pytest.mark.xdist_group("perf")
 
 
 def clean_env() -> dict[str, str]:
@@ -28,6 +30,7 @@ def clean_env() -> dict[str, str]:
 def pytest_run(*args: str, encoder: str | None = None) -> subprocess.CompletedProcess[str]:
     """Run the suite of examples/recorder_suite in a pytest of its own, as the page does."""
     env = clean_env()
+    env["PYTEST_ADDOPTS"] = "--timeout=60"  # not the 20 s per test of this project's ini
     if encoder is not None:
         env["RECORDER_ENCODER"] = encoder
     return subprocess.run(

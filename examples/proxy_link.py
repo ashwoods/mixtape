@@ -65,6 +65,9 @@ async def lossless() -> bool:
     link(producer, consumer)
     sink = consumer.pipeline.get_by_name("sink")
     async with producer, consumer:
+        # proxysink drops what it pushes before proxysrc is active: activate it first (the
+        # pipeline returns ASYNC at once, as it cannot preroll before the producer plays)
+        consumer.pipeline.set_state(Gst.State.PAUSED)
         await asyncio.gather(producer.play(), consumer.play())
         await asyncio.wait_for(consumer.play_until_eos(), 10)
         return bool(sink.get_property("stats").get_value("rendered") == 50)

@@ -28,6 +28,9 @@ from mixtape.interfaces.http.security import check_headers
 from tests.players import Feat, Recorder
 
 PIPELINE = "videotestsrc name=src ! queue name=q ! fakesink name=sink"
+# its first buffer takes half a second to reach the sink: the sink cannot preroll before the
+# pipeline's set_state returns, which is then ASYNC, and `play` waits for the bus
+SLOW = "videotestsrc name=src ! identity sleep-time=500000 ! queue name=q ! fakesink name=sink"
 COLLIDING = "bin.( name=a queue name=q ! fakesink ) bin.( name=b queue name=q ! fakesink )"
 
 
@@ -40,8 +43,8 @@ class Served:
 
 
 @pytest_asyncio.fixture
-async def served(Gst: Any) -> AsyncIterator[Served]:
-    player = Player.from_description(PIPELINE)
+async def served(Gst: Any, request: pytest.FixtureRequest) -> AsyncIterator[Served]:
+    player = Player.from_description(getattr(request, "param", PIPELINE))
     async with player, serve(player, "127.0.0.1", 0) as listening:
         async with httpx.AsyncClient(base_url=listening.url) as client:
             yield Served(player, listening, client)
@@ -198,6 +201,7 @@ async def test_dotted_element_keys(Gst: Any) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("served", [SLOW], ids=["slow"], indirect=True)
 async def test_websocket(served: Served) -> None:
     async with websockets.connect(served.ws_url) as ws:
         first = await snapshot(ws)

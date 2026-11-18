@@ -312,6 +312,10 @@ def run_command(command: str, tmp_path: Path, timeout: int) -> tuple[str, int, b
     env["LC_ALL"] = "C"
     env["NO_COLOR"] = "1"
     env["COLUMNS"] = "80"  # `--help` wraps its text to the width of the terminal
+    # a `pytest` of the docs reads this project's ini: not its 20 s per test, the sample's limit
+    env["PYTEST_ADDOPTS"] = f"--timeout={timeout}"
+    # webrtc.md's clients use the signalling server's default port, which no command names
+    env["WEBRTC_SERVER"] = f"ws://127.0.0.1:{free_port()}"
     proc = subprocess.Popen(
         ["bash", "-c", command.replace("/tmp/", f"{tmp_path}/")],
         cwd=ROOT,

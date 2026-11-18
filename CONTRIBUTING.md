@@ -12,6 +12,23 @@ $ sudo apt install python3-gi python3-gst-1.0 gstreamer1.0-tools \
     gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-nice    # Debian/Ubuntu
 ```
 
+Ubuntu does not package the Rust plugins of gst-plugins-rs: the perf tracers (`queue-levels`,
+`buffer-lateness`, `pad-push-timings`) and `webrtcsink` and `webrtcsrc`. Homebrew's `gstreamer`
+includes them. Without them, the tests that need them skip.
+
+On Debian/Ubuntu, `scripts/build-rs-plugins` builds them, as CI does. It installs nothing, so
+you need cargo (Rust 1.92 or newer), git, a C toolchain, pkg-config and the GStreamer
+development packages first. The build takes minutes. Then put its folder on `GST_PLUGIN_PATH`:
+
+```console
+$ sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev
+$ scripts/build-rs-plugins ~/.cache/gst-rs-plugins
+$ export GST_PLUGIN_PATH=~/.cache/gst-rs-plugins
+```
+
+[A WebRTC client](docs/webrtc.md#install) has the same steps and a check that the elements are
+found.
+
 ## Run the checks
 
 `scripts/check` runs every check: ruff lint, ruff format, mypy, pytest, and the documentation's
@@ -50,11 +67,14 @@ After that, `uv run pytest`, `uv run ruff format` and `uv run mypy` work on thei
 
 ## Without a native GStreamer
 
-Run the same checks in Docker (Ubuntu 24.04, as CI does):
+Run the same checks in Docker (Ubuntu 24.04):
 
 ```console
 $ docker compose run --rm test
 ```
+
+The image has only Ubuntu's own GStreamer packages, without the Rust plugins, so the tests that
+need them skip there. CI builds the plugins and runs everything.
 
 ## gst-c-crash
 
@@ -65,6 +85,9 @@ and run:
 ```console
 $ GST_PLUGIN_PATH=<build>/gst scripts/check
 ```
+
+Several folders join with `:`, for example the Rust plugins and gst-c-crash:
+`GST_PLUGIN_PATH=~/.cache/gst-rs-plugins:<build>/gst`.
 
 ## Documentation
 

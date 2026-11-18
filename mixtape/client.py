@@ -12,7 +12,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any, Literal
 
 from .hints import property_hint
@@ -201,9 +201,10 @@ class Client:
         return f"{'wss' if scheme == 'https' else 'ws'}://{rest}/api/events"
 
 
-async def watch(url: str) -> None:
-    """Print every message of the `/api/events` WebSocket of `url` as it comes, one per line,
-    until the server closes it. Needs the websockets of the http extra (ImportError)."""
+async def watch(url: str, write: Callable[[str], bool]) -> None:
+    """`write` every message of the `/api/events` WebSocket of `url` as it comes, a line each,
+    until the server closes it or `write` returns False (its reader has gone). Needs the
+    websockets of the http extra (ImportError)."""
     from websockets.asyncio.client import connect
     from websockets.exceptions import ConnectionClosedError, InvalidHandshake, InvalidStatus
 
@@ -219,13 +220,18 @@ async def watch(url: str) -> None:
         raise client._bad_response(f"HTTP {status} for the WebSocket /api/events") from None
     except InvalidHandshake as exc:
         raise client._bad_response(str(exc)) from None
-    except (OSError, TimeoutError) as exc:
+    except TimeoutError:
+        raise ClientError(
+            f"{client.url} did not open the WebSocket within {TIMEOUT:g} s", "timeout"
+        ) from None
+    except OSError as exc:
         raise _unreachable(client.url, exc) from None
     async with socket:
         try:
             async for message in socket:
                 text = message if isinstance(message, str) else message.decode()
-                print(text, flush=True)
+                if not write(text):
+                    return
         except ConnectionClosedError as exc:  # not 1000 or 1001: uvicorn's shutdown is 1012
             if exc.rcvd is None:  # the connection broke: no close frame
                 raise ClientError(

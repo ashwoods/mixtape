@@ -240,8 +240,8 @@ The client sends `{"id": 1, "command": "play", "args": {}}` to run a command, an
 `{"id": 2, "set": {"vol.volume": 0.5}}` to set properties, which are applied in order. It
 answers each with `{"type": "reply", "id": 1, "result": ...}`, or with `"error": {"status":
 404, "detail": "...", "code": "unknown_name", "hint": null}` instead of `result`, which is the
-body the REST API would return, with its `status`. A command that takes time, like `play`, does not stop the events from streaming, and
-its reply comes when it is done.
+body the REST API would return, with its `status`. A command that takes time, like `play`, does
+not stop the events from streaming, and its reply comes when it is done.
 
 This program connects, and sends a `set`, a command that does not exist and a `play`. The
 replies are keyed by `id`, as the order that they and the events arrive in is not fixed:

@@ -425,25 +425,26 @@ a script. `URL` is a full URL or `[HOST:]PORT`, and `HOST` defaults to `127.0.0.
 A `PATH` is a name that [`mixtape inspect`](#inspect-a-player) prints: `gain`, `vol.volume`. In
 `k=v` the value is a string, which the server converts and validates as it does for
 [`--set`](#set-properties); `k:=JSON` is a JSON value, such as `vol.mute:=true` or
-`timeout:=null` (`NaN` and `Infinity` are not JSON: a usage error). `--json` prints the result as JSON (for `get`, `{path: value}`; for `set`, the
-values as the server reads them back; for `call`, `{"result": …}`) and the errors as
-[JSON](#json-errors).
+`timeout:=null` (`NaN` and `Infinity` are not JSON: a usage error). `--json` prints the result
+as JSON (for `get`, `{path: value}`; for `set`, the values as the server reads them back; for
+`call`, `{"result": …}`) and the errors as [JSON](#json-errors).
 
-`get`, `set` and `call` need neither GStreamer, PyGObject nor the `http` extra: they use only the
-standard library, so they work on a machine that has none of them. `watch` needs the `http`
-extra. Each command has a `--help`.
+`get`, `set` and `call` need neither GStreamer, PyGObject nor the `http` extra, so they work on
+a machine that has only mixtape installed. `watch` needs the `http` extra. Each command has a
+`--help`.
 
 The server of these blocks plays a live source. It starts in the background, and the commands
-wait for the line of [`--json`](#http-ready) before they use it:
+wait for the line of [`--json`](#http-ready) before they use it, or stop waiting if the server
+has exited. `wait` waits for it to stop after the Ctrl-C that `kill -INT` sends:
 
 ```console
 $ rm -f /tmp/ready
-$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready &
-$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready 2>/dev/null &
+$ until [ -s /tmp/ready ] || ! kill -0 $!; do sleep 0.2; done
 $ mixtape get 8047 vol.volume
 $ mixtape set 8047 vol.volume=0.5 vol.mute:=true
 $ mixtape get 8047 vol.volume vol.mute
-$ kill -INT $!
+$ kill -INT $!; wait
 1.0
 vol.volume = 0.5
 vol.mute = true
@@ -454,23 +455,28 @@ A command's result is JSON, so a string has its quotes, where `get` prints it as
 
 ```console
 $ rm -f /tmp/ready
-$ mixtape run --http 8047 --json examples/demo.py:Demo > /tmp/ready &
-$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape run --http 8047 --json examples/demo.py:Demo > /tmp/ready 2>/dev/null &
+$ until [ -s /tmp/ready ] || ! kill -0 $!; do sleep 0.2; done
 $ mixtape call 8047 | grep shout
 $ mixtape call 8047 shout word=hi times:=3
-$ kill -INT $!
+$ kill -INT $!; wait
   shout(word: string, times: integer = 2)                 Repeat a word.
 "hihihi"
 ```
 
-`watch` prints until the server closes the connection, then exits 0. This one runs for 3 s, and
-keeps the lines of the first messages and of the last event:
+`watch` prints until the server closes the connection, then exits 0. Here it runs in the
+background until it has the graph, then the server stops, with the EOS of a Ctrl-C; this keeps
+the lines of the first messages and of that EOS:
 
 ```console
-$ rm -f /tmp/ready
-$ mixtape run --http 8047 --json --timeout 3 "audiotestsrc is-live=true ! fakesink" > /tmp/ready &
-$ until [ -s /tmp/ready ]; do sleep 0.2; done
-$ mixtape watch 8047 | grep -o -E '^\{"type": "(model|values|graph|eos)"'
+$ rm -f /tmp/ready /tmp/events
+$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! fakesink" > /tmp/ready 2>/dev/null &
+$ server=$!
+$ until [ -s /tmp/ready ] || ! kill -0 $server; do sleep 0.2; done
+$ mixtape watch 8047 > /tmp/events &
+$ until grep -q '"graph"' /tmp/events || ! kill -0 $!; do sleep 0.2; done
+$ kill -INT $server; wait
+$ grep -o -E '^\{"type": "(model|values|graph|eos)"' /tmp/events
 {"type": "model"
 {"type": "values"
 {"type": "graph"
@@ -486,14 +492,14 @@ range, and `eos` needs a playing pipeline, which this one is not once it is paus
 
 ```console
 $ rm -f /tmp/ready
-$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready &
-$ until [ -s /tmp/ready ]; do sleep 0.2; done
+$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready 2>/dev/null &
+$ until [ -s /tmp/ready ] || ! kill -0 $!; do sleep 0.2; done
 $ mixtape get 8047 vol.volum; echo "exit status $?"
 $ mixtape set 8047 vol.volume=11; echo "exit status $?"
 $ mixtape call 8047 pause
 $ mixtape call 8047 eos; echo "exit status $?"
 $ mixtape call 8047 | tail -2
-$ kill -INT $!
+$ kill -INT $!; wait
 error: unknown property 'vol.volum': did you mean 'vol.volume'?
 exit status 2
 error: invalid value for 'vol.volume': Input should be less than or equal to 10
@@ -722,7 +728,7 @@ Every error has a `code`, a stable name that a program matches on. It is the `co
 | `listen_failed` | | `--http` cannot listen for another reason |
 | `connection_failed` | | a [client command](#client) cannot reach the player, or its connection broke |
 | `bad_response` | | the server of a client command does not answer as mixtape does |
-| `timeout` | | the server of a client command did not answer within 30 s: it may still be doing it, and the `hint` says to read its values with `mixtape get` |
+| `timeout` | | the server of a client command did not answer within 30 s (and a command's `timeout` argument): it may still be doing it, and the `hint` says to read its values with `mixtape get` |
 
 A warning has a code too: `unauthenticated` is `--http` on an address other than loopback, which
 nobody has to authenticate to.

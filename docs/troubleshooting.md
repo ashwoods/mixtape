@@ -83,8 +83,9 @@ free one.
 
 ## error: cannot reach http://127.0.0.1:8047: [Errno 61] Connection refused: is `mixtape run --http PORT` running there? { #cannot-reach }
 
-`mixtape get`, `set`, `call` or `watch` found nothing listening at that address, and exited 1, with
-the code `connection_failed`. The reason after the URL is the system's: `[Errno 111]` on Linux.
+`mixtape get`, `set` or `call` found nothing listening at that address, and exited 1, with the
+code `connection_failed`. The reason after the URL is the system's: `[Errno 111]` on Linux.
+`mixtape watch` words it as the system does: `Connect call failed`.
 The player is not running, or it listens on another port or host. Start it with
 `mixtape run --http PORT`, and give the client the address it printed (`Serving on …`, or
 `{"url": …}` with `--json`). Here the first command finds no server, and the last, once one runs,
@@ -93,9 +94,9 @@ works:
 ```console
 $ mixtape get 8047 vol.volume; echo "exit status $?"
 $ rm -f /tmp/ready
-$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready &
-$ until [ -s /tmp/ready ]; do sleep 0.2; done
-$ mixtape get 8047 vol.volume; kill -INT $!
+$ mixtape run --http 8047 --json "audiotestsrc is-live=true ! volume name=vol ! fakesink" > /tmp/ready 2>/dev/null &
+$ until [ -s /tmp/ready ] || ! kill -0 $!; do sleep 0.2; done
+$ mixtape get 8047 vol.volume; kill -INT $!; wait
 error: cannot reach http://127.0.0.1:8047: [Errno 61] Connection refused: is `mixtape run --http PORT` running there?
 exit status 1
 1.0

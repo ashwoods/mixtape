@@ -83,11 +83,11 @@ SAMPLES: list[Sample] = [
     # --- script it
     run(PAGE, "json-error", "^mixtape run --json --set src.patern=1", exact=True),
     run(PAGE, "events-jsonl", "^mixtape run --events jsonl --set src.pattern=ball", exact=True),
-    # --- client
-    run(PAGE, "client-get-set", "mixtape set 8047 vol.volume=0.5", exact=True),
-    run(PAGE, "client-call", "mixtape call 8047 | grep shout", exact=True),
-    run(PAGE, "client-watch", "mixtape watch 8047", exact=True),
-    run(PAGE, "client-errors", "mixtape get 8047 vol.volum;", exact=True),
+    # --- client: a cold start of each command is several seconds on a loaded machine
+    run(PAGE, "client-get-set", "mixtape set 8047 vol.volume=0.5", timeout=120, exact=True),
+    run(PAGE, "client-call", "mixtape call 8047 | grep shout", timeout=120, exact=True),
+    run(PAGE, "client-watch", "mixtape watch 8047", timeout=120, exact=True),
+    run(PAGE, "client-errors", "mixtape get 8047 vol.volum;", timeout=120, exact=True),
     run(
         PAGE,
         "client-unreachable",

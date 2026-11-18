@@ -15,6 +15,7 @@ import os
 import re
 import signal
 import sys
+import urllib.parse
 from collections.abc import AsyncIterator, Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
@@ -363,6 +364,13 @@ def inspect(
 
 def _server_url(text: str) -> str:
     if text.startswith(("http://", "https://")):
+        try:
+            parts = urllib.parse.urlsplit(text)
+            parts.port  # noqa: B018 -- a port that is not a number raises ValueError
+        except ValueError:
+            parts = None
+        if parts is None or not parts.hostname:
+            raise typer.BadParameter(f"{text!r} is not a URL or [HOST:]PORT")
         return text.rstrip("/")
     try:
         host, port = _http_address(text)
@@ -637,7 +645,7 @@ def client_watch(
         _fail("watch needs the http extra", "missing_extra", "pip install 'mixtape[http]'")
         return EXIT_USAGE
     try:
-        asyncio.run(watch(url))
+        asyncio.run(watch(url, _write_line))
     except ClientError as exc:
         return _client_failed(exc)
     return 0
@@ -802,7 +810,20 @@ def _print_json(message: dict[str, Any], *, err: bool = False) -> None:
     program reads it as it comes."""
     from .interfaces.encoding import encode_json  # without PyGObject too
 
-    print(encode_json(message), file=sys.stderr if err else sys.stdout, flush=True)
+    _write_line(encode_json(message), sys.stderr if err else sys.stdout)
+
+
+def _write_line(text: str, file: Any = None) -> bool:
+    """Print `text` and flush it; False once the reader has gone (`| head -n1`). Then `file`
+    writes to /dev/null, so that nothing fails (and exits 120) when Python flushes it at exit,
+    as the docs of the signal module advise."""
+    file = file or sys.stdout
+    try:
+        print(text, file=file, flush=True)
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), file.fileno())
+        return False
+    return True
 
 
 def _setup_logging(verbose: int) -> None:
@@ -1107,8 +1128,7 @@ async def _play(
             timer.cancel()
         if stream is not None and printer is not None and interrupts < 2:
             stream.close()  # the teardown has closed it: the events it queued still print
-            with contextlib.suppress(BrokenPipeError):  # `| head`: the reader has gone
-                await printer
+            await printer
         for task in (pump, stopping, printer):
             if task is not None:
                 task.cancel()
@@ -1130,7 +1150,7 @@ async def _print_events(encoder: EventEncoder, stream: EventStream) -> None:
         except ValueError:  # a value JSON cannot carry: as the socket, the others still print
             logger.exception("Could not print %r", event)
             continue
-        print(text, flush=True)
+        _write_line(text)  # the run goes on when the reader has gone: its exit status is its own
 
 
 @contextlib.asynccontextmanager

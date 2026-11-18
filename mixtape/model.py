@@ -35,6 +35,11 @@ from pydantic import (
 # -- specs -- #
 
 
+ARGUMENTS_CONFIG = ConfigDict(extra="forbid", allow_inf_nan=False)
+"""Of the arguments of a command: no NaN or infinity, which JSON has not and a player cannot
+seek to (pydantic accepts them)."""
+
+
 class _Spec(BaseModel):
     model_config = ConfigDict(frozen=True, populate_by_name=True, serialize_by_alias=True)
 
@@ -547,7 +552,7 @@ def args_model(
             raise TypeError(f"{method.__qualname__}: parameter {param.name!r} needs a type hint")
         default = ... if param.default is param.empty else param.default
         fields[param.name] = (hints[param.name], default)
-    return create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
+    return create_model(name, __config__=ARGUMENTS_CONFIG, **fields)
 
 
 def _build_command(
@@ -721,7 +726,7 @@ def action_signals(obj: Any) -> dict[str, tuple[Command, Callable[..., Any]]]:
                 f"arg{i}": (Annotated[p, Field(description=t.name)], ...)
                 for i, (p, t) in enumerate(zip(params, query.param_types, strict=True), 1)
             }
-            args = create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
+            args = create_model(name, __config__=ARGUMENTS_CONFIG, **fields)
             what = f"{gtype.name}::{name}"
             spec = CommandSpec(
                 name=name,

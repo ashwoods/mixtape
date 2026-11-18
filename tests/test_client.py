@@ -1,7 +1,9 @@
 import json
 import signal
+import socket
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -10,7 +12,7 @@ import pytest
 
 from mixtape.cli import main
 
-PLAYER = "audiotestsrc is-live=true ! volume name=vol ! fakesink"
+PLAYER = "audiotestsrc is-live=true ! volume name=vol ! volume name=a/b ! fakesink"
 
 
 @pytest.fixture(scope="module")
@@ -41,6 +43,9 @@ def test_get_set_and_call(url: str, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["get", url]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "state = playing" and "vol.volume = 0.5" in lines
+    assert main(["set", url, "a/b.volume=0.25"]) == 0  # sent as a%2Fb
+    assert main(["get", url, "a/b.volume"]) == 0
+    assert capsys.readouterr().out == "0.25\n"
 
 
 def test_errors_are_the_servers(url: str, capsys: pytest.CaptureFixture[str]) -> None:
@@ -58,6 +63,26 @@ def test_errors_are_the_servers(url: str, capsys: pytest.CaptureFixture[str]) ->
     assert capsys.readouterr().err == "error: unknown command 'paus': did you mean 'pause'?\n"
     assert main(["set", "--json", url, "vol.volume:=NaN"]) == 2  # JSON has no NaN
     assert json.loads(capsys.readouterr().err)["error"]["code"] == "usage"
+    assert main(["call", "--json", url, "seek", "position=inf"]) == 2  # a string, refused
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == "invalid_value"
+
+
+def test_a_server_that_is_not_mixtapes(capsys: pytest.CaptureFixture[str]) -> None:
+    """One that does not speak HTTP (an SSH server) is a bad response, not a traceback."""
+    with socket.create_server(("127.0.0.1", 0)) as server:
+        port = str(server.getsockname()[1])
+
+        def answer() -> None:
+            connection, _ = server.accept()
+            with connection:
+                connection.recv(1000)
+                connection.sendall(b"SSH-2.0-OpenSSH_9\r\n")
+
+        thread = threading.Thread(target=answer)
+        thread.start()
+        assert main(["get", "--json", port, "x"]) == 1
+        thread.join()
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == "bad_response"
 
 
 def test_a_nan_is_an_invalid_value(url: str) -> None:

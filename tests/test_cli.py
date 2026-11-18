@@ -304,6 +304,17 @@ def test_errors_start_in_lower_case(capsys: pytest.CaptureFixture[str]) -> None:
 def test_timeout_stops_with_eos_and_exits_124(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["run", "--timeout", "0.3", "videotestsrc is-live=true ! fakesink"]) == 124
     assert capsys.readouterr().err == "Timeout: stopping (EOS)…\n"
+    assert main(["run", "--timeout", "30", "videotestsrc num-buffers=3 ! fakesink"]) == 0
+
+
+def test_events_into_a_reader_that_goes_away() -> None:
+    """`| head -n1` closes the pipe: the run goes on, and its exit status stays its own."""
+    run = f"{sys.executable} -m mixtape run --timeout 1 --events jsonl"
+    script = f"{run} 'audiotestsrc is-live=true ! fakesink' | head -n1; echo ${{PIPESTATUS[0]}}"
+    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+    first, status = done.stdout.splitlines()
+    assert (json.loads(first)["type"], status) == ("model", "124")
+    assert "BrokenPipeError" not in done.stderr
 
 
 def test_events_jsonl(capsys: pytest.CaptureFixture[str]) -> None:

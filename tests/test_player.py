@@ -289,6 +289,24 @@ async def test_error_during_a_pending_play_reaches_the_caller():
 
 
 @pytest.mark.asyncio
+async def test_an_eos_after_an_error_does_not_end_the_wait_the_error_ended():
+    async with Player.from_description("videotestsrc name=src is-live=true ! fakesink") as player:
+        stream = player.events()
+        until_eos = asyncio.create_task(player.play_until_eos())
+        while player.state != Gst.State.PLAYING:
+            await wait_for_event(stream, StateChanged)
+        post_error(player.pipeline)  # basesrc follows a flow error with an EOS
+        player.pipeline.post_message(Gst.Message.new_eos(player.pipeline))
+        with pytest.raises(PlayerPipelineError, match="boom"):
+            await bounded(until_eos)
+        kinds = []
+        while not isinstance(event := await wait_for_event(stream, Eos | Error), Error):
+            kinds.append(type(event))
+        assert kinds == []  # the stream the error ended has no end of its own
+        assert not player._eos
+
+
+@pytest.mark.asyncio
 async def test_a_play_right_after_an_error_wins_over_the_stop_it_queued():
     async with Player.from_description("videotestsrc name=src is-live=true ! fakesink") as player:
         stream = player.events()

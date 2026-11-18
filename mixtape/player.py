@@ -1425,6 +1425,8 @@ class Player:
         self._target = Gst.State.NULL
         self._live = self._buffering = self._eos = False
         waiters = [future for _, future in self._state_waiters] + self._eos_waiters
+        self._state_waiters.clear()  # the error's: an EOS or state still on the bus before the
+        self._eos_waiters.clear()  # NULL flushes it does not end them (basesrc posts an EOS)
         call = self._set_null()
 
         def report() -> None:
@@ -1468,6 +1470,8 @@ class Player:
         call.add_done_callback(finished)  # after `_after`'s: the NULL is published first
 
     def _on_eos(self) -> None:
+        if self._reports:  # the end of a stream an error ended, on the bus before the NULL
+            return
         logger.info("EOS")
         self._eos = True
         for future in self._eos_waiters:

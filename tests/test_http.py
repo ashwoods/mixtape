@@ -326,7 +326,7 @@ async def test_a_disconnect_cancels_the_pending_commands(served: Served) -> None
         await ws.send(json.dumps({"id": 1, "command": "eos", "args": {"timeout": 30}}))
         await asyncio.sleep(0.2)
     await asyncio.sleep(0.2)
-    assert not served.player._eos_waiters  # the cancelled command discarded its waiter
+    assert not served.player._machine._eos_waiters  # the cancelled command discarded its waiter
 
 
 class Odd(Player):

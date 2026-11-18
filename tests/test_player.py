@@ -316,7 +316,7 @@ async def test_an_eos_after_an_error_does_not_end_the_wait_the_error_ended():
         while not isinstance(event := await wait_for_event(stream, Eos | Error), Error):
             kinds.append(type(event))
         assert kinds == []  # the stream the error ended has no end of its own
-        assert not player._eos
+        assert not player._machine._eos
 
 
 @pytest.mark.asyncio

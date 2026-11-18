@@ -77,8 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The REST API reaches an element whose name has a `/` (`volume name=a/b`, sent as `a%2Fb`):
   `/api/elements/{el}` answered 404.
 - A refused value with a NaN or an infinity in it is a 422 `invalid_value`, not a 500: the body
-  has them as `null`. The arguments of a command refuse NaN and infinities, which a `seek` to
-  `Infinity` turned into a 500.
+  has them as `null`. The arguments of a command and the options of a feature refuse NaN and
+  infinities: a `seek` to `Infinity` was a 500.
 - An ERROR from the pipeline no longer blocks the asyncio loop: the player sets the pipeline to
   NULL on a worker thread, not on the loop, where a streaming thread that hung froze it (3.1 s
   with `state_timeout=0.5`). The waits the error ends fail, and the `Error` event is published,

@@ -728,7 +728,7 @@ Every error has a `code`, a stable name that a program matches on. It is the `co
 | `listen_failed` | | `--http` cannot listen for another reason |
 | `connection_failed` | | a [client command](#client) cannot reach the player, or its connection broke |
 | `bad_response` | | the server of a client command does not answer as mixtape does |
-| `timeout` | | the server of a client command did not answer within 30 s (and a command's `timeout` argument): it may still be doing it, and the `hint` says to read its values with `mixtape get` |
+| `timeout` | | the server of a client command did not answer within 30 s (and a command's `timeout` argument): it may still be doing it, and the `hint` of `get`, `set` and `call` says to read its values with `mixtape get` |
 
 A warning has a code too: `unauthenticated` is `--http` on an address other than loopback, which
 nobody has to authenticate to.

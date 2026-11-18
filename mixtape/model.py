@@ -36,8 +36,8 @@ from pydantic import (
 
 
 ARGUMENTS_CONFIG = ConfigDict(extra="forbid", allow_inf_nan=False)
-"""Of the arguments of a command: no NaN or infinity, which JSON has not and a player cannot
-seek to (pydantic accepts them)."""
+"""Of the arguments of a command and the options of a feature: no NaN or infinity, which JSON
+has not and a player cannot seek to (pydantic accepts them)."""
 
 
 class _Spec(BaseModel):

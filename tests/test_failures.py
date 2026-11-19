@@ -24,6 +24,7 @@ from mixtape.cli import main
 from mixtape.events import Error, Message, StateChanged
 from mixtape.exceptions import PlayerPipelineError, PlayerSetStateError
 from mixtape.interfaces.http import serve
+from mixtape.player.state import StateMachine
 from tests.elements import HANGING, RELEASE, release_all
 from tests.flaky import timing
 
@@ -124,6 +125,25 @@ async def test_a_failed_start_is_raised_and_stops_the_pipeline():
         stream.close()
         changes = [e async for e in stream if isinstance(e, StateChanged)]
         assert changes[-1].new == Gst.State.NULL  # what the page shows
+
+
+@pytest.mark.asyncio
+async def test_a_failed_start_publishes_its_null_when_the_stop_was_quick(monkeypatch):
+    after = StateMachine._after
+
+    def finished_first(self, call, state):  # as on a busy machine: the stop is done already
+        call.result(5)
+        after(self, call, state)
+
+    monkeypatch.setattr(StateMachine, "_after", finished_first)
+    async with Player.from_description("videotestsrc ! pyfaulty name=f mode=start ! fakesink") as p:
+        stream = p.events()
+        with pytest.raises(PlayerSetStateError, match="Could not set the pipeline to playing"):
+            await bounded(p.play())
+        stream.close()
+        changes = [e async for e in stream if isinstance(e, StateChanged)]
+        # the play used to raise before the NULL was published, and the page showed paused
+        assert changes[-1] == StateChanged(Gst.State.PAUSED, Gst.State.NULL, Gst.State.VOID_PENDING)
 
 
 @pytest.mark.asyncio

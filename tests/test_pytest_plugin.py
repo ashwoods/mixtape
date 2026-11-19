@@ -235,7 +235,11 @@ def test_a_perf_player_and_the_plugin_both_get_the_samples(pytester: pytest.Pyte
     summary = load(out / test["folder"] / "summary.json")
     assert summary["metrics"]["element.latency"]["subjects"]["q"]["n"] == 30
     assert summary["metrics"]["pipeline.latency"]["subjects"]["videotestsrc0→fakesink0"]["n"] == 30
-    assert test["metrics"]["element.latency"]["max"]["subject"] == "q"
+    # the queue holds the buffers, but on a busy machine a preempted element can have the max
+    latency = summary["metrics"]["element.latency"]["subjects"]
+    (subject, stats), *_ = sorted(latency.items(), key=lambda item: -item[1]["max"])
+    worst = test["metrics"]["element.latency"]["max"]
+    assert worst == {"subject": subject, "value": stats["max"]}, (worst, latency)
 
 
 def test_markup_in_a_test_id_is_text_on_the_page(pytester: pytest.Pytester) -> None:

@@ -11,7 +11,7 @@
     "checks": [
       { "command": "scripts/check --lint", "timeout": 300 },
       [
-        { "command": "scripts/check --tests", "timeout": 900 },
+        { "command": "scripts/check --tests", "timeout": 900, "filter": "-k" },
         { "command": "scripts/check --docs", "timeout": 600 }
       ]
     ]

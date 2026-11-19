@@ -99,7 +99,7 @@ def printed_programs(path: Path) -> Iterator[tuple[str, str, int]]:
 
 
 def modules_run(program: str) -> set[str]:
-    """The program's name and the names of the other examples it imports: it runs them all."""
+    """The program's name and every top-level module it imports; the caller keeps the examples."""
     names = {Path(program).stem}
     for node in ast.walk(ast.parse((root / program).read_text())):
         if isinstance(node, ast.Import):
@@ -168,7 +168,8 @@ def source_line(path: str, used: list[str], indent: str) -> str:
         if not covering:
             log.warning(
                 "%s:%s is included in the docs but no test covers it: add "
-                '@pytest.mark.covers("%s") to the tests that exercise it',
+                '@pytest.mark.covers("%s") to the tests that exercise it, or a prints sample '
+                "that runs the program to tests/samples/",
                 path,
                 section,
                 key(path, section),

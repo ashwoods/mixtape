@@ -5,7 +5,8 @@
 #
 # --lint runs ruff and mypy, --tests the tests but the documentation's, --docs the commands
 # of the documentation and its build; with none of them, all three. The rest goes to pytest,
-# which runs on up to 4 workers (`-n 0` for one).
+# which runs on up to 4 workers (`-n 0` for one). It prints the load per core and the free disk
+# first, and a hint when tests fail while the load is over 1.5 per core.
 #
 # PyGObject (`gi`) and GStreamer's Python overrides come from the system
 # (Homebrew on macOS, apt on Debian/Ubuntu), not from PyPI, so the venv is
@@ -29,6 +30,19 @@ if (( !lint && !tests && !docs )); then
   lint=1 tests=1 docs=1
 fi
 venv="${UV_PROJECT_ENVIRONMENT:-.venv}"
+
+# The load per core: the tests that bound a time fail on a busy machine whatever the code does
+load() {
+  local load
+  if [[ -r /proc/loadavg ]]; then
+    load="$(cut -d' ' -f1 /proc/loadavg)"
+  else
+    load="$(sysctl -n vm.loadavg | awk '{print $2}')"  # "{ 1.23 2.34 3.45 }"
+  fi
+  awk -v load="$load" -v cores="$(getconf _NPROCESSORS_ONLN)" 'BEGIN {printf "%.1f", load / cores}'
+}
+free="$(df -Pk . | awk 'NR == 2 {printf "%.0f", $4 / 1048576}')"
+echo "load $(load) per core, $free GB free"
 [[ "$venv" = /* ]] || venv="$PWD/$venv"
 
 has_gst() {
@@ -79,5 +93,11 @@ elif (( docs && !tests )); then
 fi
 if (( tests || docs )); then
   # loadgroup: the tests of one xdist_group (the x264 encodes) run one after another
-  uv run --no-sync pytest -n auto --maxprocesses 4 --dist loadgroup ${selection[@]+"${selection[@]}"} "$@"
+  status=0
+  uv run --no-sync pytest -n auto --maxprocesses 4 --dist loadgroup ${selection[@]+"${selection[@]}"} "$@" \
+    || status=$?
+  if (( status == 1 )) && awk -v load="$(load)" 'BEGIN {exit !(load > 1.5)}'; then
+    echo "The load is $(load) per core: a test that bounds a time or a timeout may have failed because of it; run the failures again once the machine is quieter." >&2
+  fi
+  exit "$status"
 fi

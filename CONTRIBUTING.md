@@ -98,11 +98,15 @@ is not busy, look at it: the bound may have broken because of the code.
 
 ## Without a native GStreamer
 
-Run the same checks in Docker (Ubuntu 24.04):
+Run the same checks in Docker (Ubuntu 24.04), with the same arguments as `scripts/check`:
 
 ```console
-$ docker compose run --rm test
+$ scripts/check-linux
+$ scripts/check-linux --tests -k eos
 ```
+
+It builds one image, `mixtape-check`, runs it with `--rm`, and then removes the images that a
+rebuild left dangling. It warns when the disk has less than 10 GB free.
 
 The image has only Ubuntu's own GStreamer packages, without the Rust plugins, so the tests that
 need them skip there. CI's `rs` job, which builds them, and its macOS job run everything.

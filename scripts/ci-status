@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Where GitHub Actions is with a commit: one line per job of its CI and docs runs, and at once,
+# without waiting for them.
+#
+#   scripts/ci-status [COMMIT]
+#
+# COMMIT defaults to HEAD. Exits 0 once every job has passed, 1 when one failed, and 8 while
+# one is still queued or running, or no run has started yet (as `gh pr checks` does), so a
+# loop can poll it:
+#
+#   until scripts/ci-status; [[ $? != 8 ]]; do sleep 30; done
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+sha="$(git rev-parse --verify "${1:-HEAD}^{commit}")"
+repo="${MIXTAPE_REPO:-ashwoods/mixtape}"
+
+# the newest run of each workflow for the commit: a re-run, or a pull request's run before the
+# push to main, is replaced by the later one
+runs="$(gh run list --repo "$repo" --commit "$sha" --limit 50 --json databaseId,workflowName \
+  --jq '[.[] | select(.workflowName == "CI" or .workflowName == "docs")]
+        | unique_by(.workflowName) | .[].databaseId')"
+# unique_by keeps the first of each, and the list is newest first
+if [[ -z "$runs" ]]; then
+  echo "${sha:0:7}: no CI run yet (is it pushed?)"
+  exit 8
+fi
+
+lines=""
+for run in $runs; do
+  lines+="$(gh run view "$run" --repo "$repo" --json workflowName,jobs --jq '
+    .workflowName as $workflow
+    | .jobs[] | select(.conclusion != "skipped")
+    | [ (if $workflow == "CI" then 1 else 2 end),
+        (if .status != "completed" then "…"
+         elif .conclusion == "success" then "✓"
+         else "✗" end),
+        (if $workflow == "CI" then .name else "docs " + .name end),
+        (if .status != "completed" then .status else .conclusion end),
+        (if .startedAt == "0001-01-01T00:00:00Z" or .startedAt == null then ""
+         else ((if .status == "completed" then (.completedAt | fromdate) else now end)
+               - (.startedAt | fromdate) | floor
+               | "\(. / 60 | floor)m\(. % 60 | tostring | if length < 2 then "0" + . else . end)s")
+         end),
+        .url ]
+    | @tsv')"$'\n'
+done
+
+echo "${sha:0:7}:"
+# CI's jobs (Ubuntu rs, Ubuntu stock, macOS), then docs'
+printf '%s' "$lines" | LC_ALL=C sort -t $'\t' -k1,1 -k3,3 | cut -f2- | column -t -s $'\t' \
+  | sed 's/^/  /'
+if grep -q $'\t✗\t' <<<"$lines"; then
+  exit 1
+elif grep -q $'\t…\t' <<<"$lines"; then
+  exit 8
+fi

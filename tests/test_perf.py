@@ -434,6 +434,13 @@ def run_env() -> dict[str, str]:
 def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
     out, temp = tmp_path / "out", tmp_path / "temp"
     temp.mkdir()
+    # the files of `write-log` a killed process left behind are removed, a live one's kept
+    gone = subprocess.Popen([sys.executable, "-c", ""])
+    gone.wait()
+    left = temp / f"mixtape-perf-{gone.pid}-queue-levels-x.csv"
+    live = temp / f"mixtape-perf-{os.getpid()}-queue-levels-x.csv"
+    left.touch()
+    live.touch()
     pipeline = "videotestsrc num-buffers=30 ! video/x-raw,width=64,height=48 ! queue ! fakesink"
     done = subprocess.run(
         [sys.executable, "-m", "mixtape", "run", pipeline, "--feature", f"perf,out={out}"],
@@ -444,7 +451,7 @@ def test_mixtape_run_writes_the_artifacts(tmp_path: Path, Gst: Any) -> None:
     )
     assert done.returncode == 0, done.stderr
     assert "GST_TRACER" not in done.stderr  # its log is read, not shown
-    assert list(temp.iterdir()) == []  # the files the rust tracers wrote to are gone
+    assert list(temp.iterdir()) == [live]  # the files the rust tracers wrote to are gone
     for name in ("samples.jsonl", "windows.jsonl", "element.latency.csv", "pad.buffers.csv"):
         assert (out / name).stat().st_size > 0, name
     summary = json.loads((out / "summary.json").read_text())

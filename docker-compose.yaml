@@ -1,8 +1,0 @@
-services:
-  test:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: scripts/check
-    volumes:
-      - .:/src

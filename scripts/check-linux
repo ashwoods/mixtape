@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Run scripts/check in Docker, on Ubuntu 24.04 with Ubuntu's own GStreamer packages (CI's stock
+# job, without the Rust plugins), for a machine without a native GStreamer or to try Linux.
+#
+#   scripts/check-linux [--lint] [--tests] [--docs] [PYTEST_ARGS...]
+#
+# The arguments go to scripts/check. It builds one image, mixtape-check, runs it with --rm and
+# then removes the images that rebuild left dangling. It warns when the disk has under 10 GB
+# free, as Docker's builds and layers need room.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+image=mixtape-check
+free="$(df -Pk . | awk 'NR == 2 {printf "%.0f", $4 / 1048576}')"
+if (( free < 10 )); then
+  echo "Only $free GB free: Docker may run out of room. 'docker system df' shows what it keeps." >&2
+fi
+
+trap 'docker image prune -f >/dev/null' EXIT
+docker build -q -t "$image" . >/dev/null
+tty=()
+[[ -t 1 ]] && tty=(-t)
+docker run --rm ${tty[@]+"${tty[@]}"} -v "$PWD:/src" "$image" scripts/check "$@"

@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, TextIO
 
 import gi
@@ -40,6 +41,29 @@ logger = logging.getLogger(__name__)
 
 CORE = ("latency(flags=element+pipeline)", "stats")
 """The core tracers it runs: what they measure goes to the `GST_TRACER` debug log only"""
+
+TEMP = "mixtape-perf-"
+"""The start of the names of the temporary files of `write-log`, followed by the process id"""
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # another user's
+        return True
+    return True
+
+
+def _sweep() -> None:
+    """Remove the temporary files of `write-log` that processes which are gone left behind:
+    a process killed while a tracer wrote one (a timeout's SIGKILL) runs no `finally`."""
+    for path in Path(tempfile.gettempdir()).glob(f"{TEMP}*.csv"):
+        pid = path.name.removeprefix(TEMP).partition("-")[0]
+        if pid.isdigit() and int(pid) > 0 and not _alive(int(pid)):
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 def _echo() -> TextIO | None:
@@ -135,6 +159,7 @@ class Collector:
         require("perf", rust, "perf")
         active = active_tracers()
         self._rust: dict[str, Any] = {name: active[name] for name in rust}
+        _sweep()
         self._lock = threading.Lock()  # the subscriptions, and reading for them
         self._subscriptions: list[Subscription] = []
         self.tail = RingTail(_echo())
@@ -234,11 +259,11 @@ class Collector:
 
     def _flush_rust(self) -> list[Sample]:
         """What the gst-plugins-rs tracers measured since the last call: `write-log` writes
-        it to a file, and forgets it. The file lives only as long as this call: a process that
-        is killed, and runs no `atexit`, leaves none behind."""
+        it to a file, and forgets it. The file lives only as long as this call; one that a
+        process killed during it left behind, the next collector removes (`_sweep`)."""
         samples: list[Sample] = []
         for name, tracer in self._rust.items():
-            fd, path = tempfile.mkstemp(prefix=f"mixtape-perf-{name}-", suffix=".csv")
+            fd, path = tempfile.mkstemp(prefix=f"{TEMP}{os.getpid()}-{name}-", suffix=".csv")
             os.close(fd)
             try:
                 tracer.emit("write-log", path)

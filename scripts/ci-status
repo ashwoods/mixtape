@@ -18,8 +18,8 @@ repo="${MIXTAPE_REPO:-ashwoods/mixtape}"
 # a failing `gh` (the network, the API) is a status not known yet
 gh_() {
   local out
-  if ! out="$(gh "$@" 2>&1)"; then
-    echo "gh failed: $out" >&2
+  if ! out="$(gh "$@")"; then
+    echo "gh failed" >&2
     exit 8
   fi
   printf '%s' "$out"

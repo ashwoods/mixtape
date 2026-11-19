@@ -116,8 +116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a run that does not finish shows none of an earlier one's.
 - `perf` leaves no `mixtape-perf-*` folder in the temporary folder: each read of the
   `gst-plugins-rs` tracers' log goes to a temporary file it removes. A process killed during a
-  read left its file, `mixtape-perf-<tracer>-*.csv`; the files now have the process id in their
-  name, and `perf` removes those of processes that are gone. Remove the older ones by hand.
+  read leaves its file, whose name has the process id, and `perf` removes those of processes that
+  are gone. Remove the `mixtape-perf-*` folders that 0.8.0 left by hand.
 - `perf` gives a window shorter than half the interval, such as the one a run ends with, no CPU
   use or rates: a few milliseconds of CPU looked large in it, and `perf compare` of two runs of
   the same code listed them as regressions.

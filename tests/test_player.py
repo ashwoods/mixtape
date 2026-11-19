@@ -485,9 +485,9 @@ def test_reuse_after_a_loop_closed_without_cancelling_its_waits():
     loop.create_task(player.play_until_eos())
     loop.run_until_complete(asyncio.sleep(0.2))  # playing, its EOS a second away
     loop.close()  # its waits stay: resolving one used to raise "Event loop is closed"
-    relinks = len(player._relink_ids)
+    relinks = len(player._watch._relink_ids)
     asyncio.run(bounded(player.play_until_eos()))
-    assert len(player._relink_ids) == relinks == 1  # connected again, not once more
+    assert len(player._watch._relink_ids) == relinks == 1  # connected again, not once more
     player.teardown()
 
 
@@ -549,9 +549,9 @@ async def test_position_events_only_for_position_streams_polled_lazily():
     player = FastPositions.from_description(LIVE)
     async with player:
         plain = player.events()
-        assert player._position_task is None  # nobody asked for positions
+        assert player._watch._position_task is None  # nobody asked for positions
         stream = player.events(position=True)
-        task = player._position_task
+        task = player._watch._position_task
         assert task is not None
         first = await bounded(anext(stream))
         assert first == Position(None, None)  # immediately, though nothing runs
@@ -564,12 +564,12 @@ async def test_position_events_only_for_position_streams_polled_lazily():
         # a second subscriber is told where it is at once; the poll keeps its one task
         late = player.events(position=True)
         assert isinstance((await bounded(anext(late))), Position)
-        assert player._position_task is task
+        assert player._watch._position_task is task
 
         stream.close()
         late.close()
         await asyncio.sleep(0.1)  # the next tick finds nobody and ends the task
-        assert player._position_task is None and task.done()
+        assert player._watch._position_task is None and task.done()
         await bounded(player.stop())
     assert not [e async for e in plain if isinstance(e, Position)]
 
@@ -580,11 +580,11 @@ async def test_a_failing_position_poll_is_logged_once_and_starts_again(caplog, m
     async with player:
         for _ in range(2):
             player.events(position=True)
-            task = player._position_task
+            task = player._watch._position_task
             with monkeypatch.context() as patched:
-                patched.setattr(player, "_publish_position", lambda: 1 / 0)
+                patched.setattr(player._watch, "_publish_position", lambda: 1 / 0)
                 await asyncio.wait({task}, timeout=5)
-            assert task.done() and player._position_task is None
+            assert task.done() and player._watch._position_task is None
         assert caplog.text.count("Polling the position failed") == 1
 
         stream = player.events(position=True)  # a new stream polls again
@@ -599,13 +599,13 @@ async def test_a_paused_pipeline_publishes_its_position_once_and_teardown_ends_t
     async with player:
         await bounded(player.pause())
         stream = player.events(position=True)
-        task = player._position_task
+        task = player._watch._position_task
         await bounded(anext(stream))
         await asyncio.sleep(0.2)
         # unchanged pairs are not published again
         assert sum(isinstance(e, Position) for e in stream._queue._queue) <= 1
     await asyncio.sleep(0)
-    assert player._position_task is None and task.cancelled()
+    assert player._watch._position_task is None and task.cancelled()
 
 
 class Bly(Player):

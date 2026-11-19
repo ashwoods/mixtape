@@ -463,7 +463,7 @@ async def test_property_changed_of_an_element_added_after_setup(Gst):
         assert (await next_change(stream, "late.sleep-time")).value == 3
         player.pipeline.remove(late)
         await asyncio.sleep(0)
-        assert all(element != late for element, _ in player._notify_ids)
+        assert all(element != late for element, _ in player._watch._notify_ids)
 
 
 @pytest.mark.asyncio
@@ -473,8 +473,8 @@ async def test_property_changed_after_set_and_no_handlers_after_teardown(Gst):
         stream = player.events()
         await player.set("nested.max-size-buffers", 42)
         assert (await next_change(stream, "nested.max-size-buffers")).value == 42
-    assert not player._notify_ids
-    assert not player._shape_ids
+    assert not player._watch._notify_ids
+    assert not player._watch._shape_ids
     player.pipeline.get_by_name("src").set_property("pattern", "snow")  # nobody listens
 
 
@@ -531,10 +531,13 @@ async def test_no_shape_handlers_stay_on_a_removed_element(Gst):
         late = Gst.ElementFactory.make("identity", "late")
         player.pipeline.add(late)
         await asyncio.sleep(0)  # deep-element-added hands the element to the loop
-        assert late in player._shape_ids and late.get_static_pad("src") in player._shape_ids
+        assert (
+            late in player._watch._shape_ids
+            and late.get_static_pad("src") in player._watch._shape_ids
+        )
         player.pipeline.remove(late)
         await asyncio.sleep(0)
-        assert not [o for o in player._shape_ids if o == late or o.get_parent() == late]
+        assert not [o for o in player._watch._shape_ids if o == late or o.get_parent() == late]
 
 
 @pytest.mark.asyncio

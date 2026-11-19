@@ -374,9 +374,10 @@ class StateMachine:
 
     async def _queued_null(self) -> None:
         """Wait up to `state_timeout` for the NULL a failed start or its error queued, if it
-        is the last change: the start fails once the pipeline is stopped, or stuck."""
+        is the last change: the start fails once the pipeline is stopped, or stuck. One that
+        is done already is awaited too: its `_after` has only scheduled the NULL it publishes."""
         changing = self._changing
-        if changing is not None and self._changing_to == Gst.State.NULL and not changing.done():
+        if changing is not None and self._changing_to == Gst.State.NULL:
             done, _ = await asyncio.wait(
                 [asyncio.wrap_future(changing)], timeout=self._host.state_timeout
             )

@@ -129,4 +129,55 @@ Several folders join with `:`, for example the Rust plugins and gst-c-crash:
 Every command and program in `docs/` and the README runs in the test suite: see
 `tests/doc_samples.py` for the rules, and `tests/samples/` for the sample of each page.
 
+## Releasing
+
+For the maintainer. Release only when you decide to. The steps, as 0.7.0 and 0.8.0 went:
+
+1. Set `version` in `pyproject.toml` from the dev version (`0.8.1.dev0`) to the release version,
+   for example `0.9.0`, and run `uv lock`, which sets it in `uv.lock` too. `release.yml` fails
+   unless the tag is that version.
+2. In `Changelog.md`, replace the heading `## X.Y.Z (unreleased)` with the release and its date,
+   as in `## 0.8.0 (2026-11-17)`.
+3. Land both on `main`, push, and wait for CI to pass on that commit. `scripts/ci-status`
+   prints one line per job of its CI and docs runs, and exits 0 when every job passed, 1 when
+   one failed and 8 while one is still running:
+
+   ```console
+   $ until scripts/ci-status <sha>; [[ $? != 8 ]]; do sleep 30; done
+   ```
+
+4. Tag that commit, with no `v` (`0.7.0`, `0.8.0`), and push the tag:
+
+   ```console
+   $ git tag -a 0.9.0 -m "mixtape 0.9.0" <sha> && git push origin 0.9.0
+   ```
+
+5. Create the GitHub release from the Changelog section: the awk line writes the lines between
+   the release's heading and the previous release's.
+
+   ```console
+   $ awk '/^## 0.9.0/{f=1;next} /^## 0.8.0/{f=0} f' Changelog.md > notes.md
+   $ gh release create 0.9.0 --title "0.9.0" --notes-file notes.md --verify-tag
+   ```
+
+6. Publishing the release runs `release.yml`, with three jobs in a row:
+   - `ci` calls `ci.yml` on the tag: the release goes no further unless every check passes.
+   - `dist` checks that `uv version --short` is the tag, builds the wheel and the sdist with
+     `uv build`, attests their provenance, and attaches them to the release.
+   - `pypi` uploads them to PyPI by trusted publishing, in the GitHub environment `pypi`. On
+     pypi.org the project's publisher is owner `ashwoods`, repository `mixtape`, workflow
+     `release.yml`, environment `pypi`. No token is stored.
+7. When `release.yml` has succeeded, `docs.yml` deploys the site, https://shashi.to/mixtape/,
+   from the released commit (a `workflow_run` of Release), so the site never names a version
+   PyPI does not have. To deploy by hand, run the docs workflow from the Actions tab
+   (`workflow_dispatch`).
+8. Check the release:
+   - `gh attestation verify <file> --repo ashwoods/mixtape` on a wheel or sdist downloaded from
+     the GitHub release;
+   - pypi.org/project/mixtape lists the version;
+   - the site's Overview names it.
+9. Back on `main`, set `version` to the next dev version (for example `0.9.1.dev0`, then
+   `uv lock`) and add a `## 0.9.1 (unreleased)` section at the top of `Changelog.md`, as
+   `0.8.1.dev0` followed `0.8.0`.
+
 [uv]: https://docs.astral.sh/uv/

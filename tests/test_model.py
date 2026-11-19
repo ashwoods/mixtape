@@ -548,7 +548,8 @@ async def test_an_element_added_later_brings_its_action_signals_and_takes_them(G
         player.pipeline.remove(player.pipeline.get_by_name("late"))
         model = (await next_event(stream, ModelChanged)).model
         assert "late.end-of-stream" not in model.commands
-        assert "late.end-of-stream" not in player._commands  # its emit keeps no element alive
+        # its emit keeps no element alive
+        assert "late.end-of-stream" not in player._model._commands
 
 
 @pytest.mark.asyncio

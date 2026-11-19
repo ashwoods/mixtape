@@ -51,12 +51,11 @@ from ..model import (
     validation_reasons,
 )
 from ..spec import GraphSpec, LinkSpec, NodeSpec, PlayerSpec
+from .bus import Bus, MessageCallback
 from .state import StateMachine
 from .util import _retrying
 
 logger = logging.getLogger(__name__)
-
-MessageCallback = Callable[[Gst.Message], None]
 
 
 def ensure_init() -> None:
@@ -165,9 +164,8 @@ class Player:
             raise TypeError(f"pipeline must be a Gst.Pipeline, not {type(pipeline).__name__}")
         self.pipeline = pipeline
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._fd: int | None = None
         self._machine = StateMachine(self)  # the only owner of the pipeline's state
-        self._handlers: dict[object, tuple[Gst.MessageType, MessageCallback]] = {}
+        self._bus = Bus(self, self._machine)
         self._events = events.Broadcast()
         self._position_task: asyncio.Task[None] | None = None  # while a position stream is open
         self._last_position: tuple[float | None, float | None] | None = None  # the last published
@@ -321,7 +319,8 @@ class Player:
             raise PlayerNotConfigured("setup needs a running asyncio loop") from exc
         if self._loop is not None and self._loop.is_closed():
             self._detach_features()  # they were attached to it
-            self._loop = self._fd = None  # the loop died without a teardown
+            self._loop = None  # the loop died without a teardown
+            self._bus.release()
             self._events = events.Broadcast()  # and its subscribers with it
             self._position_task = self._last_position = None
             self._commands_flush = None
@@ -331,9 +330,8 @@ class Player:
             return
         if self._loop is not None:
             raise PlayerNotConfigured("The player is attached to a different loop")
-        fd = self.bus.get_pollfd().fd
-        loop.add_reader(fd, self._drain)
-        self._loop, self._fd = loop, fd
+        self._bus.attach(loop)
+        self._loop = loop
         self._connect_notify()
         self._connect_relinks()
         for feature in self._features.values():
@@ -378,8 +376,8 @@ class Player:
         self._machine.teardown_null(null=null)
         self._detach_features()
         self._machine.reset()
-        loop, fd = self._loop, self._fd
-        self._loop = self._fd = None
+        loop, fd = self._loop, self._bus.release()
+        self._loop = None
         if self._position_task is not None and loop is not None and not loop.is_closed():
             self._position_task.cancel()
         self._position_task = self._last_position = None
@@ -388,8 +386,7 @@ class Player:
             self._commands_flush = None
         waiters = self._machine.take_waiters()
         if loop is not None and not loop.is_closed():
-            if fd is not None:
-                loop.remove_reader(fd)
+            self._bus.detach(loop, fd)
             self._machine.end_waits(waiters)
             self._events.close()
         else:
@@ -1085,49 +1082,8 @@ class Player:
     ) -> Callable[[], None]:
         """Call `callback(message)` on the loop for bus messages of `message_type`,
         after the built-in handling. Returns a function that removes it again."""
-        token = object()
-        self._handlers[token] = (message_type, callback)
-
-        def remove() -> None:
-            self._handlers.pop(token, None)
-
-        return remove
-
-    # -- bus message handling -- #
+        return self._bus.add_handler(message_type, callback)
 
     def _drain(self) -> None:
-        """The loop's reader callback: handle every message on the bus."""
-        while (message := self.bus.pop()) is not None:
-            self._handle(message)
-
-    def _handle(self, message: Gst.Message) -> None:
-        kind = message.type
-        if kind == Gst.MessageType.ERROR:
-            self._machine.on_error(message)
-        elif kind == Gst.MessageType.EOS:
-            self._machine.on_eos()
-        elif kind == Gst.MessageType.STATE_CHANGED:
-            self._machine.on_state_changed(message)
-        elif kind == Gst.MessageType.WARNING:
-            self._on_warning(message)
-        elif kind == Gst.MessageType.CLOCK_LOST:
-            self._machine.on_clock_lost()
-        elif kind == Gst.MessageType.LATENCY:
-            self.pipeline.recalculate_latency()
-        elif kind == Gst.MessageType.BUFFERING:
-            self._machine.on_buffering(message)
-        elif kind == Gst.MessageType.QOS:
-            logger.debug("QoS from %s", message.src.get_name())
-        self._publish(events.Message(message))
-        for message_type, callback in tuple(self._handlers.values()):
-            if kind & message_type:
-                try:
-                    callback(message)
-                except Exception:
-                    logger.exception("Message handler %r failed", callback)
-
-    def _on_warning(self, message: Gst.Message) -> None:
-        gerror, debug = message.parse_warning()
-        source = message.src.get_name() if message.src else "unknown"
-        logger.warning("Warning from element %s: %s (%s)", source, gerror.message, debug)
-        self._publish(events.Warning(source, gerror.message, debug))
+        """Handle every message on the bus."""
+        self._bus.drain()

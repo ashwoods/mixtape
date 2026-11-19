@@ -10,6 +10,10 @@ sections they cover with a marker (registered in tests/conftest.py):
 
     @pytest.mark.covers("recorder:build", "recorder:run")
 
+A `prints(PAGE, name, "examples/recorder.py")` sample in tests/samples/ covers every section of
+that program, and of the examples it imports, with no marker: tests/test_doc_samples.py runs it
+and compares its output.
+
 A key is the example's file name without `.py`, a colon and the section name, so the names of
 the examples must be unique across examples/ and its folders.
 
@@ -80,6 +84,31 @@ def markers(path: Path) -> Iterator[tuple[str, str, int]]:
                     yield ast.literal_eval(arg), node.name, node.lineno
 
 
+def printed_programs(path: Path) -> Iterator[tuple[str, str, int]]:
+    """Yield (program, test id, line) for each `prints(PAGE, name, "examples/x.py")` in a module
+    of tests/samples/: tests/test_doc_samples.py runs the program and checks its output."""
+    tree = ast.parse(path.read_text())
+    page = ""
+    for node in tree.body:  # PAGE = "library.md"
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "PAGE":
+            page = ast.literal_eval(node.value)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "prints":
+            name, program = ast.literal_eval(node.args[1]), ast.literal_eval(node.args[2])
+            yield program, f"test_prints[{page}:{name}]", node.lineno
+
+
+def modules_run(program: str) -> set[str]:
+    """The program's name and the names of the other examples it imports: it runs them all."""
+    names = {Path(program).stem}
+    for node in ast.walk(ast.parse((root / program).read_text())):
+        if isinstance(node, ast.Import):
+            names |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module.split(".")[0])
+    return names
+
+
 def on_config(config: Any) -> Any:
     global root, repo, sha, blob, tests, sections
     root = Path(config.config_file_path).parent
@@ -114,6 +143,13 @@ def on_config(config: Any) -> Any:
                     covered,
                 )
             tests.setdefault(covered, []).append((name, rel, line))
+    # a `prints` sample covers every section of the program it runs, and of the examples it imports
+    for path in sorted((root / "tests" / "samples").glob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        for program, name, line in printed_programs(path):
+            run = modules_run(program)
+            for covered in sorted(s for s in sections if s.split(":")[0] in run):
+                tests.setdefault(covered, []).append((name, rel, line))
     return config
 
 

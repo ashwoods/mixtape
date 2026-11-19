@@ -22,8 +22,8 @@ A block that no sample matches, or two do, fails `test_every_block_is_covered`, 
 added to a page without a test fails the suite. Where a tool, an element or a platform is
 missing the sample is skipped, one by one.
 
-Python code on a page is always an included section of a program in examples/, which the tests
-in tests/test_examples_*.py run; hooks/source_lines.py links each to its tests.
+Python code on a page is always an included section of a program in examples/, which a `prints`
+sample or a test in tests/test_examples_*.py runs; hooks/source_lines.py links each to them.
 """
 
 import os

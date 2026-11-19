@@ -4,9 +4,9 @@
 #
 #   scripts/ci-status [COMMIT]
 #
-# COMMIT defaults to HEAD. Exits 0 once every job has passed, 1 when one failed, and 8 while
-# one is still queued or running, or no run has started yet (as `gh pr checks` does), so a
-# loop can poll it:
+# COMMIT defaults to HEAD. Exits 0 once every job has passed, 1 when one failed or was
+# cancelled, and 8 while one is still queued or running, a workflow has no run yet, or `gh` could
+# not reach GitHub (as `gh pr checks` does), so a loop can poll it:
 #
 #   until scripts/ci-status; [[ $? != 8 ]]; do sleep 30; done
 set -euo pipefail
@@ -15,34 +15,50 @@ cd "$(dirname "$0")/.."
 sha="$(git rev-parse --verify "${1:-HEAD}^{commit}")"
 repo="${MIXTAPE_REPO:-ashwoods/mixtape}"
 
-# the newest run of each workflow for the commit: a re-run, or a pull request's run before the
-# push to main, is replaced by the later one
-runs="$(gh run list --repo "$repo" --commit "$sha" --limit 50 --json databaseId,workflowName \
-  --jq '[.[] | select(.workflowName == "CI" or .workflowName == "docs")]
-        | unique_by(.workflowName) | .[].databaseId')"
-# unique_by keeps the first of each, and the list is newest first
-if [[ -z "$runs" ]]; then
-  echo "${sha:0:7}: no CI run yet (is it pushed?)"
-  exit 8
-fi
+# a failing `gh` (the network, the API) is a status not known yet
+gh_() {
+  local out
+  if ! out="$(gh "$@" 2>&1)"; then
+    echo "gh failed: $out" >&2
+    exit 8
+  fi
+  printf '%s' "$out"
+}
+
+# the newest run of each workflow for a push or a pull request of the commit (not the docs run
+# after a release): a re-run, or a pull request's run before the push to main, is replaced by
+# the later one; unique_by keeps the first of each, and the list is newest first
+runs="$(gh_ run list --repo "$repo" --commit "$sha" --limit 50 --json databaseId,workflowName,event \
+  --jq '[.[] | select((.workflowName == "CI" or .workflowName == "docs")
+                      and (.event == "push" or .event == "pull_request"))]
+        | unique_by(.workflowName) | .[] | "\(.workflowName) \(.databaseId)"')"
 
 lines=""
-for run in $runs; do
-  lines+="$(gh run view "$run" --repo "$repo" --json workflowName,jobs --jq '
-    .workflowName as $workflow
-    | .jobs[] | select(.conclusion != "skipped")
-    | [ (if $workflow == "CI" then 1 else 2 end),
-        (if .status != "completed" then "…"
-         elif .conclusion == "success" then "✓"
-         else "✗" end),
-        (if $workflow == "CI" then .name else "docs " + .name end),
-        (if .status != "completed" then .status else .conclusion end),
-        (if .startedAt == "0001-01-01T00:00:00Z" or .startedAt == null then ""
-         else ((if .status == "completed" then (.completedAt | fromdate) else now end)
-               - (.startedAt | fromdate) | floor
-               | "\(. / 60 | floor)m\(. % 60 | tostring | if length < 2 then "0" + . else . end)s")
-         end),
-        .url ]
+for workflow in CI docs; do
+  run="$(awk -v w="$workflow" '$1 == w {print $2}' <<<"$runs")"
+  order=$([[ $workflow == CI ]] && echo 1 || echo 2)
+  if [[ -z "$run" ]]; then
+    lines+="$order"$'\t…\t'"$workflow"$'\tno run yet\t-\t-\n'
+    continue
+  fi
+  # one line per job, or one for the run while it has none: queued before GitHub made them, or
+  # failed to start (an invalid workflow file)
+  lines+="$(gh_ run view "$run" --repo "$repo" --json status,conclusion,url,jobs --jq '
+    def mark: if .status != "completed" then "…" elif .conclusion == "success" then "✓"
+              else "✗" end;
+    def state: if .status != "completed" then .status else .conclusion end;
+    def took: if .startedAt == "0001-01-01T00:00:00Z" or .startedAt == null then "-"
+              else ((if .status == "completed" then (.completedAt | fromdate) else now end)
+                    - (.startedAt | fromdate) | floor
+                    | "\(. / 60 | floor)m\(. % 60 | tostring
+                                           | if length < 2 then "0" + . else . end)s")
+              end;
+    [.jobs[] | select(.conclusion != "skipped")] as $jobs
+    | if $jobs == [] then ["'"$order"'", mark, "'"$workflow"'", state, "-", .url]
+      else $jobs[] | ["'"$order"'", mark,
+                      (if "'"$workflow"'" == "CI" then .name else "docs " + .name end),
+                      state, took, .url]
+      end
     | @tsv')"$'\n'
 done
 

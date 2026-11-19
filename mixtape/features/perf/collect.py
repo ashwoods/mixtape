@@ -61,7 +61,7 @@ def _sweep() -> None:
     a process killed while a tracer wrote one (a timeout's SIGKILL) runs no `finally`."""
     for path in Path(tempfile.gettempdir()).glob(f"{TEMP}*.csv"):
         pid = path.name.removeprefix(TEMP).partition("-")[0]
-        if pid.isdigit() and int(pid) > 0 and not _alive(int(pid)):
+        if pid.isascii() and pid.isdigit() and 0 < int(pid) < 2**31 and not _alive(int(pid)):
             with contextlib.suppress(OSError):
                 path.unlink()
 

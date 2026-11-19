@@ -175,7 +175,8 @@ For the maintainer. Release only when you decide to. The steps, as 0.7.0 and 0.8
    - `gh attestation verify <file> --repo ashwoods/mixtape` on a wheel or sdist downloaded from
      the GitHub release;
    - pypi.org/project/mixtape lists the version;
-   - the site's Overview names it.
+   - the site's Changelog page has the release's heading (the Overview's version is a PyPI
+     badge, which shows it whether or not the site was deployed).
 9. Back on `main`, set `version` to the next dev version (for example `0.9.1.dev0`, then
    `uv lock`) and add a `## 0.9.1 (unreleased)` section at the top of `Changelog.md`, as
    `0.8.1.dev0` followed `0.8.0`.

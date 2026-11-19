@@ -6,7 +6,7 @@
 # --lint runs ruff and mypy, --tests the tests but the documentation's, --docs the commands
 # of the documentation and its build; with none of them, all three. The rest goes to pytest,
 # which runs on up to 4 workers (`-n 0` for one). It prints the load per core and the free disk
-# first, and a hint when tests fail while the load is over 1.5 per core.
+# first, and a hint when tests fail while the load is over 2 per core (its own 4 workers count).
 #
 # PyGObject (`gi`) and GStreamer's Python overrides come from the system
 # (Homebrew on macOS, apt on Debian/Ubuntu), not from PyPI, so the venv is
@@ -96,7 +96,7 @@ if (( tests || docs )); then
   status=0
   uv run --no-sync pytest -n auto --maxprocesses 4 --dist loadgroup ${selection[@]+"${selection[@]}"} "$@" \
     || status=$?
-  if (( status == 1 )) && awk -v load="$(load)" 'BEGIN {exit !(load > 1.5)}'; then
+  if (( status == 1 )) && awk -v load="$(load)" 'BEGIN {exit !(load > 2)}'; then
     echo "The load is $(load) per core: a test that bounds a time or a timeout may have failed because of it; run the failures again once the machine is quieter." >&2
   fi
   exit "$status"

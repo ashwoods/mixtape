@@ -16,8 +16,8 @@ if (( free < 10 )); then
   echo "Only $free GB free: Docker may run out of room. 'docker system df' shows what it keeps." >&2
 fi
 
-trap 'docker image prune -f >/dev/null' EXIT
+trap 'docker image prune -f >/dev/null || true' EXIT
 docker build -q -t "$image" . >/dev/null
 tty=()
-[[ -t 1 ]] && tty=(-t)
+[[ -t 0 && -t 1 ]] && tty=(-it)  # Ctrl-C reaches pytest
 docker run --rm ${tty[@]+"${tty[@]}"} -v "$PWD:/src" "$image" scripts/check "$@"
